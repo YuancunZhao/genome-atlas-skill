@@ -14,7 +14,7 @@ PVAR = f"{PROJ}/data/ref/all_phase3.pvar"
 XVCF = f"{WGS}/00_input/X.recall.vcf.gz"
 CHRS = [str(c) for c in range(1, 23)] + (["X"] if os.path.exists(XVCF) else [])
 
-pv = pd.read_csv(PVAR, sep="\t", comment=None, skiprows=lambda i: False, header=None, dtype=str,
+pv = pd.read_csv(PVAR, sep="\t", comment="#", header=None, dtype=str, usecols=[0, 1, 2, 3, 4],
                  names=["chrom", "pos", "id", "ref", "alt"], engine="c", na_filter=False)
 pv = pv[~pv.chrom.str.startswith("#")]
 pv = pv[(pv.ref.str.len() == 1) & (pv.alt.str.len() == 1) & pv.ref.isin(list("ACGT")) & pv.alt.isin(list("ACGT"))]
