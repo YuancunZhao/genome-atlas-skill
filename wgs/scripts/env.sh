@@ -27,4 +27,4 @@ PY
 )"
 unset _here
 # tools installed by setup/00_install_tools.sh live in a conda env; put it first if it exists
-[ -d "$TOOLS/env/bin" ] && export PATH="$TOOLS/env/bin:$PATH"
+if [ -d "$TOOLS/env/bin" ]; then export PATH="$TOOLS/env/bin:$PATH"; fi
