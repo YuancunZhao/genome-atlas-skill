@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Download the PGS Catalog scoring files listed in panel/pgs_scores.tsv and match them to the PRS reference.
 Each score becomes data/ref/prs/<PGS>.full.score with chrom:pos / effect allele / weight."""
-import sys, pathlib, urllib.request
+import sys, pathlib, urllib.request, gzip
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "scripts"))
 from wgsconfig import *  # noqa
 import numpy as np, pandas as pd
@@ -13,11 +13,20 @@ idx = pd.read_csv(f"{PRS_REF}.pvar", sep="\t", comment="#", header=None,
                   names=["chrom", "pos", "id", "ref", "alt", "qual", "filter", "info"],
                   dtype={"chrom": str, "pos": int})
 scores = pd.read_csv(PANEL, sep="\t", comment="#")
+def complete_gz(p):
+    """A download interrupted halfway stays on disk forever when only exists() is
+    checked. Decompress to the end -- gzip verifies CRC and length -- before trusting it."""
+    try:
+        with gzip.open(p, "rb") as fh:
+            while fh.read(1 << 20): pass
+        return True
+    except (OSError, EOFError):
+        return False
 meta = {}
 for r in scores.itertuples():
     pid = r.pgs
     f = PGS / f"{pid}_hmPOS_GRCh37.txt.gz"
-    if not f.exists():
+    if not (f.exists() and complete_gz(f)):
         url = f"https://ftp.ebi.ac.uk/pub/databases/spot/pgs/scores/{pid}/ScoringFiles/Harmonized/{pid}_hmPOS_GRCh37.txt.gz"
         print("downloading", pid, flush=True); urllib.request.urlretrieve(url, f)
     s = pd.read_csv(f, sep="\t", comment="#", dtype={"hm_chr": str}, low_memory=False).dropna(subset=["hm_chr", "hm_pos"])
