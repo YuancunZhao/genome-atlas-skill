@@ -3,7 +3,7 @@
 # plus European and South Asian panels as a noise floor.
 set -euo pipefail
 source "$(dirname "$0")/env.sh"
-JAVA=$HOME/miniforge3/envs/wgs/bin/java
+JAVA=$TOOLS/env/bin/java
 W=$WGS/12_localanc; mkdir -p $W; cd $W
 R=$REF_DIR
 # panel map: sample <tab> panel
