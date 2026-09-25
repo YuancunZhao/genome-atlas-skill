@@ -40,4 +40,7 @@ tar xzf "$TOOLS/pharmcat/pharmcat-preprocessor-$PC.tar.gz" -C "$TOOLS/pharmcat"
 [ -d "$TOOLS/SMNCopyNumberCaller" ] || git clone -q https://github.com/Illumina/SMNCopyNumberCaller.git "$TOOLS/SMNCopyNumberCaller"
 "$TOOLS/env/bin/pip" install -q -r "$TOOLS/Cyrius/requirements.txt" -r "$TOOLS/pharmcat/preprocessor/requirements.txt"
 [ -x "$TOOLS/haplogrep3" ] || { curl -sSL -o /tmp/h3.zip https://github.com/genepi/haplogrep3/releases/latest/download/haplogrep3-3.2.2-linux.zip; unzip -o -q /tmp/h3.zip -d "$TOOLS"; chmod +x "$TOOLS/haplogrep3"; }
+# 06_mtdna.py classifies with --tree phylotree-rcrs@17.2, which haplogrep3 does not bundle;
+# install-tree puts it in the tool's own data directory, so this is a one-off download
+"$TOOLS/haplogrep3" install-tree phylotree-rcrs@17.2
 echo "tools installed under $TOOLS"
