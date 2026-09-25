@@ -7,6 +7,7 @@ source scripts/env.sh
 S=scripts
 step(){ echo -e "\n=== $* ==="; }
 
+step 00 prepare inputs and QC;                            bash  $S/00_qc.sh
 step 01 normalise the VCF and build the callable mask;         bash  $S/01_normalize.sh
 step 02 re-call X with the right ploidy and pile up MT;        bash  $S/02_recall_x_mt.sh
 step 03 complete genotype set at the reference panel sites;    python3 $S/03_complete_set.py
