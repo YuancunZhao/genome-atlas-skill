@@ -3,7 +3,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from wgsconfig import *  # noqa: F401,F403 -- P, W, REF, TOOLS, SAMPLE, THREADS ...
 
 import pandas as pd, numpy as np, os
-W='wgs/04_ancestry'; out=open(f'{W}/summary.txt','w')
+W=f'{P}/wgs/04_ancestry'; out=open(f'{W}/summary.txt','w')
 for tag,kg,dy in [('GLOBAL','kg.proj.sscore','target.proj.sscore'),('EAS','eas.proj.sscore','eas.target.proj.sscore')]:
     k=pd.read_csv(f'{W}/{kg}',sep='\t').rename(columns={'#IID':'IID'}); d=pd.read_csv(f'{W}/{dy}',sep='\t')
     pcs=[c for c in k.columns if c.endswith('_AVG')][:4]; D=d[pcs].values[0]
