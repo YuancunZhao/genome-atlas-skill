@@ -7,7 +7,7 @@ JAVA=$HOME/miniforge3/envs/wgs/bin/java
 W=$WGS/12_localanc; mkdir -p $W; cd $W
 R=$REF_DIR
 # panel map: sample <tab> panel
-awk 'NR>1 {p=""; if($6=="CHB"||$6=="JPT") p="NorthEA"; else if($6=="CDX"||$6=="KHV") p="SouthEA"; else if($6=="CEU"||$6=="GBR") p="European"; else if($6=="GIH"||$6=="PJL") p="SouthAsian"; if(p!="") print $1"\t"p}' $R/all_phase3.psam > ref.panel
+awk 'NR>1 {p=""; if($5=="CHB"||$5=="JPT") p="NorthEA"; else if($5=="CDX"||$5=="KHV") p="SouthEA"; else if($5=="CEU"||$5=="GBR") p="European"; else if($5=="GIH"||$5=="PJL") p="SouthAsian"; if(p!="") print $1"\t"p}' $R/all_phase3.psam > ref.panel
 cut -f2 ref.panel | sort | uniq -c
 for c in $(seq 1 22); do
   [ -f $WGS/10_phase/ph.$c.vcf.gz ] || { echo "chr$c not phased yet, skipping"; continue; }

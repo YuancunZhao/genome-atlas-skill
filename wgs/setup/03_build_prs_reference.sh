@@ -5,7 +5,7 @@
 set -euo pipefail
 source "$(dirname "$0")/../scripts/env.sh"
 mkdir -p "$REF_DIR/prs"; cd "$REF_DIR/prs"
-awk -v sp="$SUPERPOP" 'NR==1{print "#IID"} NR>1 && $5==sp {print $1}' "$KG_PFILE.psam" > ref.ids
+awk -F'\t' -v sp="$SUPERPOP" 'NR==1{print "#FID\tIID"} NR>1 && $4==sp {print $1"\t"$2}' "$KG_PFILE.psam" > ref.ids
 "$PLINK2" --pfile "$KG_PFILE" --keep ref.ids --max-alleles 2 --snps-only just-acgt \
   --set-all-var-ids '@:#' --rm-dup exclude-all --make-pgen --out kg_all --threads "$THREADS" --memory $((MEM_GB*1000)) >/dev/null
 "$PLINK2" --pfile kg_all --freq --out kg_all --threads "$THREADS" --memory $((MEM_GB*1000)) >/dev/null

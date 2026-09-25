@@ -18,7 +18,7 @@ for s in kg:kg.common target:$WGS/02_complete/target.1kg; do n=${s%%:*}; f=${s#*
 done
 echo "pruned SNPs: $(wc -l < prune.prune.in)"; head -2 target.proj.sscore
 # EAS-only PCA
-awk 'NR>1 && $5=="EAS"{print $1}' $R.psam > eas.ids; sed -i '1i #IID' eas.ids
+{ printf '#FID\tIID\n'; awk 'NR>1 && $4=="EAS"{print $1"\t"$2}' $R.psam; } > eas.ids
 $PLINK2 --pfile kg.common --keep eas.ids --maf 0.05 --bp-space 2000 --indep-pairwise 200 50 0.2 --out prune.eas --threads 16 --memory 40000 >/dev/null
 $PLINK2 --pfile kg.common --keep eas.ids --extract prune.eas.prune.in --freq --pca 10 allele-wts --out eas.pca --threads 16 --memory 40000 >/dev/null
 $PLINK2 --pfile kg.common --keep eas.ids --extract prune.eas.prune.in --read-freq eas.pca.afreq --score eas.pca.eigenvec.allele 2 5 header-read no-mean-imputation variance-standardize --score-col-nums 6-15 --out eas.proj --threads 16 --memory 40000 >/dev/null
