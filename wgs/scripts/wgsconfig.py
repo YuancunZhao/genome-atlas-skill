@@ -114,3 +114,6 @@ def rel(p):
         return str(pathlib.Path(p).resolve().relative_to(P))
     except Exception:
         return str(p)
+
+# raw VCF to normalize: delivered VCF if any, else a VCF called from reads by 00_qc.sh
+VCF_RAW = str(VENDOR_VCF) if VENDOR_VCF else str(W / "00_input" / f"{SAMPLE}.call.vcf.gz")

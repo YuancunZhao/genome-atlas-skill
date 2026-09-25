@@ -9,6 +9,7 @@ out = {
   "PROJ": str(c.P), "WGS": str(c.W), "REF_DIR": str(c.REF), "TOOLS": str(c.TOOLS), "PGSDIR": str(c.PGS),
   "SAMPLE": c.SAMPLE, "SEX": c.SEX, "THREADS": str(c.THREADS), "MEM_GB": str(c.MEM_GB),
   "CRAM": c.READS, "YBAM": c.Y_READS, "VENDOR_VCF": c.VENDOR_VCF,
+  "VCF_RAW": c.VCF_RAW,
   "REF": c.FASTA, "REF_PATH": c.FASTA, "REF38": c.FASTA38,
   "CHAIN": c.CHAIN_19_38, "CHAIN_BACK": c.CHAIN_38_19,
   "KG_PFILE": c.KG_PFILE, "KG_VCF_DIR": c.KG_VCF_DIR, "CLINVAR": c.CLINVAR, "GFF3": c.GFF3,
