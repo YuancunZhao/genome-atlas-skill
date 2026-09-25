@@ -10,7 +10,7 @@ PC=$PHARMCAT_DIR
 bcftools query -f '%CHROM\t%POS\t%ID\t%REF\t%ALT\n' $PC/pharmcat_positions_3.4.0.vcf.bgz > pos38.tsv
 for c in $(seq 1 22) X Y; do echo -e "$c\tchr$c"; done > rename.txt
 # the target's PASS calls within +-5kb of PharmCAT positions (b37), chr-renamed
-python - <<'PY'
+python - <<PY
 import pysam, subprocess, collections, bisect
 from pyliftover import LiftOver
 P="$PROJ"; lo=LiftOver(f"{P}/data/ref/chain/hg38ToHg19.over.chain.gz"); fa=pysam.FastaFile(f"{P}/data/ref/b37/human_g1k_v37.fasta")
@@ -36,7 +36,7 @@ regions=open("regions37.bed","w")
 with open("fill37.vcf","w") as f:
     f.write("##fileformat=VCFv4.2\n##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">\n")
     for c in [str(i) for i in range(1,23)]+["X","Y"]: f.write(f"##contig=<ID={c}>\n")
-    f.write("#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\t41240811001690\n")
+    f.write("#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\t$SAMPLE\n")
     for c,p,rid,ref,alt in rows:
         f.write(f"{c}\t{p}\t{rid}\t{ref}\t{alt}\t.\tPASS\t.\tGT\t0/0\n"); regions.write(f"{c}\t{max(0,p-5001)}\t{p+5000}\n")
 regions.close()
