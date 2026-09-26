@@ -17,7 +17,7 @@ anc=["NorthEA","SouthEA","European","SouthAsian"]
 gw={a:np.average(dy[a],weights=dy.w) for a in anc}
 print(f"{NAME_EN}, length-weighted over 22 autosomes:")
 for a in anc: print(f"  {a:12s} {gw[a]*100:5.2f}%")
-ps=pd.read_csv(KG_PFILE+".psam",sep="\t").rename(columns={"#IID":"SAMPLE"})
+ps=pd.read_csv(KG_PFILE+".psam",sep="\t").rename(columns={"#IID":"SAMPLE","IID":"SAMPLE"})
 cal=[]
 for f in glob.glob(f"{W}/calib.*.global.anc.gz"):
     c=os.path.basename(f).split(".")[1]
