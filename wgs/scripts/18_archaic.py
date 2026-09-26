@@ -13,7 +13,9 @@ sp["seg"]=sp.POP+":"+sp.CHROM+":"+sp.SEGMENT.astype(str)
 print("Sprime variants:",len(sp)," segments:",sp.seg.nunique())
 # {NAME_EN} genotypes at these positions from the complete set
 reg=f"{W}/sites.tsv"; sp[["CHROM","POS"]].drop_duplicates().sort_values(["CHROM","POS"],key=lambda s: s.astype(int) if s.name=="CHROM" else s).to_csv(reg,sep="\t",header=False,index=False)
-q=subprocess.run(["bcftools","query","-R",reg,"-f","%CHROM\t%POS\t%REF\t%ALT\t[%GT]\n",f"{P}/wgs/02_complete/{SAMPLE}.1kg_sites.vcf.gz"],capture_output=True,text=True).stdout
+q=subprocess.run(["bcftools","query","-R",reg,"-f","%CHROM\t%POS\t%REF\t%ALT\t[%GT]\n",f"{P}/wgs/02_complete/{SAMPLE}.1kg_sites.vcf.gz"],capture_output=True,text=True)
+if q.returncode: print("bcftools query failed:\n"+q.stderr[-2000:],file=sys.stderr)  # otherwise an empty result silently yields no genotypes
+q=q.stdout
 g=pd.read_csv(io.StringIO(q),sep="\t",header=None,names=["CHROM","POS","REF","ALT","GT"],dtype={"CHROM":str})
 m=sp.merge(g,on=["CHROM","POS","REF","ALT"],how="left")
 m["alt_dose"]=m.GT.str.count("1")
