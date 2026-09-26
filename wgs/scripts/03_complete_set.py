@@ -32,7 +32,7 @@ def is_callable(c, pos):
 
 def q(args): return subprocess.run(args, capture_output=True, text=True, check=True).stdout
 
-out = gzip.open(f"{OUT}/{SAMPLE}.1kg_sites.vcf.gz", "wt", compresslevel=3)
+out = open(f"{OUT}/{SAMPLE}.1kg_sites.vcf", "wt")
 out.write("##fileformat=VCFv4.2\n##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">\n")
 for c in CHRS: out.write(f"##contig=<ID={c}>\n")
 out.write(f"#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\t{SAMPLE}\n")
@@ -56,4 +56,8 @@ for c in CHRS:
     body = keep.pos.astype(str) + "\t" + keep.id + "\t" + keep.ref + "\t" + keep.alt + "\t.\tPASS\t.\tGT\t" + keep["gt"]
     out.write("\n".join((c + "\t" + body).tolist()) + "\n")
 out.close()
+# 08, 15 and 18 read this file with bcftools -R/-T, which needs a tabix index, and tabix needs
+# bgzf. A plain gzip.open() stream cannot be indexed, so re-pack and index it here.
+subprocess.run(["bgzip", "-f", f"{OUT}/{SAMPLE}.1kg_sites.vcf"], check=True)
+subprocess.run(["tabix", "-f", "-p", "vcf", f"{OUT}/{SAMPLE}.1kg_sites.vcf.gz"], check=True)
 pd.DataFrame(stats, columns=["chrom", "sites_1kg", "wgs_called", "homref_filled", "missing"]).to_csv(f"{OUT}/complete_set_stats.tsv", sep="\t", index=False)
