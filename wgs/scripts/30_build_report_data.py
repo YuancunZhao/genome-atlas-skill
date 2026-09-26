@@ -40,9 +40,9 @@ else:
 # --- Y
 ypath = []
 for l in open(W/"03_haplo/y_haplogroup_yfull.txt"):
-    m = re.match(r"\s+(O-\S+)\s+der=\s*(\d+) anc=\s*(\d+) n/a=\s*(\d+)\s+formed=(\d+) tmrca=(\d+)", l)
+    m = re.match(r"\s+(\S+)\s+der=\s*(\d+) anc=\s*(\d+) n/a=\s*(\d+)\s+formed=(\d+) tmrca=(\d+)", l)
     if m: ypath.append({"snp": m.group(1), "der": int(m.group(2)), "anc": int(m.group(3)), "formed": int(m.group(5)), "tmrca": int(m.group(6))})
-D["ypath"] = ypath; D["y_upstream"] = v2["ypath"]; D["y_terminal"] = ypath[-1]["snp"]
+D["ypath"] = ypath; D["y_terminal"] = ypath[-1]["snp"]
 ysn = pd.read_csv(W/"03_haplo/y_terminal_snps.tsv", sep="\t"); D["y_snps"] = ysn[["branch", "snp", "depth", "n_der"]].to_dict("records")
 # --- mt
 hg = pd.read_csv(W/"03_haplo/haplogrep3.txt", sep="\t")
@@ -72,7 +72,8 @@ D["lof"] = {"all": len(lof), "rare": len(rare), "rare_hom": int((rare.zyg == "ho
 # --- PGx
 pc = pd.read_csv(W/"06_pgx/pharmcat/pharmcat_summary.tsv", sep="\t").fillna("")
 D["pgx_pharmcat"] = pc.to_dict("records")
-D["cyp2d6"] = open(W/"06_pgx/cyrius/target.tsv").read().split("\n")[1].split("\t")[1]
+_cy = W/"06_pgx/cyrius/target.tsv"
+D["cyp2d6"] = open(_cy).read().split("\n")[1].split("\t")[1] if _cy.exists() else "-"
 _t1k = W/"06_pgx/t1k/dayu_genotype.tsv"
 hla = pd.read_csv(_t1k, sep="\t", header=None) if _t1k.exists() else pd.DataFrame()
 D["hla"] = {r[0]: [str(r[2]).replace("HLA-", ""), str(r[5]).replace("HLA-", "") if str(r[5]) != "." else "-", int(r[4]), int(r[7])] for r in hla.itertuples(index=False) if str(r[0]).startswith("HLA-") and r[1] > 0}
