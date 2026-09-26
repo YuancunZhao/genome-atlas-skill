@@ -12,13 +12,13 @@ const txt=(p,a,s)=>{const n=el(p,'text',a);n.textContent=s;return n};
 const tip=(n,s)=>{const q=document.createElementNS(NS,'title');q.textContent=s;n.appendChild(q)};
 const V=name=>getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 const C=()=>({ink:V('--ink'),muted:V('--muted'),lab:V('--lab'),faint:V('--faint'),grid:V('--grid'),track:V('--track'),data:V('--data'),data2:V('--data2'),fd:V('--faintdata'),hero:V('--hero'),bg:V('--bg')});
-const fmt=n=>n.toLocaleString('en-US');
+const fmt=n=>(n==null||Number.isNaN(n))?'—':n.toLocaleString('en-US');
 const CH = {}; const NUM={'font-weight':800};
 const foot=(s,c,w,y,txt_)=>txt(s,{x:w/2,y,'text-anchor':'middle','font-size':7,'font-weight':600,fill:c.faint,'letter-spacing':'.12em',class:'fade',style:'animation-delay:.9s'},txt_.toUpperCase());
 const reveal=(id,fn)=>{CH[id]=fn;const n=document.getElementById(id);n.style.cursor='pointer';n.addEventListener('click',()=>{n.innerHTML='';fn(n,C())})};
 const K=D.kpi;
 F.depth=K.depth_auto; F.x=K.depth_x; F.y=K.depth_y; F.mt=fmt(K.depth_mt); F.callable=K.callable_gb; F.pass=fmt(K.pass_records); F.snv=fmt(K.snv); F.indel=fmt(K.indel); F.titv=K.titv;
-F.cmp=fmt(D.chip.compared); F.nocall=D.chip.nocall; F.nonp=D.chip.nocall_nopass; F.indel_n=D.chip.in_deletion;
+F.cmp=fmt(D.chip.compared); F.nocall=D.chip.nocall??'—'; F.nonp=D.chip.nocall_nopass??'—'; F.indel_n=D.chip.in_deletion??'—';
 F.ng=fmt(D.anc.n_global); F.ne=fmt(D.anc.n_eas); F.knn=Object.entries(D.knn_eas).map(([k,v])=>`${k} ${v}`).join(' · '); F.knng=Object.entries(D.knn_global).map(([k,v])=>`${k} ${v}`).join(' · ');
 F.near=Object.keys(D.near_eas)[0]; F.nearg=Object.entries(D.near_global).slice(0,2).map(([k,v])=>`${k} ${v}`).join(' ≈ ');
 F.cvn=fmt(D.clinvar_total); F.cvd=D.clinvar_date; F.lof=D.lof.all; F.lofr=D.lof.rare; F.lofh=D.lof.rare_hom;
@@ -29,7 +29,13 @@ const renderAll=()=>{document.documentElement.setAttribute('lang',LANG==='zh'?'z
   document.querySelectorAll('[data-i18n]').forEach(e=>{e.innerHTML=t(e.getAttribute('data-i18n'))});
   document.getElementById('langbtn').textContent=t('toggle');
   document.title = TITLE();
-  for(const id in CH){const n=document.getElementById(id);n.innerHTML='';CH[id](n,C())}
+  window.__renderErrors=[];
+  for(const id in CH){const n=document.getElementById(id);n.innerHTML='';
+    try{CH[id](n,C())}catch(e){window.__renderErrors.push(id);console.error('[render] '+id,e);
+      const err=document.createElementNS('http://www.w3.org/2000/svg','text');
+      err.setAttribute('x',8);err.setAttribute('y',16);err.setAttribute('font-size',10);err.setAttribute('fill','#b3261e');
+      err.textContent=id+': '+(e&&e.message?e.message:e);n.appendChild(err)}}
+  if(window.__renderErrors.length)console.warn('[render] failed figures:',window.__renderErrors.join(', '));
   renderKpi(); renderFindings(); renderPgx(); renderHla(); renderMisc(); if(typeof deepRender==='function') deepRender();};
 document.getElementById('langbtn').addEventListener('click',()=>{LANG=zh()?'en':'zh';try{localStorage.setItem('dayu-lang',LANG)}catch(e){};renderAll()});
 if(window.matchMedia){window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change',renderAll)}
@@ -75,11 +81,12 @@ reveal('ychain',(s,c)=>{
     txt(s,{x,y:y+r+14,'text-anchor':'middle','font-size':7,'font-weight':600,fill:c.muted},p.der+(zh()?' 位点':' SNP'));
     txt(s,{x,y:y+r+25,'text-anchor':'middle','font-size':7,fill:c.faint},'~'+fmt(p.formed)+(zh()?' 年前':' ybp'));
   });
-  txt(s,{x:x0,y:y+80,'font-size':8,'font-weight':600,fill:c.muted},zh()?'上游（ISOGG 树，第一轮已确认）：O-M122 → M324 → P201 → P164 → M134 → M117 → F8 → F438':'Upstream (ISOGG tree, round 1): O-M122 → M324 → P201 → P164 → M134 → M117 → F8 → F438');
-  txt(s,{x:x0,y:y+96,'font-size':8,'font-weight':600,fill:c.muted},zh()?'每级兄弟支系全部祖先态（CTS12122 0/8、F316 0/16、Y277267 0/3、F15823 0/1）':'Sister branches all ancestral at every step (CTS12122 0/8, F316 0/16, Y277267 0/3, F15823 0/1)');
+  txt(s,{x:x0,y:y+80,'font-size':8,'font-weight':600,fill:c.muted},(D.ypath&&D.ypath.length)?(zh()?`YFull 树路径（共 ${D.ypath.length} 级）：${D.ypath.slice(0,8).map(p=>p.snp).join(' → ')} → … → ${D.ypath[D.ypath.length-1].snp}`:`YFull path (${D.ypath.length} levels): ${D.ypath.slice(0,8).map(p=>p.snp).join(' → ')} → … → ${D.ypath[D.ypath.length-1].snp}`):(zh()?'Y 路径数据缺失':'Y path data unavailable'));
+  txt(s,{x:x0,y:y+96,'font-size':8,'font-weight':600,fill:c.muted},zh()?'逐级从 YFull 树下行，每级取衍生态支持最多的支系（明细见 y_terminal_snps.tsv）':'Walked down the YFull tree, taking the best derived-state-supported branch at each step');
   txt(s,{x:x0,y:y+130,'font-size':24,'font-weight':700,fill:c.ink,...NUM},D.y_terminal);
   txt(s,{x:x0+150,y:y+130,'font-size':9,'font-weight':600,fill:c.muted},'YFull '+D.versions.yfull+(zh()?' · 叶节点':' · leaf branch'));
-  txt(s,{x:x0,y:y+150,'font-size':8,'font-weight':600,fill:c.muted},(zh()?'23 个定义位点深度 9–26×，全部衍生态，零祖先态':'23 defining SNPs at 9–26× depth, all derived, none ancestral'));
+  const _ysD=(D.y_snps||[]).map(r=>r.depth).filter(d=>d>0);
+  txt(s,{x:x0,y:y+150,'font-size':8,'font-weight':600,fill:c.muted},_ysD.length?(zh()?`${_ysD.length} 个末端定义位点，深度 ${Math.min(..._ysD)}–${Math.max(..._ysD)}×，全部衍生态`:`${_ysD.length} terminal defining sites at ${Math.min(..._ysD)}-${Math.max(..._ysD)}x depth, all derived`):(zh()?'末端定义位点数据缺失':'terminal defining-site data unavailable'));
   foot(s,c,520,296,zh()?'圆面积 = 该级衍生态位点数 · 最深色 = 终端支系 · 年代为 YFull 估计':'circle area = derived sites at that step · darkest = terminal · dates are YFull estimates');
 });
 
@@ -95,11 +102,13 @@ reveal('mtstrip',(s,c)=>{
     el(s,'line',{x1:x,y1:y,x2:x,y2:y+ln*.55,stroke:c.faint,'stroke-width':.7});
     const d=el(s,'circle',{cx:x,cy:y+ln*.55,r:3.2,fill:isP?c.bg:c.data,stroke:isP?c.ink:c.data,'stroke-width':1,class:'pop'}); d.style.animationDelay=(i*20)+'ms'; tip(d,v+(isP?(zh()?' · 私有':' · private'):(zh()?' · 定义位点':' · defining')));
   });
-  const hx=x0+(x1-x0)*16093/L; el(s,'path',{d:`M${hx-5} ${y+34} L${hx} ${y+27} L${hx+5} ${y+34} Z`,fill:c.hero}); txt(s,{x:hx,y:y+45,'text-anchor':'middle','font-size':7,'font-weight':700,fill:c.ink},'16093C 90%');
+  const _h0=(D.mt_het||[])[0]; if(_h0){const hx=x0+(x1-x0)*_h0.pos/L; el(s,'path',{d:`M${hx-5} ${y+34} L${hx} ${y+27} L${hx+5} ${y+34} Z`,fill:c.hero}); txt(s,{x:hx,y:y+45,'text-anchor':'middle','font-size':7,'font-weight':700,fill:c.ink},`${_h0.pos}${_h0.alt||''} ${(_h0.af*100).toFixed(0)}%`)}
   txt(s,{x:x0,y:y+80,'font-size':22,'font-weight':700,fill:c.ink,...NUM},D.mt.hg);
   txt(s,{x:x0+80,y:y+80,'font-size':10,'font-weight':600,fill:c.muted},'PhyloTree '+D.versions.phylotree+' · '+D.mt.found.length+(zh()?' 个定义位点命中 · 质量 ':' defining sites · quality ')+D.mt.quality);
-  const lines=zh()?['未命中的支系定义位点：'+D.mt.notfound.join('、'),'私有变异（'+D.mt.private.length+'）：'+D.mt.private.join(' '),'异质性：只有 m.16093T>C（90%，已知高变热点）；m.310/3107 为参考序列伪影']:
-    ['Defining sites not found: '+D.mt.notfound.join(', '),'Private ('+D.mt.private.length+'): '+D.mt.private.join(' '),'Heteroplasmy: only m.16093T>C (90%, a known hypervariable site); m.310/3107 are reference artefacts'];
+  const _hetTxt=(D.mt_het||[]).map(h=>`m.${h.pos}${h.alt||''} ${(h.af*100).toFixed(0)}%`).join('、');
+  const _hetNote=(D.mt_het||[]).length && (D.mt_het||[]).every(h=>[310,3107].includes(h.pos));
+  const lines=zh()?['未命中的支系定义位点：'+D.mt.notfound.join('、'),'私有变异（'+D.mt.private.length+'）：'+D.mt.private.join(' '),'异质性：'+(_hetTxt||'未检出')+(_hetNote?'（310/3107 是已知参考序列伪影位点）':'')]:
+    ['Defining sites not found: '+D.mt.notfound.join(', '),'Private ('+D.mt.private.length+'): '+D.mt.private.join(' '),'Heteroplasmy: '+(_hetTxt||'none detected')+(_hetNote?' (m.310/3107 are known reference artefacts)':'')];
   lines.forEach((tx,i)=>txt(s,{x:x0,y:y+104+i*14,'font-size':7.8,'font-weight':500,fill:c.muted},tx));
   foot(s,c,400,296,zh()?`实心 = 支系定义位点 · 空心 = 私有变异 · 三角 = 异质性位点 · ${fmt((D.chrom.find(r=>r.chrom==='MT')||{}).depth||0)}× 深度`:`filled = branch-defining · hollow = private · triangle = heteroplasmic · ${fmt((D.chrom.find(r=>r.chrom==='MT')||{}).depth||0)}× depth`);
 });
@@ -151,7 +160,7 @@ function renderPgx(){
 }
 function renderHla(){
   const order=['HLA-A','HLA-B','HLA-C','HLA-DRB1','HLA-DQA1','HLA-DQB1','HLA-DPA1','HLA-DPB1'];
-  const hot=new Set(['B*13:01:01']);
+  const hot=new Set();
   document.getElementById('hla').innerHTML=order.map(g=>{const v=D.hla[g]; if(!v) return ''; const f=a=>hot.has(a)?`<em>${a.replace(/:\d+$/,'')}</em>`:a.replace(/(\*\d+:\d+).*/,'$1'); return `<div><div class="k">${g}</div><div class="v">${f(v[0])} / ${f(v[1])}</div></div>`}).join('');
 }
 
@@ -168,12 +177,13 @@ reveal('prs',(s,c)=>{
     txt(s,{x:x1+34,y:y+3,'font-size':7.5,fill:c.faint},r.coverage_pct+'%');
   });
   txt(s,{x:x1+10,y:top-10,'font-size':7,'font-weight':600,fill:c.faint,'letter-spacing':'.08em'},zh()?'百分位 · 覆盖':'PCT · COVERAGE');
-  foot(s,c,900,696,zh()?'菱形 = 在 504 名东亚人中的百分位 · 空心圆 = 在 208 名汉族中 · 灰带 = 中间一半的人':'diamond = percentile among 504 East Asians · hollow = among 208 Han · band = middle half');
+  foot(s,c,900,696,zh()?`菱形 = 在 ${(D.pop||{}).n_super||'—'} 名东亚人中的百分位 · 空心圆 = 在 ${(D.pop||{}).n_sub||'—'} 名汉族中 · 灰带 = 中间一半的人`:`diamond = percentile among ${(D.pop||{}).n_super||'—'} East Asians · hollow = among ${(D.pop||{}).n_sub||'—'} Han · band = middle half`);
 });
 
 /* ── 06 CNV depth panel ── */
 reveal('cnv',(s,c)=>{
-  const rows=D.cnv, x0=120, x1=470, top=14, rh=24, X=v=>x0+(x1-x0)*Math.min(v,2.2)/2.2;
+  const rows=D.cnv||[], x0=120, x1=470, top=14, rh=24, X=v=>x0+(x1-x0)*Math.min(v,2.2)/2.2;
+  if(!rows.length){txt(s,{x:12,y:22,'font-size':10,fill:c.faint},zh()?'本版未生成 CNV 深度面板：没有拷贝数产物（调用层未接入）。':'CNV depth panel not generated in this build: no copy-number producer is wired up.');return}
   [0,0.5,1,1.5,2].forEach(v=>{el(s,'line',{x1:X(v),y1:top-6,x2:X(v),y2:top+rows.length*rh,stroke:v===1?c.faint:c.grid,'stroke-width':v===1?1:.5,'stroke-dasharray':v===1?'':'2 3'});txt(s,{x:X(v),y:top+rows.length*rh+12,'text-anchor':'middle','font-size':7.5,fill:c.faint},v===1?(zh()?'1.0 = 两份':'1.0 = two copies'):v.toFixed(1))});
   rows.forEach((r,i)=>{const y=top+i*rh+8, w=X(r.ratio)-x0;
     txt(s,{x:x0-8,y:y+3,'text-anchor':'end','font-size':9,'font-weight':r.copies<2?800:600,fill:c.ink},r.locus);
@@ -207,27 +217,28 @@ reveal('roh',(s,c)=>{
   foot(s,c,900,296,zh()?'深色段 = ≥1.5 Mb 的纯合区 · 浅色 = 1–1.5 Mb · 小刻度 = 着丝粒 · 跨着丝粒/端粒的伪影段已剔除':'dark = homozygous run ≥1.5 Mb · light = 1–1.5 Mb · tick = centromere · segments spanning centromeres/telomeres removed');
 });
 function renderMisc(){
-  const items=zh()?[['SMN1 / SMN2',`${D.smn.SMN1} / ${D.smn.SMN2} 份 · 非 SMA 携带者`],['线粒体异质性','m.16093T>C 90%'],['结构变异总数',`${fmt(D.sv_total)}（DEL ${fmt(D.sv_counts.DEL)} · DUP ${D.sv_counts.DUP} · INV ${D.sv_counts.INV}）`],['罕见功能丧失变异',`${D.lof.rare} 个 · 纯合 ${D.lof.rare_hom} 个均在重复区`],['X 染色体','PAR 重调后 6,919 个杂合位点'],['近亲检查',`ROH ≥1 Mb ${D.roh_stats.n} 段 · 合计 ${D.roh_stats.total_mb} Mb · 无 >5 Mb`]]:
-    [['SMN1 / SMN2',`${D.smn.SMN1} / ${D.smn.SMN2} copies · not an SMA carrier`],['mt heteroplasmy','m.16093T>C 90%'],['Structural variants',`${fmt(D.sv_total)} (DEL ${fmt(D.sv_counts.DEL)} · DUP ${D.sv_counts.DUP} · INV ${D.sv_counts.INV})`],['Rare loss-of-function',`${D.lof.rare} · ${D.lof.rare_hom} homozygous, all in repeats`],['X chromosome','6,919 heterozygous PAR sites after re-calling'],['Relatedness',`${D.roh_stats.n} ROH ≥1 Mb · ${D.roh_stats.total_mb} Mb total · none >5 Mb`]];
+  const items=zh()?[['SMN1 / SMN2',(D.smn&&D.smn.SMN1!=null)?`${D.smn.SMN1} / ${D.smn.SMN2} 份${D.smn.carrier===false?' · 非 SMA 携带者':''}`:'未评估（无 SMN 拷贝数产物）'],['线粒体异质性',(D.mt_het||[]).map(h=>`m.${h.pos}${h.alt||''} ${(h.af*100).toFixed(0)}%`).join('、')||'未检出'],['结构变异总数',`${fmt(D.sv_total)}（DEL ${fmt(D.sv_counts.DEL)} · DUP ${D.sv_counts.DUP} · INV ${D.sv_counts.INV}）`],['罕见功能丧失变异',`${D.lof.rare} 个 · 纯合 ${D.lof.rare_hom} 个均在重复区`],['X 染色体',(D.par_het!=null?`PAR 重调后 ${fmt(D.par_het)} 个杂合位点`:'PAR 重调数据缺失')],['近亲检查',`ROH ≥1 Mb ${D.roh_stats.n} 段 · 合计 ${D.roh_stats.total_mb} Mb · 无 >5 Mb`]]:
+    [['SMN1 / SMN2',(D.smn&&D.smn.SMN1!=null)?`${D.smn.SMN1} / ${D.smn.SMN2} copies${D.smn.carrier===false?' · not an SMA carrier':''}`:'not assessed (no SMN copy-number output)'],['mt heteroplasmy',(D.mt_het||[]).map(h=>`m.${h.pos}${h.alt||''} ${(h.af*100).toFixed(0)}%`).join(', ')||'none detected'],['Structural variants',`${fmt(D.sv_total)} (DEL ${fmt(D.sv_counts.DEL)} · DUP ${D.sv_counts.DUP} · INV ${D.sv_counts.INV})`],['Rare loss-of-function',`${D.lof.rare} · ${D.lof.rare_hom} homozygous, all in repeats`],['X chromosome',(D.par_het!=null?`${fmt(D.par_het)} heterozygous PAR sites after re-calling`:'PAR re-call data unavailable')],['Relatedness',`${D.roh_stats.n} ROH ≥1 Mb · ${D.roh_stats.total_mb} Mb total · none >5 Mb`]];
   document.getElementById('misc').innerHTML=items.map(([k,v])=>`<div><div class="k">${k}</div><div class="v" style="font-size:12px">${v}</div></div>`).join('');
 }
 
 /* ══════════ deep-dive additions (phase 6) ══════════ */
 const AC=()=>({n:V('--ancn'),s:V('--ancs'),a:V('--arch')});
 const CHR22=[...Array(22)].map((_,i)=>String(i+1));
-const calCHB=D.la_calib.find(x=>x.pop==='CHB'), calCHS=D.la_calib.find(x=>x.pop==='CHS');
+const calCHB=(D.la_calib||[]).find(x=>x.pop==='CHB')||{}, calCHS=(D.la_calib||[]).find(x=>x.pop==='CHS')||{};
 const CALCH=['1','2','6','22'];
-const calLen=CALCH.reduce((a,c)=>a+D.chrlen[c],0);
-const dayuCal=CALCH.reduce((a,c)=>a+D.la_per_chrom.find(x=>String(x.chrom)===c).NorthEA*D.chrlen[c],0)/calLen;
-F.north=(D.la_global.NorthEA*100).toFixed(1);
-F.south=(D.la_global.SouthEA*100).toFixed(1);
-F.noise=((D.la_global.European+D.la_global.SouthAsian)*100).toFixed(1);
-F.chb=(calCHB.north_mean*100).toFixed(0); F.chs=(calCHS.north_mean*100).toFixed(0);
-F.dayucal=(dayuCal*100).toFixed(1);
-F.sdchb=((dayuCal-calCHB.north_mean)/calCHB.north_sd).toFixed(1);
+const calLen=CALCH.reduce((a,c)=>a+(D.chrlen[c]||0),0)||1;
+const dayuCal=CALCH.reduce((a,c)=>{const r=(D.la_per_chrom||[]).find(x=>String(x.chrom)===c);return a+((r&&r.NorthEA!=null?r.NorthEA:0)*(D.chrlen[c]||0))},0)/calLen;
+const _lg=D.la_global||{};
+F.north=_lg.NorthEA!=null?(_lg.NorthEA*100).toFixed(1):'—';
+F.south=_lg.SouthEA!=null?(_lg.SouthEA*100).toFixed(1):'—';
+F.noise=(_lg.European!=null&&_lg.SouthAsian!=null)?((_lg.European+_lg.SouthAsian)*100).toFixed(1):'—';
+F.chb=calCHB.north_mean!=null?(calCHB.north_mean*100).toFixed(0):'—'; F.chs=calCHS.north_mean!=null?(calCHS.north_mean*100).toFixed(0):'—';
+F.dayucal=isFinite(dayuCal)?(dayuCal*100).toFixed(1):'—';
+F.sdchb=(calCHB.north_mean!=null&&calCHB.north_sd)?((dayuCal-calCHB.north_mean)/calCHB.north_sd).toFixed(1):'—';
 F.archmb=D.archaic_summary.span_mb; F.neamb=D.archaic_summary.neanderthal_mb; F.denmb=D.archaic_summary.denisovan_mb;
 F.archn=D.archaic_summary.merged; F.archpct=(D.archaic_summary.span_mb/2875*100).toFixed(1);
-F.phhet=fmt(D.phase.het); F.phased=fmt(D.phase.phased); F.phpct=(D.phase.phased/D.phase.het*100).toFixed(1);
+F.phhet=fmt(D.phase.het); F.phased=fmt(D.phase.phased); F.phpct=D.phase.het>0?(D.phase.phased/D.phase.het*100).toFixed(1):'—';
 F.n50=(D.phase.n50_kb/1000).toFixed(1); F.blocks=fmt(D.phase.blocks);
 F.mtcn=D.somatic.mtDNA_copies_per_cell; F.ydr=D.somatic.Y_depth_ratio; F.telk7=fmt(D.telomere.k7);
 F.teltot=fmt((D.telomere&&D.telomere.total_reads)||0); F.archhom=((D.archaic_summary||{}).homozygous)||0;
@@ -291,7 +302,7 @@ reveal('hopca',(s,c)=>{
   pts.forEach(p=>{el(s,'circle',{cx:X(p[1]).toFixed(1),cy:Y(p[2]).toFixed(1),r:2,fill:COL[p[0]]||c.fd,opacity:COL[p[0]]?.6:.34})});
   anc.forEach(p=>{const d=el(s,'rect',{x:X(p.pc1)-2.4,y:Y(p.pc2)-2.4,width:4.8,height:4.8,fill:'none',stroke:c.ink,'stroke-width':1,opacity:.75});
     tip(d,`${p.label} · ${fmt(p.date)} BP`)});
-  const SHOW={Henan:[0,-26],Shandong:[46,-12],Guangdong:[-44,16],Fujian:[40,10],Sichuan:[-52,-4]};
+  const SHOW=Object.fromEntries((D.ho_prov||[]).map(p=>[p.label,[0,-26]]));
   D.ho_prov.forEach(p=>{const off=SHOW[p.label]; if(!off) return;
     const lab=zh()?({Shandong:'山东',Henan:'河南',Fujian:'福建',Guangdong:'广东',Sichuan:'四川'}[p.label]):p.label;
     const px=X(p.pc1),py=Y(p.pc2);
@@ -486,7 +497,7 @@ reveal('circos',(s,c)=>{
     const p=arc(R.roh[0],R.roh[1],at(r.chrom,r.start),Math.max(at(r.chrom,r.end),at(r.chrom,r.start)+0.0016),c.ink,r.mb>=1.5?.95:.45);
     tip(p,`chr${r.chrom}:${fmt(r.start)}-${fmt(r.end)} · ${r.mb} Mb`);
   });
-  const DEL=[["1",110230156,"GSTM1",14],["1",152555540,"LCE3B/C",34],["19",41349539,"CYP2A6",34],["19",54800853,"LILRA3",14],["22",24274142,"GSTT1",54],["4",69373820,"UGT2B17",14]];
+  const DEL=(D.sv_gene_dels||[]).map(g=>[g.chrom,g.pos,g.gene,g.frac]);
   DEL.forEach(([ch,pos,name,drop])=>{
     const t=at(ch,pos); const [x0,y0]=P(R.roh[0]-3,t),[x1,y1]=P(R.roh[0]-drop,t);
     el(s,'line',{x1:x0,y1:y0,x2:x1,y2:y1,stroke:c.faint,'stroke-width':.8});
@@ -494,7 +505,7 @@ reveal('circos',(s,c)=>{
     txt(s,{x:x1+(right?4:-4),y:y1,'text-anchor':right?'start':'end','dominant-baseline':'central','font-size':9,'font-weight':700,fill:c.lab,stroke:c.bg,'stroke-width':2.6,'paint-order':'stroke'},name);
   });
   txt(s,{x:CX,y:CY-16,'text-anchor':'middle','font-size':12,'font-weight':700,fill:c.muted,'letter-spacing':'.16em'},NAME().toUpperCase());
-  txt(s,{x:CX,y:CY+14,'text-anchor':'middle','font-size':30,'font-weight':800,fill:c.ink,...NUM},'2.87 Gb');
+  txt(s,{x:CX,y:CY+14,'text-anchor':'middle','font-size':30,'font-weight':800,fill:c.ink,...NUM},(((D.chrlen?Object.entries(D.chrlen).filter(([c])=>/^\d+$/.test(c)&&+c<23).reduce((a,e)=>a+(e[1]||0),0):0)/1e9).toFixed(2))+' Gb');
   txt(s,{x:CX,y:CY+34,'text-anchor':'middle','font-size':10,fill:c.muted},zh()?'22 条常染色体':'22 autosomes');
   const RL=[[R.dens,zh()?'变异密度':'variant density',c.data2,.34],
             [R.la,zh()?'局部祖源':'local ancestry',a.n,.5],
@@ -534,7 +545,7 @@ reveal('behaviour',(s,c)=>{
   el(s,'rect',{x:X(25),y:top-10,width:X(75)-X(25),height:rows.length*rh+2,fill:c.track,opacity:.6});
   [0,25,50,75,100].forEach(v=>{el(s,'line',{x1:X(v),y1:top-10,x2:X(v),y2:top+rows.length*rh-4,stroke:v===50?c.faint:c.grid,'stroke-width':v===50?.9:.5});
     txt(s,{x:X(v),y:top+rows.length*rh+10,'text-anchor':'middle','font-size':8,fill:c.faint},v)});
-  txt(s,{x:x0,y:10,'font-size':8,'font-weight':600,fill:c.faint,'letter-spacing':'.08em'},zh()?'在 504 名东亚参考个体中的百分位':'PERCENTILE AMONG THE 504 EAST ASIAN REFERENCE INDIVIDUALS');
+  txt(s,{x:x0,y:10,'font-size':8,'font-weight':600,fill:c.faint,'letter-spacing':'.08em'},zh()?`在 ${(D.pop||{}).n_super||'—'} 名东亚参考个体中的百分位`:`PERCENTILE AMONG THE ${(D.pop||{}).n_super||'—'} EAST ASIAN REFERENCE INDIVIDUALS`);
   rows.forEach((r,i)=>{const y=top+i*rh+6, eas=r.panel==='EAS';
     txt(s,{x:x0-12,y:y+3,'text-anchor':'end','font-size':10,'font-weight':eas?700:500,fill:eas?c.ink:c.muted},zh()?r.zh:r.en);
     const mx=X(r.pct_EAS);
