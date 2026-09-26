@@ -9,7 +9,7 @@ import json, re, subprocess, pathlib, collections
 import pandas as pd, numpy as np
 W = P/"wgs"; D = {}
 _ch = pd.read_csv(pathlib.Path(__file__).resolve().parents[1]/"panel"/"chrom_grch37.tsv", sep="\t", dtype={"chrom": str})
-D["chrlen"] = {r.chrom: int(r.length) for r in _ch.itertuples()}
+D["chrlen"] = {r.chrom: int(r.length) for r in _ch.itertuples() if pd.notna(r.length)}
 D["cen"] = {r.chrom: float(r.centromere_mb) for r in _ch.itertuples() if pd.notna(r.centromere_mb)}
 # --- QC / KPI
 ms = pd.read_csv(W/"01_qc/depth.mosdepth.summary.txt", sep="\t"); ms = ms[~ms.chrom.str.contains("_region|^GL")]
