@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-""f"Nearest present-day and ancient populations to {NAME_EN} in the Human Origins PCA space."""
+"""Nearest present-day and ancient populations in the Human Origins PCA space."""
 import sys, pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from wgsconfig import *  # noqa: F401,F403 -- P, W, REF, TOOLS, SAMPLE, THREADS ...
