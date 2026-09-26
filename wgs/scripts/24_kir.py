@@ -6,6 +6,15 @@ from wgsconfig import *  # noqa: F401,F403 -- P, W, REF, TOOLS, SAMPLE, THREADS 
 
 import pandas as pd
 P=str(P); W=f"{P}/wgs/16_panels"
+import os as _os
+_os.makedirs(W, exist_ok=True)
+# No step of this repository runs T1K; without its kir_genotype.tsv there is nothing to type.
+import os as _os
+if not _os.path.exists(f"{P}/wgs/06_pgx/t1k/kir_genotype.tsv"):
+    pd.DataFrame(columns=["gene","present","call","ab1","ab2"]).to_csv(f"{W}/kir.tsv",sep="\t",index=False)
+    open(f"{W}/kir_summary.txt","w").write("haplotype\tunavailable (T1K was not run)\npresent\t\nC_ligands\t\nB_epitopes\t\n")
+    print("WARNING: 06_pgx/t1k/kir_genotype.tsv not found (no step runs T1K) -- empty kir.tsv written", file=sys.stderr)
+    sys.exit(0)
 k=pd.read_csv(f"{P}/wgs/06_pgx/t1k/kir_genotype.tsv",sep="\t",header=None,
               names=["gene","n","a1","ab1","q1","a2","ab2","q2","other"])
 k["present"]=(k.n>0)&(k.ab1>=5)

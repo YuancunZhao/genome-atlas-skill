@@ -7,6 +7,11 @@ from wgsconfig import *  # noqa: F401,F403 -- P, W, REF, TOOLS, SAMPLE, THREADS 
 
 import pandas as pd, re, json, os
 P=str(P); W=f"{P}/wgs/19_hla_disease"; os.makedirs(W,exist_ok=True)
+# No step of this repository runs T1K; without its dayu_genotype.tsv there are no HLA types to check.
+if not os.path.exists(f"{P}/wgs/06_pgx/t1k/dayu_genotype.tsv"):
+    json.dump({"genotype":{},"checks":[]},open(f"{W}/hla_disease.json","w"),ensure_ascii=False)
+    print("WARNING: 06_pgx/t1k/dayu_genotype.tsv not found (no step runs T1K) -- empty hla_disease.json written", file=sys.stderr)
+    sys.exit(0)
 t=pd.read_csv(f"{P}/wgs/06_pgx/t1k/dayu_genotype.tsv",sep="\t",header=None,
               names=["gene","n","a1","ab1","q1","a2","ab2","q2","other"])
 def two(a):  # keep two fields: 04:05
