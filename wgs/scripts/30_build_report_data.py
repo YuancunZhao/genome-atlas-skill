@@ -14,7 +14,9 @@ D["cen"] = {r.chrom: float(r.centromere_mb) for r in _ch.itertuples() if pd.notn
 # --- QC / KPI
 ms = pd.read_csv(W/"01_qc/depth.mosdepth.summary.txt", sep="\t"); ms = ms[~ms.chrom.str.contains("_region|^GL")]
 dep = {r.chrom: r["mean"] for r in ms.itertuples(index=False).__iter__()} if False else dict(zip(ms.chrom, ms["mean"]))
-idx = subprocess.run(["bcftools", "index", "-s", str(W/f"00_input/{SAMPLE}.pass.vcf.gz")], capture_output=True, text=True).stdout
+_pass_vcf = W/"00_input/target.pass.vcf.gz"   # 01_normalize.sh writes target.*; an older run may have left only a {SAMPLE}.* link
+if not _pass_vcf.exists(): _pass_vcf = W/f"00_input/{SAMPLE}.pass.vcf.gz"
+idx = subprocess.run(["bcftools", "index", "-s", str(_pass_vcf)], capture_output=True, text=True).stdout
 nvar = {l.split("\t")[0]: int(l.split("\t")[2]) for l in idx.splitlines()}
 CHR = [str(i) for i in range(1, 23)] + ["X", "Y", "MT"]
 D["chrom"] = [{"chrom": c, "depth": round(dep.get(c, 0), 1), "n_pass": nvar.get(c, 0), "len": D["chrlen"].get(c, 16569 if c == "MT" else 0)} for c in CHR]
@@ -25,7 +27,8 @@ sp = W/"01_qc/stats.pass.txt"
 tstv = [l for l in open(sp) if l.startswith("TSTV")][0].split("\t")
 psc = [l for l in open(sp) if l.startswith("PSC")][0].split("\t")
 call_bp = sum(int(l.split()[2]) - int(l.split()[1]) for l in open(W/"00_input/callable.bed"))
-D["kpi"] = {"depth_auto": round(dep["total"], 1), "depth_x": round(dep["X"], 1), "depth_y": round(dep["Y"], 1), "depth_mt": int(dep["MT"]),
+_w_a = ms[ms.chrom.isin([str(i) for i in range(1, 23)])]
+D["kpi"] = {"depth_auto": round(_w_a["bases"].sum() / _w_a["length"].sum(), 1), "depth_x": round(dep["X"], 1), "depth_y": round(dep["Y"], 1), "depth_mt": int(dep["MT"]),
             "callable_gb": round(call_bp/1e9, 2), "pass_records": sn(sp, "number of records"), "snv": sn(sp, "number of SNPs"), "indel": sn(sp, "number of indels"),
             "titv": float(tstv[4]), "het": int(psc[5]), "homalt": int(psc[4]), "all_records": sn(W/"01_qc/stats.norm.txt", "number of records"),
             "platform": "MGI T7 · Sentieon DNAscope · GRCh37"}
@@ -57,6 +60,14 @@ D["pca_global"] = {"pts": [[r.SuperPop, r.Population, round(r.PC1_AVG, 4), round
 ke = pd.read_csv(W/"04_ancestry/eas.proj.sscore", sep="\t"); mee = pd.read_csv(W/"04_ancestry/eas.target.proj.sscore", sep="\t")
 D["pca_eas"] = {"pts": [[r.Population, round(r.PC1_AVG, 4), round(r.PC2_AVG, 4)] for r in ke.itertuples()], "me": [round(mee.PC1_AVG[0], 4), round(mee.PC2_AVG[0], 4)]}
 D["anc"] = {"n_global": sum(1 for _ in open(W/"04_ancestry/prune.prune.in")), "n_eas": sum(1 for _ in open(W/"04_ancestry/prune.eas.prune.in")), "summary": open(W/"04_ancestry/summary.txt").read()}
+D["pop"] = {"n_super": int((ps.SuperPop == "EAS").sum()), "n_sub": int(ps.Population.isin(["CHS", "CHB"]).sum())}  # sizes the percentile captions quote
+# PAR heterozygous sites in the re-called X VCF (GRCh37 PAR1/PAR2); the misc caption quotes this
+_par_vcf = W/"00_input/X.recall.vcf.gz"
+if _par_vcf.exists():
+    _par_out = subprocess.run(["bcftools", "view", "-H", "-r", "X:60001-2699520,X:154931044-155260560", str(_par_vcf)], capture_output=True, text=True).stdout
+    D["par_het"] = sum(1 for l in _par_out.splitlines() if len(l.split("\t")) > 9 and re.search(r"0[/|]1|1[/|]0", l.split("\t")[9]))
+else:
+    D["par_het"] = None
 def near(k, m, pcs):
     cen = k.groupby("Population")[pcs].mean(); d = np.sqrt(((cen - m)**2).sum(axis=1)).sort_values()
     k = k.copy(); k["d"] = np.sqrt(((k[pcs].values - m)**2).sum(1)); return d.head(5).round(4).to_dict(), k.nsmallest(15, "d").Population.value_counts().to_dict()
@@ -82,6 +93,8 @@ pr = pd.read_csv(W/"07_prs/prs_wgs.tsv", sep="\t"); D["prs"] = pr.round(1).filln
 # --- SV counts (13 writes sv_filtered.tsv; it is empty when no Delly VCF was produced)
 sv = pd.read_csv(W/"08_sv/sv_filtered.tsv", sep="\t", dtype={"chrom": str})
 D["sv_counts"] = sv.svtype.value_counts().to_dict(); D["sv_total"] = len(sv)
+_gd = sv[(sv.svtype == "DEL") & (sv.dp_ratio.notna()) & (sv.dp_ratio < 0.2) & sv.genes.fillna("").astype(str).str.len().gt(0)] if len(sv) else sv
+D["sv_gene_dels"] = [{"chrom": str(r.chrom), "pos": int(r.pos), "gene": str(r.genes).split(",")[0], "frac": round(float(r.dp_ratio), 2)} for r in _gd.itertuples()]
 # SMN copies come from SMNCopyNumberCaller and STR lengths from ExpansionHunter; no step of
 # this repository runs either tool, so both sections degrade to "not assessed" when absent.
 _smn_f = W/"08_sv/smn/target.tsv"
@@ -103,8 +116,41 @@ else:
 _roh_f = W/"09_misc/roh_1mb_nocen.bed"
 roh = [l.split() for l in open(_roh_f)] if _roh_f.exists() else []
 D["roh"] = [{"chrom": r[0], "start": int(r[1]), "end": int(r[2]), "mb": round(int(r[3])/1e6, 2), "q": float(r[4])} for r in roh]
-D["roh_stats"] = {"n": len(roh), "total_mb": round(sum(int(r[3]) for r in roh)/1e6, 1), "max_mb": round(max(int(r[3]) for r in roh)/1e6, 2), "n_gt5": 0} if roh else {"n": 0, "total_mb": 0.0, "max_mb": 0.0, "n_gt5": 0}
-D["versions"] = {"yfull": "14.06.0", "phylotree": "17.2", "pharmcat": "3.4.0", "clinvar": "2026-09-05", "gnomad": "v2.1.1", "delly": "1.7.2", "eh": "5.0.0", "t1k": "1.0.10", "cyrius": "1.1.1", "bcftools": "1.22", "beagle": "5.4"}
+D["roh_stats"] = {"n": len(roh), "total_mb": round(sum(int(r[3]) for r in roh)/1e6, 1), "max_mb": round(max(int(r[3]) for r in roh)/1e6, 2), "n_gt5": sum(1 for r in roh if int(r[3]) > 5_000_000)} if roh else {"n": 0, "total_mb": 0.0, "max_mb": 0.0, "n_gt5": 0}
+# Versions are probed from the tools and references actually in use instead of being hand-written:
+# the previous constants had already drifted (Delly 1.7.2 vs installed v2.6.0, bcftools 1.22 vs 1.24,
+# ClinVar date 2026-09-05 vs the file's own 2026-09-23).
+def _ver(cmd, pat=r"\d+\.\d+(?:\.\d+)?"):
+    try:
+        o = subprocess.run(cmd if isinstance(cmd, list) else [cmd], capture_output=True, text=True, timeout=15)
+        m = re.search(pat, (o.stdout or "") + (o.stderr or ""))
+        return m.group(0) if m else None
+    except Exception:
+        return None
+def _clinvar_file_date():
+    f = P/"data/ref/clinvar_grch37.vcf.gz"
+    if not f.exists(): return None
+    try:
+        for l in subprocess.run(["bcftools", "view", "-h", str(f)], capture_output=True, text=True, timeout=30).stdout.splitlines():
+            if l.startswith("##fileDate="): return l.split("=", 1)[1].strip()
+    except Exception:
+        pass
+    return None
+_yt = P/"data/ref/ytree/current_version.txt"
+_delly_bin = TOOLS/"delly" if (TOOLS/"delly").exists() else TOOLS/"env/bin/delly"
+_eh_bins = sorted((TOOLS/"eh").glob("*/bin/ExpansionHunter")) if (TOOLS/"eh").exists() else []
+D["versions"] = {"yfull": _yt.read_text().strip() if _yt.exists() else None,
+                 "phylotree": "17.2",   # the tree 06_mtdna.py classifies against
+                 "pharmcat": "3.4.0" if (TOOLS/"pharmcat/pharmcat-3.4.0-all.jar").exists() else None,
+                 "clinvar": _clinvar_file_date(),
+                 "gnomad": "v2.1.1",    # the dataset 07c_gnomad_lookup.py queries (gnomad_r2_1)
+                 "delly": _ver([str(_delly_bin), "--version"]),
+                 "eh": _ver([str(_eh_bins[0]), "--version"]) if _eh_bins else None,
+                 "t1k": _ver([str(TOOLS/"T1K/run-t1k")]) if (TOOLS/"T1K/run-t1k").exists() else None,
+                 "cyrius": None,
+                 "bcftools": _ver(["bcftools", "--version"]),
+                 "samtools": _ver(["samtools", "--version"]),
+                 "beagle": None}
 # ---- HLA disease associations, archaic gene families, behaviour scores, candidate genes
 import json as _j
 hd = W/"19_hla_disease/hla_disease.tsv"
@@ -143,7 +189,11 @@ else:
 _pc = _read_tsv(W/"12_localanc/per_chrom.tsv", dtype={"chrom": str})
 D["la_per_chrom"] = _pc[["chrom", "NorthEA", "SouthEA"]].to_dict("records") if _pc is not None and len(_pc) else []
 _sg = _read_tsv(W/"12_localanc/segments.tsv", dtype={"chrom": str})
-D["la_segments"] = _sg[["chrom", "start", "end", "anc", "mb"]].to_dict("records") if _sg is not None and len(_sg) else []
+if _sg is not None and len(_sg):
+    _sg = _sg.copy(); _sg["hap"] = _sg["hap"].astype(str).str.replace("a", "", regex=False).astype(int)  # a1/a2 -> 1/2 for the painting figures
+    D["la_segments"] = _sg[["chrom", "start", "end", "anc", "mb", "hap"]].to_dict("records")
+else:
+    D["la_segments"] = []
 _cb = _read_tsv(W/"12_localanc/calibration.tsv")
 D["la_calib"] = _cb.to_dict("records") if _cb is not None and len(_cb) else []
 # archaic introgression (step 18)
@@ -179,7 +229,7 @@ D["kir"] = _kr.to_dict("records") if _kr is not None and len(_kr) else []
 # PASS variants per 1 Mb bin, for the circos density ring
 try:
     _dens = {}
-    _q = subprocess.run(["bcftools", "query", "-f", "%CHROM\t%POS\n", str(W/f"00_input/{SAMPLE}.pass.vcf.gz")],
+    _q = subprocess.run(["bcftools", "query", "-f", "%CHROM\t%POS\n", str(_pass_vcf)],
                          capture_output=True, text=True, check=True).stdout
     for l in _q.splitlines():
         c, p = l.split("\t"); _dens.setdefault(c, []).append(int(p))
