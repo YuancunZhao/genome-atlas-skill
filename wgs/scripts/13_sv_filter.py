@@ -8,6 +8,14 @@ from wgsconfig import *  # noqa: F401,F403 -- P, W, REF, TOOLS, SAMPLE, THREADS 
 import subprocess, gzip, io, collections, bisect, os
 import pandas as pd, numpy as np
 PROJ = str(P); W = f"{PROJ}/wgs/08_sv"; MEAN_DP = 28.88
+# No step of this repository runs Delly; without an externally produced target.sv.bcf there is
+# nothing to filter, so write an empty table and let the pipeline continue instead of dying.
+import os as _os
+if not _os.path.exists(f"{W}/delly/target.sv.bcf"):
+    _cols = "chrom pos end svtype svlen precise pe sr mapq chr2 pos2 geno gq rc rcl rcr dr dv rr rv dp_ratio rd_ok genes".split()
+    pd.DataFrame(columns=_cols).to_csv(f"{W}/sv_filtered.tsv", sep="\t", index=False)
+    print("WARNING: 08_sv/delly/target.sv.bcf not found (no step runs Delly) -- empty sv_filtered.tsv written", file=sys.stderr)
+    sys.exit(0)
 q = subprocess.run(["bcftools", "query", "-i", 'FILTER="PASS" && GT="alt"', "-f",
     "%CHROM\t%POS\t%INFO/END\t%INFO/SVTYPE\t%INFO/SVLEN\t%INFO/PRECISE\t%INFO/PE\t%INFO/SR\t%INFO/MAPQ\t%INFO/CHR2\t%INFO/POS2\t[%GT\t%GQ\t%RC\t%RCL\t%RCR\t%DR\t%DV\t%RR\t%RV]\n",
     f"{W}/delly/target.sv.bcf"], capture_output=True, text=True, check=True).stdout
