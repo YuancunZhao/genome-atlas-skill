@@ -5,8 +5,12 @@ source "$(dirname "$0")/env.sh"
 A=$REF_DIR/annot; W=$WGS/05_clinvar; mkdir -p $W; cd $W
 CV=$REF_DIR/clinvar_grch37.vcf.gz
 [ -f $CV.tbi ] || tabix -p vcf $CV
-# 1. EAS AF annotation file from plink afreq
-paste <(awk 'NR>1{print $1"\t"$2"\t"$4"\t"$5"\t"$6}' $WGS/02_complete/eas_allvar.afreq) <(awk 'NR>1{print $6}' $WGS/02_complete/all_allvar.afreq) | bgzip -@4 > eas_af.tsv.gz; tabix -f -s1 -b2 -e2 eas_af.tsv.gz
+# 1. EAS AF annotation file straight from the 1000G panel, whose INFO column already carries
+# EAS_AF and AF. The two .afreq files this used to read are never produced by anything in the
+# repository, and the process substitutions hid that: paste then wrote an empty eas_af.tsv.gz
+# and every variant silently lost its frequencies.
+awk -F'\t' 'BEGIN{OFS="\t"} $1!~/^#/ { e="."; a="."; n=split($8,kv,";"); for(i=1;i<=n;i++){ if(kv[i]~/^EAS_AF=/) e=substr(kv[i],8); else if(kv[i]~/^AF=/) a=substr(kv[i],4) } print $1,$2,$4,$5,e,a }' $REF_DIR/all_phase3.pvar | bgzip -@4 > eas_af.tsv.gz
+tabix -f -s1 -b2 -e2 eas_af.tsv.gz
 printf '##INFO=<ID=EAS_AF,Number=1,Type=Float,Description="1000G phase3 EAS alt allele frequency">\n##INFO=<ID=ALL_AF,Number=1,Type=Float,Description="1000G phase3 global alt allele frequency">\n' > eas_af.hdr
 # 2. ClinVar + EAS AF + csq
 bcftools annotate -a $CV -c INFO/CLNSIG,INFO/CLNREVSTAT,INFO/CLNDN,INFO/GENEINFO,INFO/CLNSIGCONF,INFO/CLNVC,INFO/ALLELEID --threads 8 -Ou $WGS/00_input/target.pass.vcf.gz \
