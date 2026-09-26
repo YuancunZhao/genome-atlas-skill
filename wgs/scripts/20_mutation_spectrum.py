@@ -7,7 +7,9 @@ from wgsconfig import *  # noqa: F401,F403 -- P, W, REF, TOOLS, SAMPLE, THREADS 
 import subprocess, collections, pysam, pandas as pd
 P=str(P); pathlib.Path(f"{P}/wgs/17_mutspec").mkdir(parents=True, exist_ok=True); fa=pysam.FastaFile(FASTA)
 comp={"A":"T","C":"G","G":"C","T":"A"}
-q=subprocess.run(["bcftools","query","-i",'TYPE="snp"',"-r",",".join(map(str,range(1,23))),"-f","%CHROM\t%POS\t%REF\t%ALT\t%INFO/EAS_AF\t%INFO/ALL_AF\n",f"{P}/wgs/05_clinvar/{SAMPLE}.pass.annot.vcf.gz"],capture_output=True,text=True).stdout
+_annot=f"{P}/wgs/05_clinvar/{SAMPLE}.pass.annot.vcf.gz"
+if not pathlib.Path(_annot).exists(): _annot=f"{P}/wgs/05_clinvar/target.pass.annot.vcf.gz"  # step 05 writes target.*
+q=subprocess.run(["bcftools","query","-i",'TYPE="snp"',"-r",",".join(map(str,range(1,23))),"-f","%CHROM\t%POS\t%REF\t%ALT\t%INFO/EAS_AF\t%INFO/ALL_AF\n",_annot],capture_output=True,text=True).stdout
 cnt=collections.Counter(); cnt_priv=collections.Counter(); n=0
 for l in q.splitlines():
     c,p,r,a,eas,al=l.split("\t"); p=int(p); ctx=fa.fetch(c,p-2,p+1).upper()

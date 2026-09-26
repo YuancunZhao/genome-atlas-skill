@@ -7,6 +7,8 @@ from wgsconfig import *  # noqa: F401,F403 -- P, W, REF, TOOLS, SAMPLE, THREADS 
 
 import subprocess, io, re, pandas as pd, numpy as np
 P=str(P); W=f"{P}/wgs/13_somatic"; pathlib.Path(W).mkdir(parents=True, exist_ok=True); CRAM=f"{P}/wgs/00_input/{SAMPLE}.cram"; REF=FASTA
+_annot=f"{P}/wgs/05_clinvar/{SAMPLE}.pass.annot.vcf.gz"
+if not pathlib.Path(_annot).exists(): _annot=f"{P}/wgs/05_clinvar/target.pass.annot.vcf.gz"  # step 05 writes target.*
 AUTO=28.88
 out=[]
 # 1. mtDNA copy number
@@ -36,7 +38,7 @@ hot=pd.DataFrame(rows,columns=["hotspot","chrom","pos","depth","alt_reads","vaf"
 genes = {r.gene: (str(r.chrom), int(r.start), int(r.end)) for r in pd.read_csv(PANEL / "chip_genes.tsv", sep="\t").itertuples()}
 reg=",".join(f"{c}:{s}-{e}" for c,s,e in genes.values())
 t=subprocess.run(["bcftools","query","-r",reg,"-f","%CHROM\t%POS\t%REF\t%ALT\t%FILTER\t%INFO/BCSQ\t[%GT\t%DP\t%AD]\n",f"{P}/wgs/00_input/{SAMPLE}.norm.vcf.gz"],capture_output=True,text=True).stdout
-csq=subprocess.run(["bcftools","query","-r",reg,"-f","%CHROM\t%POS\t%REF\t%ALT\t%INFO/BCSQ\n",f"{P}/wgs/05_clinvar/{SAMPLE}.pass.annot.vcf.gz"],capture_output=True,text=True).stdout
+csq=subprocess.run(["bcftools","query","-r",reg,"-f","%CHROM\t%POS\t%REF\t%ALT\t%INFO/BCSQ\n",_annot],capture_output=True,text=True).stdout
 cmap={tuple(l.split("\t")[:4]):l.split("\t")[4] for l in csq.splitlines()}
 lv=[]
 for l in t.splitlines():
