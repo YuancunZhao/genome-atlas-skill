@@ -5,8 +5,8 @@ source "$(dirname "$0")/env.sh"
 JAVA=$HOME/miniforge3/envs/wgs/bin/java
 W=$WGS/12_localanc; cd $W
 R=$REF_DIR
-awk 'NR>1 && $6=="CHB"{print $1}' $R/all_phase3.psam | head -20 > holdout.ids
-awk 'NR>1 && $6=="CHS"{print $1}' $R/all_phase3.psam | head -20 >> holdout.ids
+awk 'NR>1 && $5=="CHB"{print $1}' $R/all_phase3.psam | head -20 > holdout.ids
+awk 'NR>1 && $5=="CHS"{print $1}' $R/all_phase3.psam | head -20 >> holdout.ids
 grep -vwFf holdout.ids ref.panel > ref.calib.panel
 cut -f2 ref.calib.panel | sort | uniq -c
 for c in 1 2 6 22; do
