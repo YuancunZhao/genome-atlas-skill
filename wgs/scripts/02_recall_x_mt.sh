@@ -4,7 +4,8 @@ set -euo pipefail
 source "$(dirname "$0")/env.sh"
 mkdir -p $WGS/03_haplo $WGS/00_input
 cd $WGS/00_input
-echo -e "41240811001690\tM" > sample_sex.txt
+SM=$( [ "${SEX:-male}" = "female" ] && echo F || echo M )
+echo -e "$SAMPLE\t$SM" > sample_sex.txt
 # X: parallel over 4 chunks
 for r in X:1-40000000 X:40000001-80000000 X:80000001-120000000 X:120000001-155270560; do
   ( bcftools mpileup -f $REF -r $r -q 20 -Q 20 -d 500 -a FORMAT/AD,FORMAT/DP -Ou "$CRAM" 2>/dev/null \
