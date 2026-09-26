@@ -40,74 +40,91 @@ print("tree SNP positions:", len(positions), file=sys.stderr)
 PILE = f"{W}/y_pileup.tsv"
 if not os.path.exists(PILE):
     # samtools mpileup over a sorted BED is a single sequential pass (much faster than bcftools -R random access)
-    subprocess.run(f"samtools mpileup -f {REF} -l {bed} -q 20 -Q 20 -d 500 {CRAM} 2>/dev/null > {PILE}", shell=True, check=True)
+    # Tightened for platforms whose base qualities run optimistic (MGI/DNBSEQ):
+    # NOTE -q/-Q only matter if this pileup is ever rebuilt; an existing pileup keeps its own
+    # filtering, but base quality can still be re-applied below because column 6 carries it.
+    subprocess.run(f"samtools mpileup -f {REF} -l {bed} -q 30 -Q 25 -d 500 {CRAM} 2>/dev/null > {PILE}", shell=True, check=True)
 q = open(PILE).read()
 import re
-counts = {}
-for l in q.splitlines():
-    f = l.split("\t")
-    if len(f) < 5: continue
-    pos, ref, bases = int(f[1]), f[2].upper(), f[4]
-    bases = re.sub(r"\^.", "", bases); bases = bases.replace("$", "")
-    bases = re.sub(r"[+-](\d+)(?=[ACGTNacgtn*#]+)", lambda m: "\x00" * 0, bases)  # strip indel length markers
-    # remove indel sequences: after +N or -N, N bases follow
-    out = []; i = 0
-    b = f[4]
-    while i < len(b):
-        ch = b[i]
-        if ch == "^": i += 2; continue
-        if ch == "$": i += 1; continue
-        if ch in "+-":
-            j = i + 1; num = ""
-            while j < len(b) and b[j].isdigit(): num += b[j]; j += 1
-            i = j + int(num or 0); continue
-        out.append(ch); i += 1
-    c = collections.Counter()
-    for ch in out:
-        if ch in ".,": c[ref] += 1
-        elif ch.upper() in "ACGT": c[ch.upper()] += 1
-    counts[pos] = dict(c)
-refbase = {}
-for l in q.splitlines():
-    f = l.split("\t")
-    if len(f) >= 3: refbase[int(f[1])] = f[2].upper()
+# --- quality gates (tightened; base qualities on MGI/DNBSEQ runs are optimistic) ---
+# Column 6 of the pileup carries per-base qualities, so a higher BQ floor is re-applied here
+# WITHOUT rebuilding the pileup. MAPQ is not recoverable from an existing pileup file.
+MIN_BQ = 25      # base-quality floor applied while counting (pileup itself was built with -Q 20)
+MIN_DP = 5       # minimum depth for a site to be callable at all
+MIN_VOTES = 3    # minimum number of agreeing reads
+CONC = 0.90      # minimum fraction of reads that must agree
+print(f"quality gates: BQ>={MIN_BQ} DP>={MIN_DP} votes>={MIN_VOTES} conc>={CONC}", file=sys.stderr)
+counts, refbase = {}, {}
+with open(PILE) as _fh:
+    for l in _fh:
+        f = l.rstrip("\n").split("\t")
+        if len(f) < 6: continue
+        try: pos = int(f[1])
+        except ValueError: continue
+        ref, bases, quals = f[2].upper(), f[4], f[5]
+        refbase[pos] = ref
+        c = collections.Counter()
+        bp = qp = 0; nb = len(bases)
+        while bp < nb:
+            ch = bases[bp]
+            if ch == "^": bp += 2; continue          # read start + mapq char (no qual consumed)
+            if ch == "$": bp += 1; continue          # read end (no qual consumed)
+            if ch in "+-":                           # indel: digit(s) + sequence (no qual consumed)
+                j = bp + 1; num = ""
+                while j < nb and bases[j].isdigit(): num += bases[j]; j += 1
+                bp = j + (int(num) if num else 0); continue
+            _q = (ord(quals[qp]) - 33) if qp < len(quals) else 0
+            bp += 1; qp += 1
+            if _q < MIN_BQ: continue
+            if ch in ".,": c[ref] += 1
+            elif ch.upper() in "ACGT": c[ch.upper()] += 1
+        counts[pos] = dict(c)
 def state(pos, anc, der):
-    """Within haplogroup O the hg19 reference (R1b) carries the ancestral allele at every branch SNP, so
-    derived := non-reference allele; ybrowse anc/der labels are only used when they agree with this."""
+    """Trust the ybrowse anc/der labels as-is -- the old "hg19 reference == ancestral" shortcut only
+    holds inside haplogroup O (the hg19 Y reference is an R1b individual, whose own branch SNPs carry
+    the derived allele). A site counts only at depth >= MIN_DP with a >= CONC majority backed by at
+    least MIN_VOTES reads."""
     c = counts.get(pos, {}); dp = sum(c.values())
-    if dp < 2: return "nocov", dp, c
-    rb = refbase.get(pos)
-    if rb and rb in (anc, der):
-        anc, der = rb, (der if der != rb else anc)
+    if dp < MIN_DP: return "nocov", dp, c
     nd, na = c.get(der, 0), c.get(anc, 0)
-    if nd >= max(2, 0.8 * dp): return "der", dp, c
-    if na >= max(2, 0.8 * dp): return "anc", dp, c
+    need = max(MIN_VOTES, CONC * dp)
+    if nd >= need: return "der", dp, c
+    if na >= need: return "anc", dp, c
     return "mixed", dp, c
 def score(node):
     st = collections.Counter(state(p, a, d)[0] for _, p, a, d in snps_of(node))
     return st["der"], st["anc"], st["nocov"] + st["mixed"]
 # 3. greedy descent
-START = "O-F438"   # terminal branch from the ISOGG-2016 descent (rounds 1-4); orientation is reliable inside O
+# (removed) upstream hardcoded START = "O-F438"; the walk now starts at the tree root below
 def find_node(n, i):
     if n["id"] == i: return n
     for c in n.get("children", []):
         r = find_node(c, i)
         if r: return r
-node = find_node(tree, START); d0, a0, o0 = score(node)
-path = [(node["id"], d0, a0, o0, node.get("formed"), node.get("tmrca"))]
-# sanity: also score a few O trunk nodes
-for chk in ["O", "O-M175", "O2", "O-M122", "O-M117", "O-F8"]:
-    nn = find_node(tree, chk)
-    if nn: print(chk, score(nn), file=sys.stderr)
-while True:
-    kids = [c for c in node.get("children", []) if not c["id"].endswith("*")]
-    best = None
-    for c in kids:
-        d, a, o = score(c)
-        if d > a and d >= 1 and (best is None or (d - a) > (best[1] - best[2])): best = (c, d, a, o)
-    if best is None: break
-    node = best[0]; path.append((node["id"], best[1], best[2], best[3], node.get("formed"), node.get("tmrca")))
-lines = [f"YFull tree {open(f'{P}/data/ref/ytree/current_version.txt').read().strip()} (descent started at {START}); terminal branch: {path[-1][0]}",
+# Walk from the ROOT of the tree. Upstream started at a hardcoded O-F438 branch, which any non-O
+# sample never enters (every O SNP then reads as ancestral). Support is accumulated along the path
+# (sum of der-anc), because plain per-node "der > anc" is fragile: some nodes list sibling
+# sub-branch SNPs in their "snps" field and dilute the vote (e.g. A1: der=65 anc=265, while the
+# true downstream path reads BT 499/206, CT 410/79, N 420/0).
+_best = {"cum": 0, "path": []}
+def _walk(_n, _cum, _path):
+    for _c in _n.get("children", []):
+        if _c["id"].endswith("*"): continue
+        _d, _a, _o = score(_c)
+        _cc = _cum + (_d - _a)
+        if _cc > _best["cum"]:
+            _best["cum"] = _cc
+            _best["path"] = _path + [_c]
+        _walk(_c, _cc, _path + [_c])
+_walk(tree, 0, [])
+node = _best["path"][-1] if _best["path"] else tree
+path = []
+_cum = 0
+for _n in _best["path"]:
+    _d, _a, _o = score(_n)
+    _cum += _d - _a
+    path.append((_n["id"], _d, _a, _o, _n.get("formed"), _n.get("tmrca")))
+lines = [f"YFull tree {open(f'{P}/data/ref/ytree/current_version.txt').read().strip()} (walk from root); terminal branch: {path[-1][0]}",
          f"  formed ~{path[-1][4]} ybp, TMRCA ~{path[-1][5]} ybp", "", "Path (branch, #derived, #ancestral, #untyped/mixed, formed, tmrca):"]
 for p in path: lines.append("  %-28s der=%3d anc=%3d n/a=%3d  formed=%s tmrca=%s" % p)
 # children of terminal: show why we stopped
