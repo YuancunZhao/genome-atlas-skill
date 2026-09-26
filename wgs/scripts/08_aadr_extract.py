@@ -39,7 +39,9 @@ print(keep[keep.kind=="modern"].label.value_counts().head(20).to_dict(),file=sys
 snp["idx"]=np.arange(n_snp)
 sel=snp[(snp.chrom.isin([str(i) for i in range(1,23)]))&snp.a1.isin(list("ACGT"))&snp.a2.isin(list("ACGT"))].copy()
 sel[["chrom","pos"]].to_csv(f"{W}/ho_sites.tsv",sep="\t",header=False,index=False)
-q=subprocess.run(["bcftools","query","-R",f"{W}/ho_sites.tsv","-f","%CHROM\t%POS\t%REF\t%ALT\t[%GT]\n",f"{P}/wgs/02_complete/{SAMPLE}.1kg_sites.vcf.gz"],capture_output=True,text=True).stdout
+q=subprocess.run(["bcftools","query","-R",f"{W}/ho_sites.tsv","-f","%CHROM\t%POS\t%REF\t%ALT\t[%GT]\n",f"{P}/wgs/02_complete/{SAMPLE}.1kg_sites.vcf.gz"],capture_output=True,text=True)
+if q.returncode: print("bcftools query failed:\n"+q.stderr[-2000:],file=sys.stderr)  # otherwise an empty result silently yields 0 usable SNPs
+q=q.stdout
 dg=pd.read_csv(io.StringIO(q),sep="\t",header=None,names=["chrom","pos","ref","alt","gt"],dtype={"chrom":str}).drop_duplicates(["chrom","pos"])
 sel=sel.merge(dg,on=["chrom","pos"],how="inner")
 ok=((sel.a1==sel.ref)&(sel.a2==sel.alt))|((sel.a1==sel.alt)&(sel.a2==sel.ref))
