@@ -2,7 +2,7 @@
 # Calibration: score 20 CHB and 20 CHS reference individuals with the same north/south panels, holding them out.
 set -euo pipefail
 source "$(dirname "$0")/env.sh"
-JAVA=$HOME/miniforge3/envs/wgs/bin/java
+JAVA=$TOOLS/env/bin/java
 W=$WGS/12_localanc; cd $W
 R=$REF_DIR
 awk 'NR>1 && $5=="CHB"{print $1}' $R/all_phase3.psam | head -20 > holdout.ids
