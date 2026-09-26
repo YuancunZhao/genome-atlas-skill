@@ -79,26 +79,31 @@ hla = pd.read_csv(_t1k, sep="\t", header=None) if _t1k.exists() else pd.DataFram
 D["hla"] = {r[0]: [str(r[2]).replace("HLA-", ""), str(r[5]).replace("HLA-", "") if str(r[5]) != "." else "-", int(r[4]), int(r[7])] for r in hla.itertuples(index=False) if str(r[0]).startswith("HLA-") and r[1] > 0}
 # --- PRS
 pr = pd.read_csv(W/"07_prs/prs_wgs.tsv", sep="\t"); D["prs"] = pr.round(1).fillna(-1).to_dict("records")
-# --- CNV panel (depth ratios measured above) and SV counts
+# --- SV counts (13 writes sv_filtered.tsv; it is empty when no Delly VCF was produced)
 sv = pd.read_csv(W/"08_sv/sv_filtered.tsv", sep="\t", dtype={"chrom": str})
 D["sv_counts"] = sv.svtype.value_counts().to_dict(); D["sv_total"] = len(sv)
-D["cnv"] = [
- {"locus": "GSTM1", "ratio": 0.02, "copies": 0, "evidence": "Delly + depth"}, {"locus": "LCE3B/LCE3C", "ratio": 0.0, "copies": 0, "evidence": "Delly + depth"},
- {"locus": "CYP2A6", "ratio": 0.01, "copies": 0, "evidence": "Delly + depth"}, {"locus": "LILRA3", "ratio": 0.0, "copies": 0, "evidence": "Delly + depth"},
- {"locus": "GSTT1", "ratio": 0.51, "copies": 1, "evidence": "depth"}, {"locus": "UGT2B17", "ratio": 0.55, "copies": 1, "evidence": "Delly + depth"},
- {"locus": "CFHR3-CFHR1", "ratio": 0.5, "copies": 1, "evidence": "Delly + depth"}, {"locus": "HBA1/HBA2", "ratio": 0.97, "copies": 2, "evidence": "depth"},
- {"locus": "RHD", "ratio": 1.02, "copies": 2, "evidence": "depth"}, {"locus": "SMN1", "ratio": 1.0, "copies": 2, "evidence": "SMNCopyNumberCaller"}, {"locus": "SMN2", "ratio": 1.0, "copies": 2, "evidence": "SMNCopyNumberCaller"}]
-smn = pd.read_csv(W/"08_sv/smn/target.tsv", sep="\t").iloc[0]; D["smn"] = {"SMN1": int(smn.SMN1_CN), "SMN2": int(smn.SMN2_CN), "carrier": bool(smn.isCarrier)}
+# SMN copies come from SMNCopyNumberCaller and STR lengths from ExpansionHunter; no step of
+# this repository runs either tool, so both sections degrade to "not assessed" when absent.
+_smn_f = W/"08_sv/smn/target.tsv"
+if _smn_f.exists():
+    smn = pd.read_csv(_smn_f, sep="\t").iloc[0]
+    D["smn"] = {"SMN1": int(smn.SMN1_CN), "SMN2": int(smn.SMN2_CN), "carrier": bool(smn.isCarrier)}
+else:
+    D["smn"] = {"SMN1": None, "SMN2": None, "carrier": None}
 # --- STR
-eh = pd.read_csv(W/"08_sv/eh/eh_summary.tsv", sep="\t")
-thr = dict(pd.read_csv(pathlib.Path(__file__).resolve().parents[1] / "panel" / "str_thresholds.tsv", sep="\t").values)
-eh = eh.drop_duplicates("locus", keep="first"); eh["thr"] = eh.locus.map(thr)
-D["str"] = [{"locus": r.locus, "unit": r.unit, "gt": str(r.genotype), "max": int(r.max_allele), "thr": int(r.thr) if pd.notna(r.thr) else None} for r in eh.itertuples()]
-# --- ROH
-roh = [l.split() for l in open(W/"09_misc/roh_1mb_nocen.bed")]
+_eh_f = W/"08_sv/eh/eh_summary.tsv"
+if _eh_f.exists():
+    eh = pd.read_csv(_eh_f, sep="\t")
+    thr = dict(pd.read_csv(pathlib.Path(__file__).resolve().parents[1] / "panel" / "str_thresholds.tsv", sep="\t").values)
+    eh = eh.drop_duplicates("locus", keep="first"); eh["thr"] = eh.locus.map(thr)
+    D["str"] = [{"locus": r.locus, "unit": r.unit, "gt": str(r.genotype), "max": int(r.max_allele), "thr": int(r.thr) if pd.notna(r.thr) else None} for r in eh.itertuples()]
+else:
+    D["str"] = []
+# --- ROH (bcftools roh output; no step of this repository produces it)
+_roh_f = W/"09_misc/roh_1mb_nocen.bed"
+roh = [l.split() for l in open(_roh_f)] if _roh_f.exists() else []
 D["roh"] = [{"chrom": r[0], "start": int(r[1]), "end": int(r[2]), "mb": round(int(r[3])/1e6, 2), "q": float(r[4])} for r in roh]
-D["roh_stats"] = {"n": len(roh), "total_mb": round(sum(int(r[3]) for r in roh)/1e6, 1), "max_mb": round(max(int(r[3]) for r in roh)/1e6, 2), "n_gt5": 0}
-D["blood"] = {"abo": "A (A102/A102)", "rhd": "D+"}
+D["roh_stats"] = {"n": len(roh), "total_mb": round(sum(int(r[3]) for r in roh)/1e6, 1), "max_mb": round(max(int(r[3]) for r in roh)/1e6, 2), "n_gt5": 0} if roh else {"n": 0, "total_mb": 0.0, "max_mb": 0.0, "n_gt5": 0}
 D["versions"] = {"yfull": "14.05.0", "phylotree": "17.2", "pharmcat": "3.4.0", "clinvar": "2026-09-05", "gnomad": "v2.1.1", "delly": "1.7.2", "eh": "5.0.0", "t1k": "1.0.10", "cyrius": "1.1.1", "bcftools": "1.22", "beagle": "5.4"}
 # ---- HLA disease associations, archaic gene families, behaviour scores, candidate genes
 import json as _j
