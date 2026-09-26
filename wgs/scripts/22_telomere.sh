@@ -16,8 +16,11 @@ samtools view -@ 16 -T "$REF" -F 0x100 -F 0x400 -F 0x200 "$CRAM" \
     if (m>=14) k14++}
    END{printf "total_reads\t%d\ntotal_bp\t%d\nmean_readlen\t%.1f\ntel_reads_k7\t%d\ntel_reads_k10\t%d\ntel_reads_k12\t%d\ntel_reads_k14\t%d\n", n, bp, bp/n, k7, k10, k12, k14}' > "$W/counts.tsv"
 cat "$W/counts.tsv"
-awk -v cov=28.88 -v ends=92 'BEGIN{FS="\t"} {v[$1]=$2} END{
-  rl=v["mean_readlen"];
+# depth for the length conversion is measured from this scan itself: total_bp / reference length
+# (sum of $REF.fai), so it tracks the sample's real depth instead of a fixed value.
+GS=$(awk '{s+=$2} END{print s+0}' "$REF.fai"); GS=${GS:-3100000000}
+awk -v gs="$GS" -v ends=92 'BEGIN{FS="\t"} {v[$1]=$2} END{
+  rl=v["mean_readlen"]; cov=v["total_bp"]/gs;
   split("tel_reads_k7 tel_reads_k10 tel_reads_k12 tel_reads_k14",ks," ");
   for (i=1;i<=4;i++) { k=ks[i]; tl=v[k]*rl/cov/ends;
     printf "%s\tmean_telomere_len_bp\t%.0f\ttelomeric_read_fraction\t%.4g\n", k, tl, v[k]/v["total_reads"] }
