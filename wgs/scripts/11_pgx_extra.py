@@ -5,8 +5,9 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import pathlib
 from wgsconfig import *  # noqa: F401,F403 -- P, W, REF, TOOLS, SAMPLE, THREADS ...
 
-import subprocess, pandas as pd
+import subprocess, pandas as pd, os
 P=str(P); V=f"{P}/wgs/00_input/{SAMPLE}.norm.vcf.gz"
+os.makedirs(f"{P}/wgs/16_panels", exist_ok=True)
 PV=KG_PFILE+".pvar"
 PANEL = pathlib.Path(__file__).resolve().parents[1] / "panel" / "pgx_extra.tsv"
 M = [(r.rsid, r.gene, r.allele, r.drug) for r in pd.read_csv(PANEL, sep="\t").fillna("").itertuples()]
