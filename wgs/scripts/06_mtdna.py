@@ -29,5 +29,10 @@ for l in q.splitlines():
     elif len(r) == 1 and len(a) > 1: muts.append("".join(f"{p}.{i+1}{b}" for i, b in enumerate(a[1:])))
     elif len(a) == 1 and len(r) > 1: muts.append(" ".join(f"{p+i+1}d" for i in range(len(r)-1)))
 with open(f"{W}/target_mt.hsd", "w") as f: f.write(f"SampleId\tRange\tHaplogroup\tPolymorphisms\n{SAMPLE}\t1-16569\t?\t" + "\t".join(muts) + "\n")
-subprocess.run([HAPLOGREP3, "classify", "--tree", "phylotree-rcrs@17.2", "--in", f"{W}/target_mt.hsd", "--out", f"{W}/haplogrep3.txt", "--extend-report"], check=True, capture_output=True)
+# haplogrep3 3.3.2 writes its report but then never exits: bound it with a timeout and
+_hg = subprocess.run(["timeout","180", HAPLOGREP3, "classify", "--tree", "phylotree-rcrs@17.2",
+                      "--in", f"{W}/target_mt.hsd", "--out", f"{W}/haplogrep3.txt",
+                      "--extend-report"], capture_output=True)  # accept exit 124 if output was written
+if _hg.returncode not in (0, 124):
+    print(_hg.stderr.decode(errors="replace")[-500:], file=sys.stderr)
 print(open(f"{W}/haplogrep3.txt").read()[:800])
