@@ -49,7 +49,9 @@ if [ "${WITH_SPRIME:-1}" = "1" ]; then
   python3 - "$REF_DIR/archaic" <<'PY'
 import json,sys,urllib.request,pathlib,subprocess
 d=pathlib.Path(sys.argv[1]); d.mkdir(parents=True,exist_ok=True)
-meta=json.load(urllib.request.urlopen("https://data.mendeley.com/public-api/datasets/y7hyt83vxr/files?folder_id=root&version=1"))
+_req=urllib.request.Request("https://data.mendeley.com/public-api/datasets/y7hyt83vxr/files?folder_id=root&version=1",
+        headers={"User-Agent":"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36"})
+meta=json.load(urllib.request.urlopen(_req))
 want={f"{p}_sprime_results.tar.gz" for p in ("CHB","CHS","JPT","CEU","GBR","CDX","KHV","BEB","GIH")}
 for f in meta:
     if f["filename"] in want and not (d/f["filename"]).exists():
