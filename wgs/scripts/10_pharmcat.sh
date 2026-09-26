@@ -53,12 +53,17 @@ echo "records to lift: $(bcftools view -H pgx37.chr.vcf.gz | wc -l) (calls $(bcf
 java -Xmx8g -jar $PICARD LiftoverVcf -I pgx37.chr.vcf.gz -O pgx38.vcf.gz -CHAIN $CHAIN -REJECT rejected.vcf.gz -R $REF38 --RECOVER_SWAPPED_REF_ALT true --WARN_ON_MISSING_CONTIG true > liftover.log 2>&1
 echo "lifted: $(bcftools view -H pgx38.vcf.gz | wc -l)  rejected: $(bcftools view -H rejected.vcf.gz | wc -l)  swapped: $(bcftools view -H -i 'INFO/SwappedAlleles=1' pgx38.vcf.gz | wc -l)"
 bcftools view -H rejected.vcf.gz | cut -f1-5,7 > rejected.tsv
-# outside call for CYP2D6 from Cyrius
+# outside call for CYP2D6 from Cyrius. No pipeline step runs Cyrius yet; when its output is
+# missing (or empty) PharmCAT must be started WITHOUT -po -- an empty "CYP2D6\t\n" file makes
+# the reporter die with BadOutsideCallException after the matcher has already written results.
 CYRIUS_T=$WGS/06_pgx/cyrius/target.tsv
-if [ -f "$CYRIUS_T" ]; then CYP2D6=$(awk 'NR==2{print $2}' "$CYRIUS_T"); else echo "[warn] Cyrius output missing, leaving the CYP2D6 outside call empty" >&2; CYP2D6=""; fi
-printf "CYP2D6\t%s\n" "$CYP2D6" > outside_calls.tsv
+PO_ARGS=()
+if [ -f "$CYRIUS_T" ] && [ -n "$(awk 'NR==2{print $2}' "$CYRIUS_T")" ]; then
+  awk 'NR==2{print "CYP2D6\t" $2}' "$CYRIUS_T" > outside_calls.tsv
+  PO_ARGS=(-po outside_calls.tsv)
+fi
 rm -rf prep out
 python $PC/preprocessor/pharmcat_vcf_preprocessor -vcf pgx38.vcf.gz -refFna $REF38 -refVcf $PC/pharmcat_positions_3.4.0.vcf.bgz -o prep -bf target > preprocess.log 2>&1 || { tail -20 preprocess.log; exit 1; }
-java -jar $PC/pharmcat-3.4.0-all.jar -vcf prep/target.preprocessed.vcf.bgz -po outside_calls.tsv -o out -reporterJson -matcherHtml > pharmcat.log 2>&1 || { tail -20 pharmcat.log; exit 1; }
+java -jar $PC/pharmcat-3.4.0-all.jar -vcf prep/target.preprocessed.vcf.bgz "${PO_ARGS[@]}" -o out -reporterJson -matcherHtml > pharmcat.log 2>&1 || { tail -20 pharmcat.log; exit 1; }
 echo "missing PGx positions after fill: $(grep -vc '^#' prep/target.missing_pgx_var.vcf || true)"
 echo PHARMCAT_DONE
