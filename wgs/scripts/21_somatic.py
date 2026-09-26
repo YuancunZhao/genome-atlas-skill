@@ -9,10 +9,13 @@ import subprocess, io, re, pandas as pd, numpy as np
 P=str(P); W=f"{P}/wgs/13_somatic"; pathlib.Path(W).mkdir(parents=True, exist_ok=True); CRAM=f"{P}/wgs/00_input/{SAMPLE}.cram"; REF=FASTA
 _annot=f"{P}/wgs/05_clinvar/{SAMPLE}.pass.annot.vcf.gz"
 if not pathlib.Path(_annot).exists(): _annot=f"{P}/wgs/05_clinvar/target.pass.annot.vcf.gz"  # step 05 writes target.*
-AUTO=28.88
-out=[]
+# autosomal and MT depth are measured from the step-01 mosdepth bed; fixed constants here would
+# misstate mtDNA copy number and every depth ratio for any sample whose coverage differs
+_auto,_mt=subprocess.run(f"zcat {P}/wgs/01_qc/depth.regions.bed.gz | awk '$1 ~ /^[0-9]+$/ && $1<23 {{s+=$4;n++}} $1==\"MT\" {{m+=$4;k++}} END{{print s/n, m/k}}'",
+                         shell=True,capture_output=True,text=True).stdout.split()
+AUTO=float(_auto); out=[]
 # 1. mtDNA copy number
-mt=4850.22; out.append(("mtDNA_copies_per_cell", round(2*mt/AUTO,1), "2 x MT depth / autosomal depth"))
+mt=float(_mt); out.append(("mtDNA_copies_per_cell", round(2*mt/AUTO,1), "2 x MT depth / autosomal depth"))
 # 2. mLOY: median 1-kb bin depth in male-specific single-copy Y (X-degenerate) vs autosomes; expected 0.5
 def bins(reg):
     t=subprocess.run(["tabix",f"{P}/wgs/01_qc/depth.regions.bed.gz",reg],capture_output=True,text=True).stdout
