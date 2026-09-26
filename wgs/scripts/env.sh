@@ -1,6 +1,7 @@
 # source this before any shell step: reads config.yaml through wgsconfig.py so shell and Python agree.
 # usage:  source scripts/env.sh
-_here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# BASH_SOURCE is bash-only; when sourced from zsh it is unset and $0 is the sourced file
+_here="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 eval "$(python3 - "$_here" <<'PY'
 import sys, pathlib, shlex
 sys.path.insert(0, sys.argv[1])
