@@ -30,8 +30,13 @@ D["kpi"] = {"depth_auto": round(dep["total"], 1), "depth_x": round(dep["X"], 1),
             "titv": float(tstv[4]), "het": int(psc[5]), "homalt": int(psc[4]), "all_records": sn(W/"01_qc/stats.norm.txt", "number of records"),
             "platform": "MGI T7 · Sentieon DNAscope · GRCh37"}
 # --- chip-is-subset evidence
-cs = pd.read_csv(W/"01_qc/chip_vs_wgs_summary.tsv", sep="\t", index_col=0)
-D["chip"] = {"compared": int(cs["concordant"].sum()), "discordant": 0, "nocall": int(cs["chip_nocall"].sum()), "nocall_nopass": 248, "uncallable": int(cs["uncallable"].sum()), "in_deletion": 63}
+_chip_f = W/"01_qc/chip_vs_wgs_summary.tsv"
+if _chip_f.exists():
+    cs = pd.read_csv(_chip_f, sep="\t", index_col=0)
+    D["chip"] = {"compared": int(cs["concordant"].sum()), "discordant": 0,
+                 "nocall": int(cs["chip_nocall"].sum()), "uncallable": int(cs["uncallable"].sum())}
+else:
+    D["chip"] = {"compared": 0, "discordant": 0, "nocall": 0, "uncallable": 0}
 # --- Y
 ypath = []
 for l in open(W/"03_haplo/y_haplogroup_yfull.txt"):
@@ -68,7 +73,8 @@ D["lof"] = {"all": len(lof), "rare": len(rare), "rare_hom": int((rare.zyg == "ho
 pc = pd.read_csv(W/"06_pgx/pharmcat/pharmcat_summary.tsv", sep="\t").fillna("")
 D["pgx_pharmcat"] = pc.to_dict("records")
 D["cyp2d6"] = open(W/"06_pgx/cyrius/target.tsv").read().split("\n")[1].split("\t")[1]
-hla = pd.read_csv(W/"06_pgx/t1k/dayu_genotype.tsv", sep="\t", header=None)
+_t1k = W/"06_pgx/t1k/dayu_genotype.tsv"
+hla = pd.read_csv(_t1k, sep="\t", header=None) if _t1k.exists() else pd.DataFrame()
 D["hla"] = {r[0]: [str(r[2]).replace("HLA-", ""), str(r[5]).replace("HLA-", "") if str(r[5]) != "." else "-", int(r[4]), int(r[7])] for r in hla.itertuples(index=False) if str(r[0]).startswith("HLA-") and r[1] > 0}
 # --- PRS
 pr = pd.read_csv(W/"07_prs/prs_wgs.tsv", sep="\t"); D["prs"] = pr.round(1).fillna(-1).to_dict("records")
