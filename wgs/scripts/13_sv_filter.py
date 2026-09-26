@@ -12,6 +12,7 @@ PROJ = str(P); W = f"{PROJ}/wgs/08_sv"; MEAN_DP = 28.88
 # nothing to filter, so write an empty table and let the pipeline continue instead of dying.
 import os as _os
 if not _os.path.exists(f"{W}/delly/target.sv.bcf"):
+    _os.makedirs(W, exist_ok=True)
     _cols = "chrom pos end svtype svlen precise pe sr mapq chr2 pos2 geno gq rc rcl rcr dr dv rr rv dp_ratio rd_ok genes".split()
     pd.DataFrame(columns=_cols).to_csv(f"{W}/sv_filtered.tsv", sep="\t", index=False)
     print("WARNING: 08_sv/delly/target.sv.bcf not found (no step runs Delly) -- empty sv_filtered.tsv written", file=sys.stderr)
