@@ -6,7 +6,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from wgsconfig import *  # noqa: F401,F403 -- P, W, REF, TOOLS, SAMPLE, THREADS ...
 
 import glob, io, subprocess, collections, pandas as pd, numpy as np
-P=str(P); W=f"{P}/wgs/15_archaic"; A=SPRIME_DIR
+P=str(P); W=f"{P}/wgs/15_archaic"; pathlib.Path(W).mkdir(parents=True, exist_ok=True); A=SPRIME_DIR
 sp=pd.concat([pd.read_csv(f,sep="\t",dtype={"CHROM":str}).assign(POP=f.split("/")[-1].split(".")[0]) for f in glob.glob(f"{A}/CH*.chr*.ND_match")],ignore_index=True)
 sp=sp[(sp.REF.str.len()==1)&(sp.ALT.str.len()==1)]
 sp["seg"]=sp.POP+":"+sp.CHROM+":"+sp.SEGMENT.astype(str)

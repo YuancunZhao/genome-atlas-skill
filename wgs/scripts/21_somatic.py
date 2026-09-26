@@ -6,7 +6,7 @@ import pathlib
 from wgsconfig import *  # noqa: F401,F403 -- P, W, REF, TOOLS, SAMPLE, THREADS ...
 
 import subprocess, io, re, pandas as pd, numpy as np
-P=str(P); W=f"{P}/wgs/13_somatic"; CRAM=f"{P}/wgs/00_input/{SAMPLE}.cram"; REF=FASTA
+P=str(P); W=f"{P}/wgs/13_somatic"; pathlib.Path(W).mkdir(parents=True, exist_ok=True); CRAM=f"{P}/wgs/00_input/{SAMPLE}.cram"; REF=FASTA
 AUTO=28.88
 out=[]
 # 1. mtDNA copy number

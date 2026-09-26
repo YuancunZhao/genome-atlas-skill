@@ -5,7 +5,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from wgsconfig import *  # noqa: F401,F403 -- P, W, REF, TOOLS, SAMPLE, THREADS ...
 
 import subprocess, collections, pysam, pandas as pd
-P=str(P); fa=pysam.FastaFile(FASTA)
+P=str(P); pathlib.Path(f"{P}/wgs/17_mutspec").mkdir(parents=True, exist_ok=True); fa=pysam.FastaFile(FASTA)
 comp={"A":"T","C":"G","G":"C","T":"A"}
 q=subprocess.run(["bcftools","query","-i",'TYPE="snp"',"-r",",".join(map(str,range(1,23))),"-f","%CHROM\t%POS\t%REF\t%ALT\t%INFO/EAS_AF\t%INFO/ALL_AF\n",f"{P}/wgs/05_clinvar/{SAMPLE}.pass.annot.vcf.gz"],capture_output=True,text=True).stdout
 cnt=collections.Counter(); cnt_priv=collections.Counter(); n=0
