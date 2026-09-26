@@ -22,7 +22,7 @@ def fetch(pid):
         url=f"https://ftp.ebi.ac.uk/pub/databases/spot/pgs/scores/{pid}/ScoringFiles/Harmonized/{pid}_hmPOS_GRCh37.txt.gz"
         print("downloading",pid,flush=True); urllib.request.urlretrieve(url,f)
     return f
-idx=pd.read_csv(FV/"kg_all.pvar",sep="\t",comment="#",header=None,names=["chrom","pos","id","ref","alt"],dtype={"chrom":str})
+idx=pd.read_csv(FV/"kg_all.pvar",sep="\t",comment="#",header=None,names=["chrom","pos","id","ref","alt"],dtype={"chrom":str},usecols=[0,1,2,3,4])
 fr=pd.read_csv(FV/"kg_all.afreq",sep="\t",usecols=["ID","ALT_FREQS"]); fr["maf"]=np.minimum(fr.ALT_FREQS,1-fr.ALT_FREQS)
 common=set(fr[fr.maf>=MAF].ID)
 dayu_ids=set(l.split("\t")[2] for l in open(ROOT/f"wgs/07_prs/{SAMPLE}_pos.pvar") if not l.startswith("#"))
