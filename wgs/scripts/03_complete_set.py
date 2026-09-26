@@ -60,4 +60,7 @@ out.close()
 # bgzf. A plain gzip.open() stream cannot be indexed, so re-pack and index it here.
 subprocess.run(["bgzip", "-f", f"{OUT}/{SAMPLE}.1kg_sites.vcf"], check=True)
 subprocess.run(["tabix", "-f", "-p", "vcf", f"{OUT}/{SAMPLE}.1kg_sites.vcf.gz"], check=True)
+# step 04 projects the target with plink2 --pfile; build that pfile from the VCF just written
+subprocess.run([PLINK2, "--vcf", f"{OUT}/{SAMPLE}.1kg_sites.vcf.gz", "--make-pgen",
+                "--double-id", "--threads", THREADS, "--out", f"{OUT}/{SAMPLE}.1kg"], check=True)
 pd.DataFrame(stats, columns=["chrom", "sites_1kg", "wgs_called", "homref_filled", "missing"]).to_csv(f"{OUT}/complete_set_stats.tsv", sep="\t", index=False)
