@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-""f"96-context germline SNV spectrum (PASS, autosomal), pyrimidine-centred, plus the same spectrum for 1000G EAS-common vs {NAME_EN}-private SNVs."""
+"""96-context germline SNV spectrum (PASS, autosomal), pyrimidine-centred, plus the same spectrum for 1000G EAS-common vs {NAME_EN}-private SNVs."""
 import sys, pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from wgsconfig import *  # noqa: F401,F403 -- P, W, REF, TOOLS, SAMPLE, THREADS ...
