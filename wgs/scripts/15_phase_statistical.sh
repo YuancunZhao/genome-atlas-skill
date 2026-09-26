@@ -4,7 +4,9 @@ set -euo pipefail
 source "$(dirname "$0")/env.sh"
 W=$WGS/10_phase; mkdir -p $W; cd $W
 IMP=$KG_VCF_DIR
-awk 'NR>1 && $1!="X" {m=($6<0.5?$6:1-$6); if(m>=0.01) print $1"\t"$2}' $WGS/02_complete/eas_all.afreq > common.sites.tsv
+# EAS MAF >= 0.01 sites straight from the panel INFO; the eas_all.afreq this used to read is
+# never produced by anything in the repository
+awk -F'\t' 'BEGIN{OFS="\t"} $1!~/^#/ && $1!="X" { e="."; n=split($8,kv,";"); for(i=1;i<=n;i++) if(kv[i]~/^EAS_AF=/) e=substr(kv[i],8); if(e!="."){ m=(e<0.5?e:1-e); if(m>=0.01) print $1,$2 } }' $REF_DIR/all_phase3.pvar > common.sites.tsv
 wc -l common.sites.tsv
 for c in $(seq 1 22); do
   awk -v c=$c '$1==c' common.sites.tsv > sites.$c.tsv
