@@ -7,7 +7,15 @@ from wgsconfig import *  # noqa: F401,F403 -- P, W, REF, TOOLS, SAMPLE, THREADS 
 
 import subprocess, gzip, io, collections, bisect, os
 import pandas as pd, numpy as np
-PROJ = str(P); W = f"{PROJ}/wgs/08_sv"; MEAN_DP = 28.88
+PROJ = str(P); W = f"{PROJ}/wgs/08_sv"
+# The autosomal mean depth is measured here from the step-01 mosdepth bed, the same way
+# 21_somatic.py does it; a fixed constant would misstate dp_ratio and invert the DEL/DUP
+# read-depth check for any sample whose coverage differs from the one it was measured on.
+_auto = subprocess.run(f"zcat {PROJ}/wgs/01_qc/depth.regions.bed.gz | awk '$1 ~ /^[0-9]+$/ && $1<23 {{s+=$4; n++}} END{{print (n ? s/n : \"\")}}'",
+                       shell=True, capture_output=True, text=True).stdout.strip()
+MEAN_DP = float(_auto) if _auto else None
+if MEAN_DP is None:
+    print("WARNING: autosomal mean depth unreadable from 01_qc/depth.regions.bed.gz -- DEL/DUP read-depth check will be reported as n/a", file=sys.stderr)
 # No step of this repository runs Delly; without an externally produced target.sv.bcf there is
 # nothing to filter, so write an empty table and let the pipeline continue instead of dying.
 import os as _os
@@ -28,6 +36,8 @@ sv = sv[sv.chrom.isin(main) & (sv.gq >= 20)]
 nonbnd = sv[(sv.svtype != "BND") & (sv["size"] >= 50) & (sv["size"] <= 5e6) & ((sv.precise == 1) | ((sv.pe >= 5) & (sv.mapq >= 40)))].copy()
 # read-depth validation for DEL/DUP >= 2kb via mosdepth 1kb bins
 def region_depth(c, s, e):
+    if MEAN_DP is None:
+        return np.nan
     out = subprocess.run(["tabix", f"{PROJ}/wgs/01_qc/depth.regions.bed.gz", f"{c}:{max(1,s)}-{e}"], capture_output=True, text=True).stdout
     v = [float(l.split("\t")[3]) for l in out.splitlines()]
     base = MEAN_DP * (0.5 if c in ("X", "Y") else 1.0)
