@@ -9,7 +9,9 @@ import numpy as np, pandas as pd
 PANEL = pathlib.Path(__file__).resolve().parents[1] / "panel" / "pgs_scores.tsv"
 FV = pathlib.Path(PRS_REF).parent; FV.mkdir(parents=True, exist_ok=True)
 idx = pd.read_csv(f"{PRS_REF}.pvar", sep="\t", comment="#", header=None,
-                  names=["chrom", "pos", "id", "ref", "alt"], dtype={"chrom": str})
+                  usecols=[0, 1, 2, 3, 4],
+                  names=["chrom", "pos", "id", "ref", "alt", "qual", "filter", "info"],
+                  dtype={"chrom": str, "pos": int})
 scores = pd.read_csv(PANEL, sep="\t", comment="#")
 meta = {}
 for r in scores.itertuples():
