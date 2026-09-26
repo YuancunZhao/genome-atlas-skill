@@ -104,7 +104,7 @@ _roh_f = W/"09_misc/roh_1mb_nocen.bed"
 roh = [l.split() for l in open(_roh_f)] if _roh_f.exists() else []
 D["roh"] = [{"chrom": r[0], "start": int(r[1]), "end": int(r[2]), "mb": round(int(r[3])/1e6, 2), "q": float(r[4])} for r in roh]
 D["roh_stats"] = {"n": len(roh), "total_mb": round(sum(int(r[3]) for r in roh)/1e6, 1), "max_mb": round(max(int(r[3]) for r in roh)/1e6, 2), "n_gt5": 0} if roh else {"n": 0, "total_mb": 0.0, "max_mb": 0.0, "n_gt5": 0}
-D["versions"] = {"yfull": "14.05.0", "phylotree": "17.2", "pharmcat": "3.4.0", "clinvar": "2026-09-05", "gnomad": "v2.1.1", "delly": "1.7.2", "eh": "5.0.0", "t1k": "1.0.10", "cyrius": "1.1.1", "bcftools": "1.22", "beagle": "5.4"}
+D["versions"] = {"yfull": "14.06.0", "phylotree": "17.2", "pharmcat": "3.4.0", "clinvar": "2026-09-05", "gnomad": "v2.1.1", "delly": "1.7.2", "eh": "5.0.0", "t1k": "1.0.10", "cyrius": "1.1.1", "bcftools": "1.22", "beagle": "5.4"}
 # ---- HLA disease associations, archaic gene families, behaviour scores, candidate genes
 import json as _j
 hd = W/"19_hla_disease/hla_disease.tsv"
@@ -121,6 +121,96 @@ bp = W/"20_behaviour/behaviour_prs.tsv"
 if bp.exists(): D["behaviour"] = pd.read_csv(bp, sep="\t").fillna("").to_dict("records")
 cg = W/"20_behaviour/candidate_genes.tsv"
 if cg.exists(): D["candidate"] = pd.read_csv(cg, sep="\t").fillna("").to_dict("records")
+
+# ---- figure data consumed by the report template's JavaScript ----
+# The template reads keys the assembly above never wrote (phase, la_*, ho_*, archaic*, spectrum,
+# somatic, chip_hotspots, telomere, kir, density, prs_rho), which left the matching figures blank.
+# Each key is filled straight from the step outputs and degrades to an empty shape when absent.
+def _read_tsv(p, **kw):
+    return pd.read_csv(p, sep="\t", **kw) if pathlib.Path(p).exists() else None
+# phase (step 14b)
+_ph = W/"10_phase/summary.txt"
+if _ph.exists():
+    D["phase"] = {k: (float(v) if "." in v else int(v)) for k, v in (l.split() for l in open(_ph).read().strip().split("\n"))}
+else:
+    D["phase"] = {"het": 0, "phased": 0, "blocks": 0, "n50_kb": 0.0, "max_mb": 0.0}
+# local ancestry (steps 16/16b/17/17b)
+_g = W/"12_localanc/global.tsv"
+if _g.exists():
+    D["la_global"] = {a: float(f) for a, f in (l.split() for l in open(_g).read().strip().split("\n"))}
+else:
+    D["la_global"] = {"European": 0.0, "SouthEA": 0.0, "SouthAsian": 0.0, "NorthEA": 0.0}
+_pc = _read_tsv(W/"12_localanc/per_chrom.tsv", dtype={"chrom": str})
+D["la_per_chrom"] = _pc[["chrom", "NorthEA", "SouthEA"]].to_dict("records") if _pc is not None and len(_pc) else []
+_sg = _read_tsv(W/"12_localanc/segments.tsv", dtype={"chrom": str})
+D["la_segments"] = _sg[["chrom", "start", "end", "anc", "mb"]].to_dict("records") if _sg is not None and len(_sg) else []
+_cb = _read_tsv(W/"12_localanc/calibration.tsv")
+D["la_calib"] = _cb.to_dict("records") if _cb is not None and len(_cb) else []
+# archaic introgression (step 18)
+_as = W/"15_archaic/summary.txt"
+if _as.exists():
+    D["archaic_summary"] = {k: (float(v) if "." in v else int(v)) for k, v in (l.split() for l in open(_as).read().strip().split("\n"))}
+else:
+    D["archaic_summary"] = {"segments_tested": 0, "carried": 0, "merged": 0, "span_mb": 0.0, "neanderthal_mb": 0.0, "denisovan_mb": 0.0, "homozygous": 0}
+_ac = _read_tsv(W/"15_archaic/segments_carried.bed", header=None, names=["chrom", "start", "end", "source", "hom", "mb"], dtype={"chrom": str})
+D["archaic"] = _ac.rename(columns={"source": "src"}).to_dict("records") if _ac is not None and len(_ac) else []
+# mutation spectrum (step 20)
+_sp = _read_tsv(W/"17_mutspec/spectrum96.tsv")
+D["spectrum"] = (_sp.rename(columns={"context": "ctx"})[["ctx", "n", "n_private", "frac", "frac_private"]].to_dict("records")
+                 if _sp is not None and len(_sp) else [])
+# somatic signals (step 21)
+_sm = _read_tsv(W/"13_somatic/summary.tsv")
+D["somatic"] = {r.metric: r.value for r in _sm.itertuples()} if _sm is not None and len(_sm) else {}
+_ch = _read_tsv(W/"13_somatic/chip_hotspots.tsv")
+D["chip_hotspots"] = {"median_depth": float(_ch.depth.median()) if _ch is not None and len(_ch) else 0.0,
+                      "alt_reads": int(_ch.alt_reads.sum()) if _ch is not None and len(_ch) else 0}
+# telomere (step 22)
+_tl = W/"14_telomere/counts.tsv"
+if _tl.exists():
+    _tv = {k: float(v) for k, v in (l.split() for l in open(_tl).read().strip().split("\n"))}
+    D["telomere"] = {"k7": int(_tv.get("tel_reads_k7", 0)), "k10": int(_tv.get("tel_reads_k10", 0)),
+                     "k12": int(_tv.get("tel_reads_k12", 0)), "k14": int(_tv.get("tel_reads_k14", 0)),
+                     "total_reads": int(_tv.get("total_reads", 0))}
+else:
+    D["telomere"] = {"k7": 0, "k10": 0, "k12": 0, "k14": 0, "total_reads": 0}
+# KIR (step 24; empty table when no T1K input was delivered)
+_kr = _read_tsv(W/"16_panels/kir.tsv")
+D["kir"] = _kr.to_dict("records") if _kr is not None and len(_kr) else []
+# PASS variants per 1 Mb bin, for the circos density ring
+try:
+    _dens = {}
+    _q = subprocess.run(["bcftools", "query", "-f", "%CHROM\t%POS\n", str(W/f"00_input/{SAMPLE}.pass.vcf.gz")],
+                         capture_output=True, text=True, check=True).stdout
+    for l in _q.splitlines():
+        c, p = l.split("\t"); _dens.setdefault(c, []).append(int(p))
+    D["density"] = []
+    for c, pos in _dens.items():
+        n = D["chrlen"].get(c, 0) // 1_000_000 + 1
+        counts = [0]*n
+        for p in pos: counts[min(p // 1_000_000, n-1)] += 1
+        D["density"].append({"chrom": c, "counts": counts})
+except Exception:
+    D["density"] = []
+# Human Origins PCA (step 09b)
+_pa = _read_tsv(W/"11_aadr/proj_annotated.tsv")
+if _pa is not None and len(_pa):
+    anc = _pa[_pa.kind == "ancient"]
+    mod = _pa[_pa.kind != "ancient"]
+    D["ho_ancient_pts"] = [{"label": r.label, "pc1": r.PC1_AVG, "pc2": r.PC2_AVG, "date": r.date} for r in anc.itertuples()]
+    D["ho_modern"] = [{"label": r.label, "pc1": r.PC1_AVG, "pc2": r.PC2_AVG} for r in mod.itertuples()]
+    _me = _pa[_pa.kind == "target"] if "target" in set(_pa.kind) else _pa.tail(1)
+    D["ho_me"] = [float(_me.iloc[0].PC1_AVG), float(_me.iloc[0].PC2_AVG)]
+    D["ho_prov"] = [{"label": r.label.split("_")[1] if r.label.startswith("Han_") else r.label,
+                      "pc1": r.PC1_AVG, "pc2": r.PC2_AVG, "date": r.date}
+                     for r in mod[mod.label.str.startswith("Han_")].itertuples()]
+else:
+    D["ho_ancient_pts"] = []; D["ho_modern"] = []; D["ho_me"] = [0.0, 0.0]; D["ho_prov"] = []
+_na = _read_tsv(W/"11_aadr/near_ancient.tsv")
+D["ho_near_ancient"] = _na.to_dict("records") if _na is not None and len(_na) else []
+# PRS site coverage, for the copy's transferability note
+_pr = D.get("prs") or []
+_cov = [r.get("coverage_pct") for r in _pr if isinstance(r.get("coverage_pct"), (int, float)) and r["coverage_pct"] >= 0]
+D["prs_rho"] = {"subset": f"{min(_cov):.0f}–{max(_cov):.0f}%" if _cov else "-", "imputed": "-"}
 D["name_zh"] = NAME_ZH; D["name_en"] = NAME_EN; D["sample"] = SAMPLE
 D["title_zh"] = NAME_ZH; D["title_en"] = NAME_EN
 json.dump(D, open(W/"report_data.json", "w"), ensure_ascii=False)
