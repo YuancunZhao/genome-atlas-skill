@@ -61,7 +61,7 @@ reveal('chromdepth',(s,c)=>{
     txt(s,{x:px+(r.chrom==='MT'?0:bw2)+5,y:y+3,'font-size':7.5,'font-weight':800,fill:c.muted},r.chrom==='MT'?fmt(r.n_pass)+(zh()?' 个':''):fmt(r.n_pass));
   });
   [0,10,20,30,40].forEach(v=>{const x=x0+W1*v/40,yb=top+rows.length*rh+8;el(s,'line',{x1:x,y1:yb,x2:x,y2:yb+4,stroke:c.faint,'stroke-width':.8});txt(s,{x,y:yb+13,'text-anchor':'middle','font-size':7,fill:c.faint},v+'×')});
-  foot(s,c,900,348,zh()?'X 约为常染色体一半、Y 更低：男性 · 线粒体 4,850× 超出刻度':'X about half of autosomes, Y lower: male · mitochondria 4,850× off scale');
+  foot(s,c,900,348,zh()?`X 约为常染色体一半、Y 更低：男性 · 线粒体 ${fmt((D.chrom.find(r=>r.chrom==='MT')||{}).depth||0)}× 超出刻度`:`X about half of autosomes, Y lower: male · mitochondria ${fmt((D.chrom.find(r=>r.chrom==='MT')||{}).depth||0)}× off scale`);
 });
 
 
@@ -101,7 +101,7 @@ reveal('mtstrip',(s,c)=>{
   const lines=zh()?['未命中的支系定义位点：'+D.mt.notfound.join('、'),'私有变异（'+D.mt.private.length+'）：'+D.mt.private.join(' '),'异质性：只有 m.16093T>C（90%，已知高变热点）；m.310/3107 为参考序列伪影']:
     ['Defining sites not found: '+D.mt.notfound.join(', '),'Private ('+D.mt.private.length+'): '+D.mt.private.join(' '),'Heteroplasmy: only m.16093T>C (90%, a known hypervariable site); m.310/3107 are reference artefacts'];
   lines.forEach((tx,i)=>txt(s,{x:x0,y:y+104+i*14,'font-size':7.8,'font-weight':500,fill:c.muted},tx));
-  foot(s,c,400,296,zh()?'实心 = 支系定义位点 · 空心 = 私有变异 · 三角 = 异质性位点 · 4,850× 深度':'filled = branch-defining · hollow = private · triangle = heteroplasmic · 4,850× depth');
+  foot(s,c,400,296,zh()?`实心 = 支系定义位点 · 空心 = 私有变异 · 三角 = 异质性位点 · ${fmt((D.chrom.find(r=>r.chrom==='MT')||{}).depth||0)}× 深度`:`filled = branch-defining · hollow = private · triangle = heteroplasmic · ${fmt((D.chrom.find(r=>r.chrom==='MT')||{}).depth||0)}× depth`);
 });
 
 /* ── 02 scatter ── */
@@ -230,6 +230,9 @@ F.archn=D.archaic_summary.merged; F.archpct=(D.archaic_summary.span_mb/2875*100)
 F.phhet=fmt(D.phase.het); F.phased=fmt(D.phase.phased); F.phpct=(D.phase.phased/D.phase.het*100).toFixed(1);
 F.n50=(D.phase.n50_kb/1000).toFixed(1); F.blocks=fmt(D.phase.blocks);
 F.mtcn=D.somatic.mtDNA_copies_per_cell; F.ydr=D.somatic.Y_depth_ratio; F.telk7=fmt(D.telomere.k7);
+F.teltot=fmt((D.telomere&&D.telomere.total_reads)||0); F.archhom=((D.archaic_summary||{}).homozygous)||0;
+F.phmax=(((D.phase||{}).max_mb)||0).toFixed(1); F.chipalt=fmt(((D.chip_hotspots||{}).alt_reads)||0);
+F.segmax=Math.max(0,...((D.la_segments||[]).filter(g=>g.anc==='SouthEA').map(g=>g.mb))).toFixed(1);
 F.snvn=fmt(D.spectrum.reduce((a,b)=>a+b.n,0));
 F.cpg=(D.spectrum.filter(x=>/\[C>T\]G/.test(x.ctx)).reduce((a,b)=>a+b.frac,0)*100).toFixed(1);
 
@@ -405,18 +408,18 @@ function deepRender(){
   statGrid('k_la',[[`${F.north}<small>%</small>`,zh()?`北方东亚成分，比北京汉平均高 ${F.sdchb} 个标准差`:`northern East Asian; ${F.sdchb} sd above the Beijing Han mean`,'northern east asian'],
                    [`${F.south}<small>%</small>`,zh()?`南方东亚成分（北京汉 ${100-F.chb}%、南方汉 ${100-F.chs}%）`:`southern (Beijing Han ${100-F.chb}%, southern Han ${100-F.chs}%)`,'southern east asian'],
                    [`${F.noise}<small>%</small>`,zh()?'欧洲 + 南亚，方法的噪声底':'European + South Asian, the noise floor','noise floor'],
-                   [`${D.la_segments.filter(g=>g.anc==='SouthEA').length}`,zh()?'≥0.5 Mb 的南方片段，最长 6.6 Mb':'southern segments ≥0.5 Mb, longest 6.6 Mb','segments']]);
+                   [`${D.la_segments.filter(g=>g.anc==='SouthEA').length}`,zh()?`≥0.5 Mb 的南方片段，最长 ${F.segmax} Mb`:`southern segments ≥0.5 Mb, longest ${F.segmax} Mb`,'segments']]);
   statGrid('k_arch',[[`${F.archmb}<small>Mb</small>`,zh()?`古老人类片段总长，占常染色体 ${F.archpct}%`:`archaic span, ${F.archpct}% of the autosomes`,'archaic span'],
-                     [`${F.archn}`,zh()?'片段数，其中 13 段为纯合':'segments, 13 of them homozygous','segments'],
+                     [`${F.archn}`,zh()?`片段数，其中 ${F.archhom} 段为纯合`:`segments, ${F.archhom} of them homozygous`,'segments'],
                      [`${F.neamb}<small>Mb</small>`,zh()?'尼安德特来源':'from Neanderthals','neanderthal'],
                      [`${F.denmb}<small>Mb</small>`,zh()?'丹尼索瓦来源':'from Denisovans','denisovan']]);
   statGrid('k_phase',[[`${F.phpct}<small>%</small>`,zh()?`杂合位点已定相（${F.phased} / ${F.phhet}）`:`heterozygous sites phased (${F.phased} of ${F.phhet})`,'phased'],
                       [`${F.n50}<small>Mb</small>`,zh()?`相位块 N50，共 ${F.blocks} 个块`:`phase block N50, ${F.blocks} blocks`,'block n50'],
-                      [`2`,zh()?'因此确定的顺反关系：UGT1A1 与 FUT3':'cis/trans questions settled: UGT1A1 and FUT3','cis / trans']]);
+                      [`${F.phmax}<small>Mb</small>`,zh()?'最大相位块':'largest phase block','max block']]);
   statGrid('k_som',[[`${F.mtcn}`,zh()?'线粒体拷贝/细胞（正常 100–500）':'mtDNA copies per cell (100–500 normal)','mtdna copy number'],
                     [`${F.ydr}`,zh()?'Y 染色体深度比（<0.45 才提示镶嵌性丢失）':'Y depth ratio (mosaic loss below 0.45)','y depth ratio'],
-                    [`0`,zh()?`19 个克隆性造血热点的支持读段，中位深度 ${D.chip_hotspots.median_depth}×`:`reads at 19 clonal-haematopoiesis hotspots, median depth ${D.chip_hotspots.median_depth}×`,'clonal haematopoiesis'],
-                    [`${F.telk7}`,zh()?'端粒重复读段（6.52 亿条中），不足以估计端粒长度':'telomeric reads of 652 million, too few for a length estimate','telomeric reads']]);
+                    [`${F.chipalt}`,zh()?`19 个克隆性造血热点的支持读段，中位深度 ${((D.chip_hotspots||{}).median_depth)||0}×`:`reads at 19 clonal-haematopoiesis hotspots, median depth ${((D.chip_hotspots||{}).median_depth)||0}×`,'clonal haematopoiesis'],
+                    [`${F.telk7}`,zh()?`端粒重复读段（共 ${F.teltot} 条读段中），不足以估计端粒长度`:`telomeric reads of ${F.teltot} total, too few for a length estimate`,'telomeric reads']]);
   const tb=document.getElementById('tb_anc');
   if(tb) tb.innerHTML=D.ho_near_ancient.slice(0,10).map(r=>{const nm=zh()?(ANC_ZH[r.label]||r.label):r.label.replace(/_/g,' ');
     return `<tr><td class="gene">${nm}</td><td class="num">${r.n}</td><td class="num">${fmt(Math.round(r.date))}</td><td class="num">${r.d.toFixed(4)}</td></tr>`}).join('');
