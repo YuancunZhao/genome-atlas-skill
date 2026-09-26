@@ -10,7 +10,7 @@ PC=$PHARMCAT_DIR
 bcftools query -f '%CHROM\t%POS\t%ID\t%REF\t%ALT\n' $PC/pharmcat_positions_3.4.0.vcf.bgz > pos38.tsv
 for c in $(seq 1 22) X Y; do echo -e "$c\tchr$c"; done > rename.txt
 # the target's PASS calls within +-5kb of PharmCAT positions (b37), chr-renamed
-python - <<'PY'
+python - <<PY
 import pysam, subprocess, collections, bisect
 from pyliftover import LiftOver
 P="$PROJ"; lo=LiftOver(f"{P}/data/ref/chain/hg38ToHg19.over.chain.gz"); fa=pysam.FastaFile(f"{P}/data/ref/b37/human_g1k_v37.fasta")
