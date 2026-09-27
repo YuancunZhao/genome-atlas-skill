@@ -42,10 +42,33 @@ else:
     D["chip"] = {"compared": 0, "discordant": 0, "nocall": 0, "uncallable": 0}
 # --- Y
 ypath = []
-for l in open(W/"03_haplo/y_haplogroup_yfull.txt"):
-    m = re.match(r"\s+(\S+)\s+der=\s*(\d+) anc=\s*(\d+) n/a=\s*(\d+)\s+formed=(\d+) tmrca=(\d+)", l)
-    if m: ypath.append({"snp": m.group(1), "der": int(m.group(2)), "anc": int(m.group(3)), "na": int(m.group(4)), "formed": int(m.group(5)), "tmrca": int(m.group(6))})
-D["ypath"] = ypath; D["y_terminal"] = ypath[-1]["snp"]
+# Y result comes from 05's structured file (AN4). The regex-parse of the text left an empty path
+# possible, and `ypath[-1]` then raised IndexError; it also could not express a conservative fallback.
+_yr = None
+_yf = W/"03_haplo/y_result.json"
+if _yf.exists():
+    try:
+        _yr = json.loads(_yf.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        _yr = None
+if _yr is not None:
+    _pth = _yr.get("supported_path") or []
+    D["ypath"] = [{"snp": p.get("node"), "der": p.get("der"), "anc": p.get("anc"), "na": p.get("na"),
+                   "formed": p.get("formed"), "tmrca": p.get("tmrca")} for p in _pth]
+    D["y_terminal"] = _yr.get("reported_hg") or ""      # 空路径时是空串，不是崩溃
+    D["y_conservative"] = _yr.get("conservative_hg")
+    D["y_conservative_source"] = _yr.get("conservative_source")
+    D["y_uncertain"] = [u.get("node") for u in (_yr.get("uncertain_nodes") or [])]
+    D["y_state"] = _yr.get("state")
+    D["lineage_history"] = (_yr.get("history") or {})
+    ypath = D["ypath"]
+else:
+    for l in open(W/"03_haplo/y_haplogroup_yfull.txt"):
+        m = re.match(r"\s+(\S+)\s+der=\s*(\d+) anc=\s*(\d+) n/a=\s*(\d+)\s+formed=(\d+) tmrca=(\d+)", l)
+        if m: ypath.append({"snp": m.group(1), "der": int(m.group(2)), "anc": int(m.group(3)), "na": int(m.group(4)), "formed": int(m.group(5)), "tmrca": int(m.group(6))})
+    D["ypath"] = ypath
+    D["y_terminal"] = ypath[-1]["snp"] if ypath else ""   # 旧文本回退也做空路径保护
+    D["y_conservative"] = None; D["y_uncertain"] = []; D["y_state"] = "ok" if ypath else "unavailable"
 # Keep `n_anc` and `state` too: a branch with der=0 is "ancestral (genuinely negative)" when anc>0,
 # but "no hg19-mapped site / low coverage" when both are zero, and the figure must not conflate them.
 ysn = pd.read_csv(W/"03_haplo/y_terminal_snps.tsv", sep="\t"); D["y_snps"] = ysn[["branch", "snp", "depth", "n_der", "n_anc", "state"]].to_dict("records")
@@ -56,6 +79,15 @@ hg = pd.read_csv(W/"03_haplo/haplogrep3.txt", sep="\t", keep_default_na=False)
 row = hg.iloc[0]; found = str(row["Found_Polys"]).split(); rem = [x.split(" ")[0] for x in str(row["Remaining_Polys"]).split(") ")]
 rem = re.findall(r"(\d+(?:\.\d+)?[ACGTd])", str(row["Remaining_Polys"]))
 D["mt"] = {"hg": row["Haplogroup"], "quality": float(row["Quality"]), "found": found, "private": rem, "notfound": str(row["Not_Found_Polys"]).split()}
+_mf = W/"03_haplo/mt_result.json"
+if _mf.exists():   # AN4：判定与状态以结构化结果为准，文本只提供位点细节
+    try:
+        _mr = json.loads(_mf.read_text(encoding="utf-8"))
+        D["mt"]["state"] = _mr.get("state"); D["mt"]["call_quality"] = _mr.get("call_quality")
+        D["mt"]["hg"] = _mr.get("reported_hg") or D["mt"]["hg"]
+        D["mt"]["conservative_hg"] = _mr.get("conservative_hg")
+    except (json.JSONDecodeError, OSError):
+        pass
 het = pd.read_csv(W/"03_haplo/mt_heteroplasmy.tsv", sep="\t"); D["mt_het"] = het.to_dict("records")
 # --- ancestry
 ps = pd.read_csv(P/"data/ref/all_phase3.psam", sep="\t").rename(columns={"#IID": "IID"})

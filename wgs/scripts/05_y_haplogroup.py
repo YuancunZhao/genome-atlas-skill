@@ -143,3 +143,45 @@ for bid, *_ in path[-6:]:
         s, dp, c = state(pos, a, d); rows.append((bid, name, pos, a, d, s, dp, c.get(a, 0), c.get(d, 0)))
 pd.DataFrame(rows, columns=["branch", "snp", "pos_hg19", "anc", "der", "state", "depth", "n_anc", "n_der"]).to_csv(f"{W}/y_terminal_snps.tsv", sep="\t", index=False)
 open(f"{W}/y_haplogroup_yfull.txt", "w").write("\n".join(lines) + "\n"); print("\n".join(lines))
+
+# --- structured result (7.3 Lineage). The text above stays as the audit trail; step 30 reads this
+# file instead of regex-matching the text, which is how an empty path became an IndexError("'SAMPLE'
+# is not in list") and a 1-5 site branch looked like a confirmed terminal.
+import json as _json
+import lineage_history as _lh
+TREE_VERSION = open(f"{P}/data/ref/ytree/current_version.txt").read().strip()
+# The conservative call is a rule, not a per-sample exception: walk the path from the end and fall back
+# to the deepest node that still has solid support. Nodes that rest on a handful of sites are recorded
+# as uncertain and never treated as a proven terminal on their own.
+SOLID = 5
+_solid = [p for p in path if p[1] >= SOLID]
+# 复核结论优先（§7：conservative 来自证据或带理由的复核记录）；没有复核记录时才退回通用规则，
+# 并把来源写清楚，免得读者以为两种来源是同一回事。
+_HIST = _lh.load_history(_json.loads((pathlib.Path(__file__).resolve().parents[1] / "panel" /
+                                      "lineage_history.json").read_text(encoding="utf-8")))
+_CONS, _CONS_WHY = _lh.reviewed_call(_HIST, "y", path[-1][0] if path else None)
+if _CONS:
+    _CONS_SRC = "reviewed:" + str(((_HIST.get("reviewed_calls") or {}).get(
+        "y:" + str(path[-1][0]), {}) or {}).get("tree_version") or _HIST.get("tree_source") or "manual")
+else:
+    _CONS, _CONS_SRC = (_solid[-1][0] if _solid else None), "rule:min_der>=%d" % SOLID
+    _CONS_WHY = ""
+if not path:
+    _res = _lh.unavailable_lineage("y", "no_supported_path",
+                                   "the tree walk found no supported branch (no usable Y pileup or no derived sites)")
+else:
+    _res = {"kind": "y", "state": "ok", "reason_code": "",
+            "reported_hg": path[-1][0],
+            "conservative_hg": _CONS, "conservative_source": _CONS_SRC, "conservative_reason": _CONS_WHY,
+            "tree_source": "YFull", "tree_version": TREE_VERSION,
+            "call_quality": "automatic",
+            "supported_path": [{"node": b, "der": d, "anc": a, "na": o, "formed": f, "tmrca": t}
+                               for b, d, a, o, f, t in path],
+            # 只标末端四级：主干上支持位点少的节点（HIJK/K2 等）是因为那些 SNP 不属于本样本的
+            # 谱系或未覆盖，不是"分辨率不确定"；HANDOFF 记录的分辨率极限正是末端四级。
+            "uncertain_nodes": [{"node": b, "reason": f"only {d} supporting site(s); below the {SOLID}-site floor"}
+                                for b, d, a, o, f, t in path[-4:] if d < SOLID],
+            "conflicts": [], "route_review": "automatic"}
+_json.dump(_res, open(f"{W}/y_result.json", "w"), ensure_ascii=False, indent=1)
+print(f"wrote {W}/y_result.json: reported={_res.get('reported_hg')} conservative={_res.get('conservative_hg')} "
+      f"uncertain={len(_res.get('uncertain_nodes') or [])} state={_res['state']}")

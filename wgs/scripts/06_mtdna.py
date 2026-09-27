@@ -37,4 +37,36 @@ _hg = subprocess.run(["timeout","180", HAPLOGREP3, "classify", "--tree", "phylot
                       "--extend-report"], capture_output=True)  # accept exit 124 if output was written
 if _hg.returncode not in (0, 124):
     print(_hg.stderr.decode(errors="replace")[-500:], file=sys.stderr)
-print(open(f"{W}/haplogrep3.txt").read()[:800])
+print(open(f"{W}/haplogrep3.txt").read()[:800] if os.path.exists(f"{W}/haplogrep3.txt") else "(no haplogrep3 output)")
+
+# --- structured result (7.3 Lineage). Same reasoning as 05: the report reads this file, and a call made
+# from an empty mutation list is unavailable rather than a low-quality "finding".
+import json as _json
+import lineage_history as _lh
+_txt = f"{W}/haplogrep3.txt"
+if not os.path.exists(_txt):
+    _res = _lh.unavailable_lineage("mt", "no_classification", "haplogrep3 produced no report")
+else:
+    _hg = pd.read_csv(_txt, sep="\t", keep_default_na=False)
+    _row = _hg.iloc[0]
+    _hg_name = str(_row.get("Haplogroup") or "").strip()
+    try:
+        _q = float(_row.get("Quality"))
+    except (TypeError, ValueError):
+        _q = None
+    _found = str(_row.get("Found_Polys") or "").split()
+    if not _hg_name or not muts:
+        _res = _lh.unavailable_lineage("mt", "insufficient_evidence",
+                                       f"{len(muts)} homoplasmic variant(s) and haplogroup={_hg_name!r}")
+    else:
+        _res = {"kind": "mt", "state": "ok", "reason_code": "", "reported_hg": _hg_name,
+                "conservative_hg": _hg_name,
+                "tree_source": "PhyloTree", "tree_version": "rcrs@17.2",
+                "call_quality": ("ok" if (_q is not None and _q >= 0.7) else "low"),
+                "supported_path": [{"node": _hg_name, "n_defining_sites": len(_found)}],
+                "uncertain_nodes": ([] if (_q is None or _q >= 0.7)
+                                    else [{"node": _hg_name, "reason": f"quality {_q}; treat as provisional"}]),
+                "conflicts": [], "route_review": "automatic"}
+_json.dump(_res, open(f"{W}/mt_result.json", "w"), ensure_ascii=False, indent=1)
+print(f"wrote {W}/mt_result.json: hg={_res.get('reported_hg')} quality={_res.get('call_quality')} "
+      f"state={_res['state']} ({len(muts)} homoplasmic variants)")

@@ -38,6 +38,10 @@ else
   skipped 09-aadr-pca aadr_not_configured 09
   skipped 09b-aadr-summary aadr_not_configured 09b
 fi
+# Lineage history (AN4): consumes 05/06 results and the normalised metadata; runs before 30 so the
+# report reads one file instead of re-deriving the paternal/maternal story from text.
+step 09c lineage history and evidence;                        python3 $S/lineage_history.py --history panel/lineage_history.json --yard $WGS/03_haplo --out $WGS/03_haplo/lineage_history.json --sample "$SAMPLE"
+
 step 10 PharmCAT star alleles, CYP2D6, HLA;                    bash  $S/10_pharmcat.sh
 step 11 extended pharmacogenomic markers;                      python3 $S/11_pgx_extra.py
 step 12 polygenic scores;                                      python3 $S/12_prs.py

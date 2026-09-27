@@ -1,0 +1,22 @@
+{
+ "schema_version": 1,
+ "tree_source": "YFull (Y) / PhyloTree rCRS (mt)",
+ "tree_version": "YFull 12.03 for the AADR-derived labels; PhyloTree rCRS 17.2 for haplogrep3",
+ "note": "Versioned local evidence for the paternal/maternal history views. routes stays empty until a route is checked against a source and given waypoints: with no route the view must say it is a distribution, not a reconstructed migration. parents and aliases are filled only from a tree file of the stated version; without edges match_lineage returns unresolved rather than guessing from label prefixes.",
+ "sources": [
+  {"id": "yfull", "url": "https://www.yfull.com/", "what": "Y tree used by 05 and by the AADR Y labels (12.03)"},
+  {"id": "haplogrep3", "url": "https://github.com/gen-pop/haplogrep3", "what": "mt classification tree (phylotree-rcrs@17.2)"}
+ ],
+ "reviewed_calls": {
+  "y:N-CTS4714": {
+   "conservative_hg": "N-M1845",
+   "reason": "N-CTS4714 rests on 1-5 supporting sites per level below N-M1845 (N-M1928 has no independent site, N-Y125475 is a structural branch), so the branch below N-M1845 is at the resolution limit of short reads. Conservative fallback recorded by hand; it applies to this branch, not to the classifier.",
+   "reviewed_by": "manual",
+   "tree_source": "YFull",
+   "tree_version": "12.03"
+  }
+ },
+ "parents": {},
+ "aliases": {},
+ "routes": []
+}
