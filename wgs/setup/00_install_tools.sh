@@ -51,7 +51,17 @@ if [ "${WITH_CROSSCHECK:-1}" = "1" ]; then
     "$TOOLS/env/bin/pip" install -q "git+https://github.com/genid/Yleaf.git" \
       || echo "  note: Yleaf not installed (no network?); rerun with WITH_CROSSCHECK=1 when reachable"
   fi
-  [ -x "$TOOLS/env/bin/Yleaf" ] && echo "  Yleaf (cross-check only) -> $TOOLS/env/bin/Yleaf"
+  if [ -x "$TOOLS/env/bin/Yleaf" ]; then
+    echo "  Yleaf (cross-check only) -> $TOOLS/env/bin/Yleaf"
+    # Yleaf ships its position tables but downloads a ~3 GB reference genome on first use. This project
+    # already has hg19 -- the same FASTA every other step was verified against -- so point Yleaf at it:
+    # no second copy, no download, no chance of the check running on a different reference.
+    YCFG=$(ls "$TOOLS"/env/lib/python*/site-packages/yleaf/config.txt 2>/dev/null | head -1)
+    if [ -n "$YCFG" ] && ! grep -q "^full hg19 genome fasta location = /" "$YCFG"; then
+      sed -i "s|^full hg19 genome fasta location = .*|full hg19 genome fasta location = $TOOLS/../data/ref/b37/human_g1k_v37.fasta|" "$YCFG"
+      echo "  Yleaf: hg19 reference pointed at the pipeline's own FASTA (avoids the 3 GB download)"
+    fi
+  fi
 fi
 
 echo "tools installed under $TOOLS"
