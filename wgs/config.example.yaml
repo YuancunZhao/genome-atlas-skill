@@ -46,6 +46,12 @@ ancestry_min_projection_snps: 10000     # working gate, not a validated accuracy
 ancestry_min_group_n: 2                 # groups smaller than this stay out of default rankings
 
 # --- local-ancestry holdout calibration (§7.3). Empty pops = use the source panels above.
+# Why these four chromosomes: they span the size range of the autosomes -- chr1 (249 Mb), chr2 (243 Mb),
+# chr6 (171 Mb, carries the MHC), chr22 (51 Mb) -- together 24.8% of the autosome length. Marker counts
+# and length-weighted fractions disagree most on the short chromosomes, so a set with this spread makes
+# the two conventions comparable at a fraction of the cost of all 22 (each one reruns FLARE). This is a
+# working gate that can be changed, not a claim that passing it validates accuracy; if a run covers only
+# some of these chromosomes it is recorded as partial, and calibration.tsv then mixes holdout generations.
 local_ancestry_calibration_pops: []
 local_ancestry_calibration_chroms: [1, 2, 6, 22]
 local_ancestry_calibration_n: 20
