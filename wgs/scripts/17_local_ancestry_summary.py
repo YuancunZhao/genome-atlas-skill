@@ -7,12 +7,18 @@ from wgsconfig import *  # noqa: F401,F403 -- P, W, REF, TOOLS, SAMPLE, THREADS 
 import glob, gzip, io, os, subprocess, pandas as pd, numpy as np
 P=str(P); W=f"{P}/wgs/12_localanc"
 ANC=["European","SouthEA","SouthAsian","NorthEA"]
-segs=[]; tot=np.zeros(len(ANC)); n_mark=0
+segs=[]; tot=np.zeros(len(ANC)); n_mark=0; missing=[]
 for f in sorted(glob.glob(f"{W}/la.*.anc.vcf.gz"),key=lambda x:int(x.split("la.")[1].split(".")[0])):
     c=f.split("la.")[1].split(".")[0]
     q=subprocess.run(["bcftools","query","-f","%POS\t[%AN1\t%AN2]\n",f],capture_output=True,text=True).stdout
     d=pd.read_csv(io.StringIO(q),sep="\t",header=None,names=["pos","a1","a2"])
-    if not len(d): continue
+    if not len(d):
+        # An empty per-chromosome VCF means FLARE never finished for that chromosome -- it creates the
+        # output up front, so an interrupted run leaves a 0-byte file. This used to be skipped in
+        # silence: chr4 was missing from the figure while per_chrom.tsv still carried its southern
+        # share, and nothing on screen compared the two. Warn loudly and name the chromosome.
+        print(f"WARNING: chr{c} has no ancestry calls ({f} is empty); skipping -- rerun step 16 for it", file=sys.stderr)
+        missing.append(c); continue
     n_mark+=len(d)
     for col in ("a1","a2"):
         v=d[col].values
@@ -25,6 +31,10 @@ for f in sorted(glob.glob(f"{W}/la.*.anc.vcf.gz"),key=lambda x:int(x.split("la."
 sg=pd.DataFrame(segs,columns=["chrom","hap","start","end","anc","n_markers"])
 sg["mb"]=(sg.end-sg.start)/1e6
 sg.to_csv(f"{W}/segments.tsv",sep="\t",index=False)
+if missing:
+    print(f"\nWARNING: {len(missing)} chromosome(s) contributed no segments at all: {', '.join(missing)}."
+          f" Their proportions are absent, not zero -- do not read the figure as complete coverage.",
+          file=sys.stderr)
 frac=tot/tot.sum()
 print("\ngenome-wide ancestry fractions (both haplotypes):")
 for a,f_ in zip(ANC,frac): print(f"  {a:12s} {f_*100:6.2f}%")
