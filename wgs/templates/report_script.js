@@ -531,51 +531,96 @@ function drawGeoMap(svg, locations, selectedId, onSelect, opts) {
   return { placed: placed.length, unplaced: unplaced };
 }
 
-/* ── AN6 地理分布：把同一份合格记录按采样/发现地点画在世界底图上 ─────────────────
-   位置是**参考样本的来源地**，不是把目标样本投成某个坐标（§7）。点只画有坐标的记录；精度只到
-   地区级的用方框，遗址级用圆点，两者不能看起来一样。距离用透明度而不是大小：否则样本量大的
-   群体看起来就像"祖源份额更大"。前五名加深并标注，其余淡显。 */
+/* ── AN6 地理分布：把合格记录按采样/发现地点画在世界底图上，并可按年代范围查看 ─────────
+   位置是**参考样本的来源地**，不是把目标样本投成某个坐标（§7）。筛选只是换一个查看已算好的
+   结果：不重建 PCA，也不在前端重算任何排名。时间轴左古右今，同时给出 BP 与公元（BP 基准 1950）。*/
 reveal('geomap',(s,c)=>{
-  const A=(D.ancestry&&D.ancestry.analyses)||[], Z=zh();
-  const a=A.find(x=>x.dataset==='AADR')||A[0]||{};
+  const A=(D.ancestry&&D.ancestry.analyses)||[], Z=zh(), a=A.find(x=>x.dataset==='AADR')||A[0]||{};
   const all=(a.records||[]);
   const groups=(Array.isArray(a.groups)?a.groups:((a.groups||{}).ancient||[]));
   const ranked=groups.filter(g=>g.rank&&!g.small_group).sort((x,y)=>x.rank-y.rank);
   const top5=ranked.slice(0,5).map(g=>String(g.label));
-  const placed=all.filter(r=>geoValid(r.latitude,r.longitude));
-  const unplaced=all.length-placed.length;
-  const VB={w:900,h:430}, pad={l:26,t:26};
-  const sc=Math.min((VB.w-2*pad.l)/360,(VB.h-2*pad.t)/180);
-  const ox=pad.l+((VB.w-2*pad.l)-360*sc)/2, oy=pad.t+((VB.h-2*pad.t)-180*sc)/2;
+  const VB={w:900,h:470}, pad={l:26,t:26}, mapH=300;
+  const sc=Math.min((VB.w-2*pad.l)/360,(mapH-2*pad.t)/180);
+  const ox=pad.l+((VB.w-2*pad.l)-360*sc)/2, oy=pad.t+((mapH-2*pad.t)-180*sc)/2;
   const P=r=>{const q=geoXY(r.latitude,r.longitude);return {x:ox+q.x*sc, y:oy+q.y*sc};};
-  el(s,'use',{href:'#world_land',x:ox,y:oy,width:360*sc,height:180*sc,fill:c.grid,'fill-opacity':.55,stroke:'none'});
-  const dists=placed.map(r=>Number(r.distance_to_target)).filter(Number.isFinite);
-  const dmax=dists.length?Math.max(...dists):0;
-  placed.forEach(r=>{
-    const p=P(r), lab=String(r.source_population_id||r.label||'');
-    const isTop=top5.includes(lab), site=(r.location_precision||'site')==='site';
-    const t=dmax>0&&Number.isFinite(Number(r.distance_to_target))?Math.min(1,Number(r.distance_to_target)/dmax):1;
-    const op=isTop?1:(0.18+0.5*(1-t));
-    const n=site?el(s,'circle',{cx:p.x,cy:p.y,r:isTop?4:2.1,fill:isTop?c.hero:c.data,'fill-opacity':op,stroke:c.bg,'stroke-width':isTop?.8:.4,class:'pop'})
-                :el(s,'rect',{x:p.x-(isTop?3.4:2),y:p.y-(isTop?3.4:2),width:isTop?6.8:4,height:isTop?6.8:4,rx:1,fill:isTop?c.hero:c.data,'fill-opacity':op,stroke:c.bg,'stroke-width':.4,class:'pop'});
-    tip(n,`${lab||r.record_id} · ${r.locality||''} ${site?(Z?'遗址级':'site'):(Z?'地区级':'region')}`+
-          (Number.isFinite(Number(r.distance_to_target))?` · d=${Number(r.distance_to_target).toFixed(4)}`:''));
-  });
-  // 前五名标注（放在点的右上方，避免互相压字）
-  ranked.slice(0,5).forEach((g,i)=>{
-    const hit=placed.find(r=>String(r.source_population_id)===String(g.label));
-    if(!hit) return;
-    const p=P(hit);
-    txt(s,{x:p.x+6,y:p.y-3-i*9,'font-size':8,'font-weight':700,fill:c.ink,stroke:c.bg,'stroke-width':2.2,'paint-order':'stroke'},
-        `${g.rank}. ${ANC_ZH[g.label]||g.label} · n=${g.n}`);
-  });
-  txt(s,{x:pad.l,y:16,'font-size':8,'font-weight':600,fill:c.faint,'letter-spacing':'.06em'},
-      Z?'参考样本的来源地（不是目标样本的坐标）':'WHERE THE REFERENCE SAMPLES COME FROM (NOT THE TARGET)');
-  const note=document.getElementById('geomap_note');
-  if(note) note.textContent=(Z
-    ? `已定位 ${placed.length} 条 · 未定位 ${unplaced} 条（缺经纬度，只在列表中出现，不落点）· 深色 = 距离最近的前五名 · 圆点 = 遗址级坐标，方框 = 地区级坐标 · 底图 Natural Earth 1:110m（public domain）`
-    : `${placed.length} placed · ${unplaced} unplaced (no coordinates: listed, not plotted) · emphasised = five closest · circles = site-level, squares = region-level · base map Natural Earth 1:110m (public domain)`);
-  foot(s,c,900,VB.h-6,Z?'离线底图，无外部请求 · 部分记录只有省级坐标，不显示为精确遗址':'offline base map, no external requests · some records are province-level only and are not shown as precise sites');
+  // 年代范围（BP）。0 = 现在，越往左越古老；1950 是 BP 基准。
+  const RANGES=[{l:0,h:1000000,zh:'全部',en:'all'},
+                {l:0,h:1500,zh:'1500 BP 以内',en:'< 1500 BP'},
+                {l:1500,h:5000,zh:'1500–5000 BP',en:'1500–5000 BP'},
+                {l:5000,h:1000000,zh:'5000 BP 以上',en:'> 5000 BP'}];
+  let cur=0;
+  const bandY=mapH+40;
+  const draw=()=>{
+    clearEl(s);
+    const R=RANGES[cur];
+    const inRange=[], outRange=[], noDate=[];
+    all.forEach(r=>{
+      const hit=ageInRange(r,R.l,R.h);
+      if(hit===null) noDate.push(r); else if(hit) inRange.push(r); else outRange.push(r);
+    });
+    const unplaced=inRange.filter(r=>!geoValid(r.latitude,r.longitude)).length;
+    const placed=inRange.filter(r=>geoValid(r.latitude,r.longitude));
+    el(s,'use',{href:'#world_land',x:ox,y:oy,width:360*sc,height:180*sc,fill:c.grid,'fill-opacity':.55,stroke:'none'});
+    const dists=placed.map(r=>Number(r.distance_to_target)).filter(Number.isFinite);
+    const dmax=dists.length?Math.max(...dists):0;
+    placed.forEach(r=>{
+      const p=P(r), lab=String(r.source_population_id||r.label||'');
+      const isTop=top5.includes(lab), site=(r.location_precision||'site')==='site';
+      const t=dmax>0&&Number.isFinite(Number(r.distance_to_target))?Math.min(1,Number(r.distance_to_target)/dmax):1;
+      const op=isTop?1:(0.18+0.5*(1-t));
+      const n=site?el(s,'circle',{cx:p.x,cy:p.y,r:isTop?4:2.1,fill:isTop?c.hero:c.data,'fill-opacity':op,stroke:c.bg,'stroke-width':isTop?.8:.4,class:'pop'})
+                  :el(s,'rect',{x:p.x-(isTop?3.4:2),y:p.y-(isTop?3.4:2),width:isTop?6.8:4,height:isTop?6.8:4,rx:1,fill:isTop?c.hero:c.data,'fill-opacity':op,stroke:c.bg,'stroke-width':.4,class:'pop'});
+      tip(n,`${lab||r.record_id} · ${r.locality||''} ${site?(Z?'遗址级':'site'):(Z?'地区级':'region')}`+
+            (Number.isFinite(Number(r.date_mean_bp))?` · ${fmt(Math.round(r.date_mean_bp))} BP`:'')+
+            (Number.isFinite(Number(r.distance_to_target))?` · d=${Number(r.distance_to_target).toFixed(4)}`:''));
+    });
+    // 前五名标注
+    ranked.slice(0,5).forEach((g,i)=>{
+      const hit=placed.find(r=>String(r.source_population_id)===String(g.label));
+      if(!hit) return;
+      const p=P(hit);
+      txt(s,{x:p.x+6,y:p.y-3-i*9,'font-size':8,'font-weight':700,fill:c.ink,stroke:c.bg,'stroke-width':2.2,'paint-order':'stroke'},
+          `${g.rank}. ${ANC_ZH[g.label]||g.label} · n=${g.n}`);
+    });
+    txt(s,{x:pad.l,y:16,'font-size':8,'font-weight':600,fill:c.faint,'letter-spacing':'.06em'},
+        Z?'参考样本的来源地（不是目标样本的坐标）':'WHERE THE REFERENCE SAMPLES COME FROM (NOT THE TARGET)');
+    // ── 时间带：左古右今；BP 与公元并列（BP 基准 1950）
+    const bx0=pad.l+40, bx1=VB.w-pad.l-40, by=bandY;
+    el(s,'line',{x1:bx0,y1:by,x2:bx1,y2:by,stroke:c.grid,'stroke-width':1.2});
+    const X=v=>bx1-(bx1-bx0)*Math.min(v,8000)/8000;      // 8000 BP 以上折到左端
+    [0,2000,4000,6000,8000].forEach(v=>{
+      el(s,'line',{x1:X(v),y1:by-4,x2:X(v),y2:by+4,stroke:c.faint,'stroke-width':.8});
+      // BP → 公元：1950 - BP（BP 以 1950 为基准，2000 BP 是公元前 50 年，不是公元 50 年）。
+      // 两套基准写错方向就会把"前 2050 年"说成"公元 2050 年"。
+      const ce=1950-v;
+      txt(s,{x:X(v),y:by+15,'text-anchor':'middle','font-size':7.5,fill:c.faint},
+          v===0?(Z?'今':'now'):`${fmt(v)} BP`+(ce<=0?`（${Z?'约前':'≈'}${fmt(-ce)}${Z?' 年':''}）`:`（${Z?'约':'≈'}${fmt(ce)}${Z?' 年':' CE'}）`));
+    });
+    txt(s,{x:bx0-6,y:by+4,'text-anchor':'end','font-size':7.5,'font-weight':700,fill:c.muted},Z?'古老':'older');
+    txt(s,{x:bx1+6,y:by+4,'font-size':7.5,'font-weight':700,fill:c.muted},Z?'现代':'recent');
+    // 范围选择：可聚焦 + Enter，键盘可用；点击只改查看范围，不重算任何统计
+    RANGES.forEach((r,i)=>{
+      const x0=bx0+i*((bx1-bx0)/RANGES.length), w=(bx1-bx0)/RANGES.length-8, y=by+28;
+      const on=i===cur;
+      const b=el(s,'rect',{x:x0,y:y,width:w,height:18,rx:2,fill:on?c.hero:'none',stroke:on?c.hero:c.grid,'stroke-width':on?0:.8,
+                           class:'fade'});
+      b.setAttribute('tabindex','0'); b.setAttribute('role','button');
+      const go=()=>{ if(cur!==i){cur=i;draw();} };
+      b.addEventListener('click',go);
+      b.addEventListener('keydown',(e)=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();go()}});
+      txt(s,{x:x0+w/2,y:y+12.5,'text-anchor':'middle','font-size':8,'font-weight':700,fill:on?c.bg:c.ink},Z?r.zh:r.en);
+    });
+    // 计数：分别说明"范围外"与"年代未知"，后者既不算命中也不算排除
+    const note=document.getElementById('geomap_note');
+    if(note) note.textContent=(Z
+      ? `当前范围：${R.zh} · 命中 ${inRange.length} 条（其中 ${placed.length} 条已定位、${unplaced} 条缺坐标不落点）· 范围外 ${outRange.length} 条 · **年代未知 ${noDate.length} 条（不计入筛选）** · 深色 = 距离最近的前五名 · 圆点 = 遗址级，方框 = 地区级 · 底图 Natural Earth 1:110m（public domain）`
+      : `range: ${R.en} · ${inRange.length} records (${placed.length} placed, ${unplaced} without coordinates) · ${outRange.length} outside · ${noDate.length} with an unknown date (excluded from filtering) · emphasised = five closest · circles = site-level, squares = region-level · base map Natural Earth 1:110m (public domain)`)
+      .replace(/\*\*/g,'');
+    foot(s,c,VB.w,VB.h-6,Z?'筛选只是换个范围查看已算好的结果，不重建 PCA、也不重算排名 · 离线底图，无外部请求'
+                          :'filtering only changes which computed records are shown; no PCA rebuild, no re-ranking · offline base map, no external requests');
+  };
+  draw();
 });
 
 /* ── affinity ranking (W-T1). Replaces the distance-vs-age scatter: a group mean and a single
