@@ -26,6 +26,7 @@ F.rho_i=D.prs_rho.imputed; F.rho_s=D.prs_rho.subset; F.sv=fmt(D.sv_total); F.roh
 F.yterm=D.y_terminal; F.yformed=fmt(D.ypath[D.ypath.length-1].formed); F.mthg=D.mt.hg; F.mtq=D.mt.quality; F.mtn=D.mt.found.length; F.mtp=D.mt.private.length;
 
 const renderAll=()=>{try{document.documentElement.setAttribute('lang',LANG==='zh'?'zh-Hans':'en');
+  {const _bs=document.getElementById('bootstate');if(_bs)_bs.textContent='rendering…';}
   document.querySelectorAll('[data-i18n]').forEach(e=>{e.innerHTML=t(e.getAttribute('data-i18n'))});
   document.getElementById('langbtn').textContent=t('toggle');
   document.title = TITLE();
@@ -36,7 +37,7 @@ const renderAll=()=>{try{document.documentElement.setAttribute('lang',LANG==='zh
       err.setAttribute('x',8);err.setAttribute('y',16);err.setAttribute('font-size',10);err.setAttribute('fill','#b3261e');
       err.textContent=id+': '+(e&&e.message?e.message:e);n.appendChild(err)}}
   if(window.__renderErrors.length)console.warn('[render] failed figures:',window.__renderErrors.join(', '));
-  renderKpi(); renderFindings(); renderPgx(); renderHla(); renderMisc(); if(typeof deepRender==='function') deepRender();}catch(e){console.error('[renderAll]',e);try{document.body.insertAdjacentHTML('afterbegin','<div style="margin:14px auto;max-width:900px;padding:10px 14px;border:1px solid #b3261e;border-radius:8px;color:#b3261e;font:13px/1.5 system-ui">render error: '+(e&&e.message?e.message:e)+'</div>')}catch(_){}}};
+  renderKpi(); renderFindings(); renderPgx(); renderHla(); renderMisc(); if(typeof deepRender==='function') deepRender();{const _bd=document.getElementById('bootstate');if(_bd){const _nf=(window.__renderErrors||[]).length,_nt=Object.keys(CH).length;_bd.textContent='rendered · figures '+(_nt-_nf)+'/'+_nt+(_nf?' (failed: '+window.__renderErrors.join(', ')+')':'');_bd.style.color=_nf?'#ffb4a2':'#9ae6b4';}}}catch(e){console.error('[renderAll]',e);{const _be=document.getElementById('bootstate');if(_be){_be.textContent='RENDER FAILED: '+(e&&e.message?e.message:e);_be.style.color='#ffb4a2';}}try{document.body.insertAdjacentHTML('afterbegin','<div style="margin:14px auto;max-width:900px;padding:10px 14px;border:1px solid #b3261e;border-radius:8px;color:#b3261e;font:13px/1.5 system-ui">render error: '+(e&&e.message?e.message:e)+'</div>')}catch(_){}}};
 document.getElementById('langbtn').addEventListener('click',()=>{LANG=zh()?'en':'zh';try{localStorage.setItem('dayu-lang',LANG)}catch(e){};renderAll()});
 if(window.matchMedia){window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change',renderAll)}
 const prsName=n=>zh()?(PRS_EN[n]||n):n;

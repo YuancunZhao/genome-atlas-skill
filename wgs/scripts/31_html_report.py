@@ -41,6 +41,28 @@ UI["sub_y"] = [s.replace("{ver}", D["versions"]["yfull"]) for s in UI["sub_y"]]
 head = open(S/"report_head.html", encoding="utf-8").read()
 head = re.sub(r"<title>.*?</title>", f"<title>{NAME_ZH}</title>", head, count=1)
 body = open(S/"report_body.html", encoding="utf-8").read()
+
+# --- build stamp + boot diagnostics. The report must work from file:// on a machine with no
+# network, so a silent failure has to be impossible: the strip states whether the script ran,
+# and if not, why not.
+import datetime
+_BUILD = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+_EARLY = """<script>
+window.__earlyErrors = [];
+window.addEventListener('error', function (e) { window.__earlyErrors.push((e.message || 'error') + ' @' + e.lineno + ':' + e.colno); });
+document.addEventListener('DOMContentLoaded', function () {
+  var b = document.getElementById('bootstate'); if (!b) return;
+  if (window.__earlyErrors.length) { b.textContent = 'SCRIPT ERROR: ' + window.__earlyErrors.join(' | '); b.style.color = '#ffd0c8'; }
+  else if (b.textContent.indexOf('waiting') >= 0) { b.textContent = 'the report script never ran -- open the developer console (F12) for the reason'; b.style.color = '#ffd0c8'; }
+});
+</script>
+"""
+_BOOT = ('<div id="boot" style="position:fixed;top:0;left:0;right:0;z-index:99999;background:#111;color:#eee;'
+         'font:12px/1.7 ui-monospace,Menlo,monospace;padding:5px 10px;text-align:center">build ' + _BUILD +
+         ' &middot; <span id="bootstate">HTML parsed; waiting for the report script&hellip;</span></div>'
+         '<div style="height:30px"></div>')
+head = _EARLY + head
+body = body + _BOOT
 js = open(S/"report_script.js", encoding="utf-8").read()
 js = (js.replace("__DATA__", json.dumps(D, ensure_ascii=False, separators=(",", ":"))).replace("__UI__", json.dumps(UI, ensure_ascii=False))
         .replace("__FIND__", json.dumps(FIND, ensure_ascii=False)).replace("__PGX__", json.dumps(PGX, ensure_ascii=False)).replace("__PRS_EN__", json.dumps(PRS_ZH, ensure_ascii=False)).replace("__BLOOD__", json.dumps(BLOOD, ensure_ascii=False)))

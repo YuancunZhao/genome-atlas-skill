@@ -179,7 +179,9 @@ def check_runtime(html_path):
         fail("report.html not found for the runtime check")
         return
     html = html_path.read_text(encoding="utf-8")
-    i, j = html.find("<script>") + len("<script>"), html.rfind("</script>")
+    # The page may carry more than one <script> block (the boot diagnostic runs first), so take
+    # the last one -- that is the report itself.
+    i, j = html.rfind("<script>") + len("<script>"), html.rfind("</script>")
     if i < len("<script>") or j <= i:
         fail("report.html has no inline <script> block")
         return
