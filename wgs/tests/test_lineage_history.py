@@ -135,6 +135,23 @@ class TestObservationsAndRoutes(unittest.TestCase):
                   "date_range", "date_basis", "call_source", "publication"):
             self.assertIn(k, o)
 
+    def test_weak_chain_above_the_terminal_forces_a_step_back(self):
+        """真实的 12 / 1 / 0 / 1 / 5 形态：末端那个 5 只是弱链的末尾，不是独立证据。"""
+        path = [("N-Z4762", 132, 0, 1), ("N-F2905", 57, 0, 2), ("N-CTS12473", 119, 0, 1),
+                ("N-M1845", 12, 0, 0), ("N-M1928", 1, 0, 0), ("N-Y125475", 0, 0, 0),
+                ("N-M1793", 1, 0, 0), ("N-CTS4714", 5, 0, 0)]
+        self.assertEqual(lh.conservative_from_path(path, solid=5, tail=4), "N-M1845")
+
+    def test_solid_terminal_is_kept(self):
+        path = [("N", 420, 0, 0), ("N-M1845", 12, 0, 0), ("N-A", 9, 0, 0), ("N-B", 7, 0, 0)]
+        self.assertEqual(lh.conservative_from_path(path, solid=5, tail=4), "N-B")
+
+    def test_empty_and_single_level_paths(self):
+        self.assertIsNone(lh.conservative_from_path([], solid=5, tail=4))
+        self.assertEqual(lh.conservative_from_path([("N", 420, 0, 0)], solid=5, tail=4), "N")
+        self.assertIsNone(lh.conservative_from_path([("N-A", 1, 0, 0)], solid=5, tail=4),
+                          "唯一一级就弱，且上面没有别的：保守落点为空而不是硬报它")
+
     def test_reviewed_call_beats_any_automatic_rule(self):
         hist = lh.load_history({"schema_version": 1, "reviewed_calls": {
             "y:N-CTS4714": {"conservative_hg": "N-M1845", "reason": "1-5 sites per level below"}}})

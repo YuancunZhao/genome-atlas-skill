@@ -157,6 +157,27 @@ def lineage_observations(rows, query, parents, tree_kind, same_tree=True):
     return out
 
 
+def conservative_from_path(path, solid=5, tail=4):
+    """没有复核记录时的通用保守落点。
+
+    判据不是"某个节点的支持数够不够"，而是"它是否位于末端一条弱链的末尾"。本项目的真实路径是
+    12 / 1 / 0 / 1 / 5：末端那个 5 恰好达到阈值，但它上面三级分别是 1、0、1——它们是同一段分辨率
+    极限，5 只是这段弱链的末尾，不是独立证据。只看单节点阈值会把它当成可靠的末端（这正是第一版
+    规则错的地方）。所以：末端 tail 级里若有支持不足的节点，就从最靠上的那个再往上退一级。
+
+    path 每项至少含 (node, der, ...)。
+    """
+    if not path:
+        return None
+    seg = list(path[-tail:]) if tail and tail > 0 else list(path)
+    weak = [i for i, p in enumerate(seg) if int(p[1]) < int(solid)]
+    if not weak:
+        return str(path[-1][0])
+    first_weak = seg[weak[0]]
+    pos = list(path).index(first_weak)
+    return str(path[pos - 1][0]) if pos > 0 else None
+
+
 def reviewed_call(history, kind, reported_hg):
     """带理由的复核记录（panel/lineage_history.json 的 reviewed_calls）优先于任何自动规则。
 

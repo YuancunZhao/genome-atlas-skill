@@ -154,18 +154,22 @@ TREE_VERSION = open(f"{P}/data/ref/ytree/current_version.txt").read().strip()
 # to the deepest node that still has solid support. Nodes that rest on a handful of sites are recorded
 # as uncertain and never treated as a proven terminal on their own.
 SOLID = 5
-_solid = [p for p in path if p[1] >= SOLID]
-# 复核结论优先（§7：conservative 来自证据或带理由的复核记录）；没有复核记录时才退回通用规则，
-# 并把来源写清楚，免得读者以为两种来源是同一回事。
+TAIL = 4          # 分辨率判据只看末端四级（与 HANDOFF 记录的"末端四级分辨率有限"一致）
+# 复核结论优先（§7：conservative 来自证据或带理由的复核记录）；没有复核记录时退回通用规则
+# conservative_from_path（连续弱链 → 上一级），并把来源写清楚，免得两种来源被当成一回事。
 _HIST = _lh.load_history(_json.loads((pathlib.Path(__file__).resolve().parents[1] / "panel" /
                                       "lineage_history.json").read_text(encoding="utf-8")))
 _CONS, _CONS_WHY = _lh.reviewed_call(_HIST, "y", path[-1][0] if path else None)
+_if_reviewed = _CONS is not None
 if _CONS:
     _CONS_SRC = "reviewed:" + str(((_HIST.get("reviewed_calls") or {}).get(
         "y:" + str(path[-1][0]), {}) or {}).get("tree_version") or _HIST.get("tree_source") or "manual")
 else:
-    _CONS, _CONS_SRC = (_solid[-1][0] if _solid else None), "rule:min_der>=%d" % SOLID
+    _CONS = _lh.conservative_from_path(path, solid=SOLID, tail=TAIL)
+    _CONS_SRC = f"rule:weak_chain_in_last_{TAIL}_levels(solid={SOLID})"
     _CONS_WHY = ""
+    if _CONS and path and _CONS != path[-1][0]:
+        _CONS_WHY = "the terminal sits at the end of a weakly supported chain"
 if not path:
     _res = _lh.unavailable_lineage("y", "no_supported_path",
                                    "the tree walk found no supported branch (no usable Y pileup or no derived sites)")
@@ -180,7 +184,7 @@ else:
             # 只标末端四级：主干上支持位点少的节点（HIJK/K2 等）是因为那些 SNP 不属于本样本的
             # 谱系或未覆盖，不是"分辨率不确定"；HANDOFF 记录的分辨率极限正是末端四级。
             "uncertain_nodes": [{"node": b, "reason": f"only {d} supporting site(s); below the {SOLID}-site floor"}
-                                for b, d, a, o, f, t in path[-4:] if d < SOLID],
+                                for b, d, a, o, f, t in path[-TAIL:] if d < SOLID],
             "conflicts": [], "route_review": "automatic"}
 _json.dump(_res, open(f"{W}/y_result.json", "w"), ensure_ascii=False, indent=1)
 print(f"wrote {W}/y_result.json: reported={_res.get('reported_hg')} conservative={_res.get('conservative_hg')} "
