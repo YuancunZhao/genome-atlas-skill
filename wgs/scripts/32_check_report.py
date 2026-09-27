@@ -14,7 +14,7 @@ Checks (P0_FIX_PLAN section 6, condensed):
 
 Exit code 0 = pass, 1 = at least one failure (details on stderr).
 """
-import json, pathlib, re, shutil, subprocess, sys, tempfile
+import json, os, pathlib, re, shutil, subprocess, sys, tempfile
 
 FAIL = []
 
@@ -33,13 +33,14 @@ const fakeEl = () => ({
   getBoundingClientRect: () => ({ x: 0, y: 0, width: 900, height: 300 }),
   closest: () => null, contains: () => false, focus(){}, blur(){}, parentNode: null,
 });
+global.__boot = fakeEl();
 global.window = { __renderErrors: [], matchMedia: null, addEventListener(){}, devicePixelRatio: 1,
                   location: { href: 'file://report.html' } };
 global.document = {
   documentElement: { setAttribute(){}, style: { setProperty(){} } },
   body: fakeEl(),
-  getElementById: () => fakeEl(),
-  querySelectorAll: () => [],
+  getElementById: (id) => (id === 'bootstate' ? global.__boot : fakeEl()),
+  querySelectorAll: (sel) => (sel === '[data-i18n]' ? (global.__i18nEls || []) : []),
   querySelector: () => null,
   createElementNS: () => fakeEl(),
   createElement: () => fakeEl(),
@@ -50,15 +51,24 @@ global.document = {
 global.getComputedStyle = () => ({ getPropertyValue: () => '#123456' });
 global.localStorage = { getItem: () => null, setItem(){} };
 global.requestAnimationFrame = (cb) => 0;
-global.navigator = { userAgent: 'node' };
+global.navigator = { userAgent: 'node', language: process.env.PROBE_LANG || 'zh-CN' };
 """
 
 NODE_RUNNER = """require(process.argv[2]);
 const fs = require('fs');
+// The page's copy lives in data-i18n attributes and is filled by renderAll through t(), which
+// indexes UI[key][zh ? 0 : 1]. Stand in for those elements, or that loop is a no-op.
+const html = fs.readFileSync(process.argv[4], 'utf8');
+global.__i18nEls = [...new Set([...html.matchAll(/data-i18n="([^"]+)"/g)].map(m => m[1]))].map(k => ({
+  __i18nKey: k, innerHTML: '', textContent: '',
+  getAttribute: (n) => (n === 'data-i18n' ? k : null), setAttribute(){}, classList: { add(){}, remove(){} },
+}));
+console.log('I18N_KEYS=' + global.__i18nEls.length);
 try { eval(fs.readFileSync(process.argv[3], 'utf8')); }
 catch (e) { console.log('TOP-LEVEL ERROR: ' + e.message); process.exit(2); }
 const errs = (global.window && global.window.__renderErrors) || [];
 console.log('RENDER_ERRORS=' + JSON.stringify(errs));
+console.log('BOOTSTATE=' + ((global.__boot && global.__boot.textContent) || ''));
 """
 
 FAIL = []
@@ -257,8 +267,10 @@ def check_runtime(html_path):
     """Run the report JS under node with a minimal DOM stub; no figure may fail.
 
     Static checks cannot see a figure that throws at run time -- a circos crash on an
-    X-chromosome gene deletion shipped past all of them. Skipped, with a note, when node
-    is unavailable.
+    X-chromosome gene deletion shipped past all of them. Nor can they see a failure that
+    only happens in one language: the copy is indexed as UI[key][zh ? 0 : 1], so a malformed
+    English entry throws inside t() and blanks the page in English alone. Run both.
+    Skipped, with a note, when node is unavailable.
     """
     node = shutil.which("node")
     if not node:
@@ -280,19 +292,31 @@ def check_runtime(html_path):
         (p / "stub.js").write_text(DOM_STUB, encoding="utf-8")
         (p / "runner.js").write_text(NODE_RUNNER, encoding="utf-8")
         (p / "report.js").write_text(script, encoding="utf-8")
-        try:
-            r = subprocess.run([node, str(p / "runner.js"), str(p / "stub.js"), str(p / "report.js")],
-                               capture_output=True, text=True, timeout=180)
-        except subprocess.TimeoutExpired:
-            fail("the report JS did not finish within 180 s under node")
-            return
-    out = (r.stdout or "") + (r.stderr or "")
-    if "TOP-LEVEL ERROR" in out:
-        line = next((l for l in out.splitlines() if "TOP-LEVEL ERROR" in l), out[-200:])
-        fail(f"report JS throws at top level: {line}")
-    elif "RENDER_ERRORS=[]" not in out:
-        m = re.search(r"RENDER_ERRORS=(\[.*\])", out)
-        fail(f"figures failed to render: {m.group(1) if m else out.strip()[-200:]}")
+        runs = {}
+        for lang in ("zh-CN", "en-US"):
+            try:
+                r = subprocess.run([node, str(p / "runner.js"), str(p / "stub.js"), str(p / "report.js"),
+                                    str(html_path)],
+                                   capture_output=True, text=True, timeout=180,
+                                   env={**os.environ, "PROBE_LANG": lang})
+            except subprocess.TimeoutExpired:
+                fail(f"the report JS did not finish within 180 s under node ({lang})")
+                return
+            runs[lang] = (r.stdout or "") + (r.stderr or "")
+    for lang, out in runs.items():
+        tag = " (zh)" if lang == "zh-CN" else " (en)"
+        nk = re.search(r"I18N_KEYS=(\d+)", out)
+        if not nk or int(nk.group(1)) == 0:
+            fail(f"the runtime harness saw no data-i18n elements{tag}; the copy check would be vacuous")
+        if "TOP-LEVEL ERROR" in out:
+            line = next((l for l in out.splitlines() if "TOP-LEVEL ERROR" in l), out[-200:])
+            fail(f"report JS throws at top level{tag}: {line}")
+        elif "RENDER_ERRORS=[]" not in out:
+            m = re.search(r"RENDER_ERRORS=(\[.*\])", out)
+            fail(f"figures failed to render{tag}: {m.group(1) if m else out.strip()[-200:]}")
+        elif "RENDER FAILED" in (re.search(r"BOOTSTATE=(.*)", out) or [None, ""])[1]:
+            banner = re.search(r"BOOTSTATE=(.*)", out).group(1).strip()[:180]
+            fail(f"the page banner reports a failed render{tag}: {banner}")
 
 
 def main():
