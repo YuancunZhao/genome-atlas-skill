@@ -423,5 +423,129 @@ class TestA1Dosage(unittest.TestCase):
         self.assertEqual(why, "not_biallelic")
 
 
+# ─────────────────────────────────────────────────── AN2: eligibility and group summaries
+
+class TestEligibleRecords(unittest.TestCase):
+    """一个合格集合：默认榜单、PCA 与地图都必须调用同一个函数，门槛只在这里生效。"""
+
+    def _recs(self):
+        return [
+            {"record_id": "close_but_thin", "group_id": "g", "kind": "ancient",
+             "call_rate": 0.49, "n_called_snps": 60000, "distance_to_target": 0.001},
+            {"record_id": "solid", "group_id": "g", "kind": "ancient",
+             "call_rate": 0.60, "n_called_snps": 60000, "distance_to_target": 0.02},
+            {"record_id": "too_few_snps", "group_id": "g", "kind": "ancient",
+             "call_rate": 0.90, "n_called_snps": 500, "distance_to_target": 0.005},
+            {"record_id": "modern", "group_id": "m", "kind": "modern",
+             "call_rate": 0.99, "n_called_snps": 60000, "distance_to_target": 0.03},
+            {"record_id": "unknown_kind", "group_id": "u", "kind": "unknown",
+             "call_rate": 0.99, "n_called_snps": 60000, "distance_to_target": 0.004},
+        ]
+
+    def test_the_closest_record_is_dropped_when_it_fails_coverage(self):
+        recs = self._recs()
+        got = ad.eligible_records(recs, kind="ancient", min_rate=0.5, min_snps=10000)
+        self.assertEqual([r["record_id"] for r in got], ["solid"])
+        # 被排除的记录留原因，供详情使用；不让它们悄悄消失
+        by_id = {r["record_id"]: r for r in recs}
+        self.assertFalse(by_id["close_but_thin"]["eligible"])
+        self.assertEqual(by_id["close_but_thin"]["exclusion_reason"], "low_call_rate")
+        self.assertEqual(by_id["too_few_snps"]["exclusion_reason"], "insufficient_sites")
+        self.assertIsNone(by_id["close_but_thin"]["eligible"] and True or None)
+
+    def test_kind_selection_and_missing_values(self):
+        recs = self._recs()
+        self.assertEqual([r["record_id"] for r in ad.eligible_records(recs, kind="modern", min_rate=0.95, min_snps=10000)],
+                         ["modern"])
+        # 没有距离的记录不能参与排名（尚未投影）
+        recs.append({"record_id": "no_distance", "group_id": "g", "kind": "ancient",
+                     "call_rate": 0.99, "n_called_snps": 60000, "distance_to_target": None})
+        got = ad.eligible_records(recs, kind="ancient", min_rate=0.5, min_snps=10000)
+        self.assertNotIn("no_distance", [r["record_id"] for r in got])
+        self.assertEqual([r for r in recs if r["record_id"] == "no_distance"][0]["exclusion_reason"],
+                         "no_distance")
+        # 完全不设门槛（min_rate/min_snps 为 None）时仍然只按 kind + 距离过滤
+        loose = ad.eligible_records(self._recs(), kind="ancient", min_rate=None, min_snps=None)
+        self.assertEqual(sorted(r["record_id"] for r in loose), ["close_but_thin", "solid", "too_few_snps"])
+
+
+    def test_pandas_nan_is_treated_as_missing_not_as_a_number(self):
+        """从 pandas 出来的缺失是 NaN，不是 None：既不能比较，也不能被 int() 撞出异常。"""
+        recs = [{"record_id": "nan_rate", "group_id": "g", "kind": "ancient",
+                 "call_rate": float("nan"), "n_called_snps": 60000.0, "distance_to_target": 0.01},
+                {"record_id": "nan_sites", "group_id": "g", "kind": "ancient",
+                 "call_rate": 0.9, "n_called_snps": float("nan"), "distance_to_target": 0.02},
+                {"record_id": "nan_distance", "group_id": "g", "kind": "ancient",
+                 "call_rate": 0.9, "n_called_snps": 60000.0, "distance_to_target": float("nan")},
+                {"record_id": "good", "group_id": "g", "kind": "ancient",
+                 "call_rate": 0.9, "n_called_snps": 60000.0, "distance_to_target": 0.03}]
+        got = ad.eligible_records(recs, kind="ancient", min_rate=0.5, min_snps=10000)
+        self.assertEqual([r["record_id"] for r in got], ["good"])
+        by = {r["record_id"]: r for r in recs}
+        self.assertEqual(by["nan_rate"]["exclusion_reason"], "low_call_rate")
+        self.assertEqual(by["nan_sites"]["exclusion_reason"], "insufficient_sites")
+        self.assertEqual(by["nan_distance"]["exclusion_reason"], "no_distance")
+        # 门槛为 None 时，NaN 覆盖率不该把记录留下（它仍然是"未测量"，不是通过）
+        loose = ad.eligible_records(recs, kind="ancient", min_rate=None, min_snps=None)
+        self.assertEqual(sorted(r["record_id"] for r in loose), ["good", "nan_rate", "nan_sites"])
+
+
+class TestGroupSummaries(unittest.TestCase):
+    """§7 的分组统计：个体先算距离，再取组均值；小群体有数但不排名。"""
+
+    def test_plan_example(self):
+        r = [{"group_id": "g", "record_id": "a", "distance_to_target": 0.01},
+             {"group_id": "g", "record_id": "b", "distance_to_target": 0.05}]
+        g = ad.group_summaries(r, min_group_n=2)
+        self.assertEqual(len(g), 1)
+        self.assertAlmostEqual(g[0]["distance_mean"], 0.03, places=12)
+        self.assertEqual(g[0]["n"], 2)
+        self.assertEqual(g[0]["member_ids"], ["a", "b"])
+
+    def test_one_and_zero_groups(self):
+        self.assertEqual(ad.group_summaries([], min_group_n=2), [])
+        one = ad.group_summaries([{"group_id": "solo", "record_id": "x", "distance_to_target": 0.1}],
+                                 min_group_n=2)
+        self.assertEqual(len(one), 1)
+        self.assertIsNone(one[0]["rank"], "n 小于门槛的群体不参与排名")
+        self.assertEqual(one[0]["n"], 1)
+        self.assertTrue(one[0]["small_group"])
+
+    def test_ranking_is_by_mean_and_ties_are_stable(self):
+        recs = [{"group_id": "b", "record_id": "b1", "distance_to_target": 0.02},
+                {"group_id": "a", "record_id": "a1", "distance_to_target": 0.02},
+                {"group_id": "c", "record_id": "c1", "distance_to_target": 0.01},
+                {"group_id": "c", "record_id": "c2", "distance_to_target": 0.02}]
+        g = ad.group_summaries(recs, min_group_n=2)
+        self.assertEqual([x["group_id"] for x in g], ["c", "a", "b"], "c 组均值最低；a/b 均值相同按 id 稳定排序")
+        self.assertEqual(g[0]["rank"], 1)
+        self.assertIsNone(g[1]["rank"], "同为 1 人的组不满足 min_group_n=2")
+        self.assertAlmostEqual(g[0]["distance_min"], 0.01)
+        self.assertAlmostEqual(g[0]["distance_max"], 0.02)
+
+    def test_identical_coordinates_and_unsorted_input(self):
+        recs = [{"group_id": "z", "record_id": "z2", "distance_to_target": 0.5},
+                {"group_id": "y", "record_id": "y1", "distance_to_target": 0.5},
+                {"group_id": "z", "record_id": "z1", "distance_to_target": 0.5}]
+        g = ad.group_summaries(recs, min_group_n=2)
+        self.assertEqual([x["group_id"] for x in g], ["z", "y"])
+        self.assertEqual(g[0]["distance_mean"], 0.5)
+        self.assertEqual(g[0]["member_ids"], ["z1", "z2"], "成员顺序稳定，与输入顺序无关")
+
+    def test_group_metadata_is_preserved(self):
+        recs = [{"group_id": "China_X_LN", "record_id": "x1", "distance_to_target": 0.01,
+                 "kind": "ancient", "source_population_id": "China_X_LN", "label": "China_X_LN",
+                 "location_id": "AADR:China_X_LN", "date_min_bp": 3000, "date_max_bp": 3400},
+                {"group_id": "China_X_LN", "record_id": "x2", "distance_to_target": 0.03,
+                 "kind": "ancient", "source_population_id": "China_X_LN", "label": "China_X_LN",
+                 "location_id": "AADR:China_X_LN", "date_min_bp": 3100, "date_max_bp": 3300}]
+        g = ad.group_summaries(recs, min_group_n=2)[0]
+        self.assertEqual(g["label"], "China_X_LN")
+        self.assertEqual(g["kind"], "ancient")
+        self.assertEqual(g["location_id"], "AADR:China_X_LN")
+        self.assertEqual(g["date_min_bp"], 3000)
+        self.assertEqual(g["date_max_bp"], 3400)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

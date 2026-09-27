@@ -560,3 +560,88 @@ def a1_dosage_with_reason(gt, ref, alt, a1):
 
 def a1_dosage(gt, ref, alt, a1):
     return a1_dosage_with_reason(gt, ref, alt, a1)[0]
+
+
+# ─────────────────────────────────────────── AN2: one eligible set, one grouping
+
+def _number_or_none(value):
+    """pandas/numpy 的 NaN 与 inf 都算缺失：它们不能拿去比较，也不该被 int() 撞出异常。"""
+    if value is None:
+        return None
+    try:
+        x = float(value)
+    except (TypeError, ValueError):
+        return None
+    return None if (math.isnan(x) or math.isinf(x)) else x
+
+
+def eligible_records(records, kind, min_rate=None, min_snps=None):
+    """默认榜单、PCA 与地图共用的唯一合格集合。
+
+    就地标注 `eligible` / `exclusion_reason`（被排除的记录留在原地供详情使用），返回合格记录并
+    保持输入顺序。`kind` 之外的一律排除，所以现代/古代/未分类不会互相混进对方的榜单；门槛只对
+    调用方显式给出的维度生效（None = 该维度不设门槛）。
+    """
+    out = []
+    for r in records:
+        reason = None
+        if r.get("kind") != kind:
+            reason = "other_kind"
+        elif _number_or_none(r.get("distance_to_target")) is None:
+            reason = "no_distance"
+        elif min_rate is not None:
+            rate = _number_or_none(r.get("call_rate"))
+            if rate is None or rate < float(min_rate):
+                reason = "low_call_rate"
+        if reason is None and min_snps is not None:
+            n = _number_or_none(r.get("n_called_snps"))
+            if n is None or n < float(min_snps):
+                reason = "insufficient_sites"
+        r["eligible"] = reason is None
+        r["exclusion_reason"] = reason
+        if reason is None:
+            out.append(r)
+    return out
+
+
+def group_summaries(records, min_group_n):
+    """按 group_id 汇总：先有每个个体的距离，再取组均值。
+
+    不用"群体质心 vs 目标"另算一套距离——那与个体距离不是同一口径，会让两个榜单给出不同的
+    近邻顺序。`rank` 只给达到 min_group_n 的群体；样本不足的组仍然可查（small_group=True，
+    rank=None），但不混进默认前几名。平手按稳定的 group_id 排序。
+    """
+    buckets = {}
+    for r in records:
+        gid = r.get("group_id")
+        if gid is None or r.get("distance_to_target") is None:
+            continue
+        buckets.setdefault(str(gid), []).append(r)
+    out = []
+    for gid, rows in buckets.items():
+        ds = [float(r["distance_to_target"]) for r in rows]
+        rows_sorted = sorted(rows, key=lambda r: str(r.get("record_id")))
+        first = rows_sorted[0]
+        dmin = [r.get("date_min_bp") for r in rows if r.get("date_min_bp") is not None]
+        dmax = [r.get("date_max_bp") for r in rows if r.get("date_max_bp") is not None]
+        out.append({
+            "group_id": gid,
+            "label": first.get("label") or gid,
+            "kind": first.get("kind"),
+            "location_id": first.get("location_id"),
+            "n": len(rows),
+            "member_ids": [str(r.get("record_id")) for r in rows_sorted],
+            "rank": None,
+            "small_group": len(rows) < int(min_group_n),
+            "distance_mean": sum(ds) / len(ds),
+            "distance_min": min(ds),
+            "distance_max": max(ds),
+            "date_min_bp": min(dmin) if dmin else None,
+            "date_max_bp": max(dmax) if dmax else None,
+        })
+    ranked = sorted((g for g in out if not g["small_group"]),
+                    key=lambda g: (g["distance_mean"], g["group_id"]))
+    for i, g in enumerate(ranked, 1):
+        g["rank"] = i
+    out.sort(key=lambda g: (g["small_group"], g["distance_mean"], g["group_id"]))
+    return out
