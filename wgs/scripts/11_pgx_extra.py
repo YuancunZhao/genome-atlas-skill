@@ -6,6 +6,7 @@ import pathlib
 from wgsconfig import *  # noqa: F401,F403 -- P, W, REF, TOOLS, SAMPLE, THREADS ...
 
 import subprocess, pandas as pd, os, collections, bisect
+from gt_alleles import gt_alleles
 P=str(P); V=f"{P}/wgs/00_input/{SAMPLE}.norm.vcf.gz"
 os.makedirs(f"{P}/wgs/16_panels", exist_ok=True)
 PV=KG_PFILE+".pvar"
@@ -45,14 +46,20 @@ for rs,g,a,d in want:
     t=q.stdout.strip().splitlines()
     if t:
         rec=[x.split("\t") for x in t]; hit=[x for x in rec if x[0]==r and x[1]==al] or rec
-        ref,alt,flt,gt,dp=hit[0]; n=gt.replace("|","/").count("1")
-        rows.append((g,rs,a,d,{0:f"{ref}/{ref}",1:f"{ref}/{alt}",2:f"{alt}/{alt}"}.get(n,gt),f"{flt} DP={dp}"))
+        ref,alt,flt,gt,dp=hit[0]; ga=gt_alleles(gt,ref,alt)
+        if ga is None:
+            rows.append((g,rs,a,d,"-","no call"))
+        else:
+            ev=f"{flt} DP={dp}"
+            if any(x is None for x in ga): ev+="; partial no call"
+            rows.append((g,rs,a,d,"/".join(x if x is not None else "." for x in ga),ev))
     elif not callable_(c,p):
         rows.append((g,rs,a,d,"-","no call (outside the callable mask)"))
     else:
         rows.append((g,rs,a,d,f"{r}/{r}","hom-ref (callable)"))
 df=pd.DataFrame(rows,columns=["gene","rsid","allele","drug","genotype","evidence"]).sort_values(["gene","rsid"])
 df.to_csv(f"{P}/wgs/16_panels/pgx_extra.tsv",sep="\t",index=False)
-carr=df[~df.genotype.str.contains("-")&df.genotype.str.split("/").apply(lambda x: len(x)==2 and x[0]!=x[1] or (len(x)==2 and x[0]==x[1] and False))]
+carr=df[df.evidence.str.startswith("PASS")
+        & df.genotype.str.split("/").apply(lambda xs: len(xs)==2 and "." not in xs and xs[0]!=xs[1])]
 print(f"{len(df)} markers checked; {len(carr)} heterozygous / non-reference")
 pd.set_option("display.width",220); print(df[df.evidence.str.startswith("PASS")].to_string(index=False))

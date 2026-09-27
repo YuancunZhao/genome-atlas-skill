@@ -6,6 +6,7 @@ import pathlib
 from wgsconfig import *  # noqa: F401,F403 -- P, W, REF, TOOLS, SAMPLE, THREADS ...
 
 import subprocess, pandas as pd, os, collections, bisect
+from gt_alleles import gt_alleles
 P=str(P); V=f"{P}/wgs/00_input/{SAMPLE}.norm.vcf.gz"; PV=KG_PFILE+".pvar"; W=f"{P}/wgs/20_behaviour"
 os.makedirs(W,exist_ok=True)
 PANEL = pathlib.Path(__file__).resolve().parents[1] / "panel" / "candidate_genes.tsv"
@@ -33,6 +34,12 @@ def callable_(c, p):
     v = _call.get(c, []); i = bisect.bisect_right([x[0] for x in v], p-1)-1
     return i >= 0 and v[i][0] <= p-1 < v[i][1]
 
+# b37 pseudoautosomal regions (same bounds as 30_build_report_data). A male's non-PAR X is
+# hemizygous, so a diploid-homozygous record there is the caller's representation of one allele.
+PAR_X = ((60001, 2699520), (154931044, 155260560))
+def hemizygous_x(c, p):
+    return c == "X" and SEX == "male" and not any(s <= p <= e for s, e in PAR_X)
+
 rows=[]
 for gene,rs,var,claim,truth in M:
     if rs not in pos: rows.append((gene,rs,var,"-","未在 1000G 面板中",claim,truth)); continue
@@ -43,13 +50,18 @@ for gene,rs,var,claim,truth in M:
     t=q.stdout.strip().splitlines()
     if t:
         rec=[x.split("\t") for x in t]; hit=[x for x in rec if x[0]==r and x[1]==a] or rec
-        ref,alt,flt,gt,dp=hit[0]; n=gt.replace("|","/").count("1")
-        g=(alt if n else ref) if c=="X" else {0:f"{ref}/{ref}",1:f"{ref}/{alt}",2:f"{alt}/{alt}"}.get(n,gt)
-        rows.append((gene,rs,var,f"{c}:{p}",g,claim,truth))
+        ref,alt,flt,gt,dp=hit[0]; ga=gt_alleles(gt,ref,alt)
+        if ga is None:
+            geno="no call"
+        else:
+            if hemizygous_x(c,p) and len(ga)==2 and ga[0] is not None and ga[0]==ga[1]:
+                ga=ga[:1]  # diploid-homozygous record of a hemizygous non-PAR X call
+            geno="/".join(x if x is not None else "." for x in ga)
+        rows.append((gene,rs,var,f"{c}:{p}",geno,claim,truth))
     elif not callable_(c,p):
         rows.append((gene,rs,var,f"{c}:{p}","no call (outside the callable mask)",claim,truth))
     else:
-        rows.append((gene,rs,var,f"{c}:{p}",r if c=="X" else f"{r}/{r}",claim,truth))
+        rows.append((gene,rs,var,f"{c}:{p}", r if hemizygous_x(c,p) else f"{r}/{r}",claim,truth))
 df=pd.DataFrame(rows,columns=["gene","rsid","variant","locus","genotype","popular_claim","what_evidence_supports"])
 df["variant_en"]=[EN.get(r,("","",""))[0] for r in df.rsid]
 df["popular_claim_en"]=[EN.get(r,("","",""))[1] for r in df.rsid]
