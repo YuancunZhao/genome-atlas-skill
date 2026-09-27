@@ -108,6 +108,31 @@ if not _decl:
     raise SystemExit("31_html_report: no payload placeholder found in report_script.js")
 js_code = "\n".join(l for i, l in enumerate(_lines) if i not in _decl)   # logic only; payload is built below
 
+# On Safari the whole 54 KB logic block silently did nothing -- no error, no effect -- while the
+# blocks after it ran fine. The logic is therefore emitted as a series of small blocks too, each
+# with its own progress marker and error report, so a failure names the exact part.
+_CODE_CAP = 12000
+def _code_blocks():
+    parts, buf, size = [], [], 0
+    for ln in js_code.split("\n"):
+        buf.append(ln)
+        size += len(ln) + 1
+        # Only break at a top-level statement boundary: a line with no leading indent that ends a
+        # statement or a block. Breaking anywhere else split an argument list, which JavaScriptCore
+        # rejected with 'Unexpected keyword catch'.
+        if size >= _CODE_CAP and ln[:1] not in (" ", "\t") and ln.rstrip().endswith((";", "}")):
+            parts.append("\n".join(buf)); buf, size = [], 0
+    if buf:
+        parts.append("\n".join(buf))
+    out = []
+    for i, part in enumerate(parts):
+        # No try/catch per block: `try` introduces a block scope, so a `const` defined in one block
+        # would be invisible in the next (JavaScriptCore: 'reveal is not defined'). The marker before
+        # each block plus the window error listener is enough to localise a failure.
+        out.append(_MARK("code-%d/%d" % (i + 1, len(parts))))
+        out.append("<script>\n" + part + "\n</script>\n")
+    return "".join(out)
+
 def _payload_blocks():
     out = []
     for name, obj in _DATA_OBJS:
@@ -128,11 +153,7 @@ OUT.write_text(head + body
                + _MARK("before-payload")
                + _payload_blocks()
                + _MARK("payload-loaded")
-               + "<script>\ntry{\n" + js_code
-               + "\n}catch(e){var _bf=document.getElementById('bootstate');"
-                 "if(_bf){_bf.textContent='MAIN SCRIPT FAILED: '+(e&&e.message?e.message:e);_bf.style.color='#ffd0c8';}"
-                 "try{document.title='REPORT ERROR: '+(e&&e.message?e.message:e);}catch(_){}"
-                 "console.error('[main script]',e);throw e;}\n</script>\n"
+               + _code_blocks()
                + _MARK("code-done")
                + _SUMMARY, encoding="utf-8")
 print("wrote", OUT, OUT.stat().st_size // 1024, "KB")
