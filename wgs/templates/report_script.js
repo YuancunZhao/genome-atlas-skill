@@ -77,18 +77,30 @@ reveal('chromdepth',(s,c)=>{
 
 /* ── 01 Y chain (YFull, from O-F438 down) ── */
 reveal('ychain',(s,c)=>{
-  const P=D.ypath, n=P.length, x0=40, x1=490, y=100;
-  el(s,'line',{x1:x0,y1:y,x2:x1,y2:y,stroke:c.ink,'stroke-width':1,class:'draw'});
-  // Radius is sqrt-normalised into a fixed range. Raw sqrt(der) made the root node ~90px across while
-  // the tip nodes were 4px: the wide part swallowed the labels of its neighbours. Area still scales
-  // with the derived-site count, which is what the caption promises.
+  // Only the last six steps are drawn, with the upstream levels collapsed into a dotted stub. The
+  // full 24-level walk put an 831-site root node next to 1-site tips, which crushed every label,
+  // and those early levels carry no conclusion: the sample's story is the resolution limit at the
+  // tip. The bundled example report draws it the same way (six circles plus an upstream text line).
+  const FULL=D.ypath, nF=FULL.length, TAIL=Math.min(6,nF);
+  const P=FULL.slice(-TAIL), n=P.length, up=FULL.slice(0,nF-TAIL);
+  const y=100, base=170, x1=490, x0=40;
+  el(s,'line',{x1:base,y1:y,x2:x1,y2:y,stroke:c.ink,'stroke-width':1,class:'draw'});
+  if(up.length){
+    el(s,'circle',{cx:52,cy:y,r:5,fill:c.data,opacity:.35});
+    el(s,'line',{x1:58,y1:y,x2:base-10,y2:y,stroke:c.faint,'stroke-width':1.4,'stroke-dasharray':'1.5 4'});
+    txt(s,{x:52,y:y-13,'text-anchor':'middle','font-size':11,'font-weight':700,fill:c.faint},'⋯');
+    txt(s,{x:52,y:y+21,'text-anchor':'middle','font-size':7.5,'font-weight':700,fill:c.muted},up.length+(zh()?' 级上游':' upstream'));
+    txt(s,{x:52,y:y+32,'text-anchor':'middle','font-size':6.5,fill:c.faint},up[0].snp);
+  }
+  // Radius is sqrt-normalised into a fixed range. Area still scales with the derived-site count,
+  // which is what the caption promises.
   const _maxDer=Math.max(1,...P.map(p=>p.der));
-  const _rad=der=>4.5+21.5*Math.sqrt(der/_maxDer);
-  P.forEach((p,i)=>{const x=x0+(x1-x0)*i/(n-1), r=_rad(p.der), last=i===n-1, lane=i%3;
-    const up=y-r-9-lane*10, dn=y+r+12+lane*10;      // three lanes: neighbours never share a baseline
+  const _rad=der=>7+20*Math.sqrt(der/_maxDer);
+  P.forEach((p,i)=>{const x=base+(x1-base)*i/(n-1), r=_rad(p.der), last=i===n-1;
     const cir=el(s,'circle',{cx:x,cy:y,r,fill:last?c.hero:c.data,stroke:c.bg,'stroke-width':1.5,class:'pop'}); cir.style.animationDelay=(i*110)+'ms'; tip(cir,`${p.snp} · ${p.der} derived / ${p.anc} ancestral · formed ${fmt(p.formed)} ybp`);
-    txt(s,{x,y:up,'text-anchor':'middle','font-size':last?11:9.5,'font-weight':last?800:700,fill:c.ink,stroke:c.bg,'stroke-width':2.4,style:'paint-order:stroke',...NUM},p.snp.replace('O-',''));
-    txt(s,{x,y:dn,'text-anchor':'middle','font-size':7,'font-weight':600,fill:c.muted,stroke:c.bg,'stroke-width':2.4,style:'paint-order:stroke'},p.der+(zh()?' 位点':' SNP')+' · ~'+fmt(p.formed)+(zh()?' 年前':' ybp'));
+    txt(s,{x,y:y-r-10,'text-anchor':'middle','font-size':last?11.5:10,'font-weight':last?800:700,fill:c.ink,stroke:c.bg,'stroke-width':2.6,style:'paint-order:stroke',...NUM},p.snp.replace('O-',''));
+    txt(s,{x,y:y+r+14,'text-anchor':'middle','font-size':7.5,'font-weight':600,fill:c.muted,stroke:c.bg,'stroke-width':2.6,style:'paint-order:stroke'},p.der+(zh()?' 位点':' SNP'));
+    txt(s,{x,y:y+r+26,'text-anchor':'middle','font-size':7,fill:c.faint,stroke:c.bg,'stroke-width':2.6,style:'paint-order:stroke'},'~'+fmt(p.formed)+(zh()?' 年前':' ybp'));
   });
   txt(s,{x:x0,y:y+80,'font-size':8,'font-weight':600,fill:c.muted},(D.ypath&&D.ypath.length)?(zh()?`YFull 树路径（共 ${D.ypath.length} 级）：${D.ypath.slice(0,8).map(p=>p.snp).join(' → ')} → … → ${D.ypath[D.ypath.length-1].snp}`:`YFull path (${D.ypath.length} levels): ${D.ypath.slice(0,8).map(p=>p.snp).join(' → ')} → … → ${D.ypath[D.ypath.length-1].snp}`):(zh()?'Y 路径数据缺失':'Y path data unavailable'));
   txt(s,{x:x0,y:y+96,'font-size':8,'font-weight':600,fill:c.muted},zh()?'逐级从 YFull 树下行，每级取衍生态支持最多的支系（明细见 y_terminal_snps.tsv）':'Walked down the YFull tree, taking the best derived-state-supported branch at each step');
@@ -96,7 +108,7 @@ reveal('ychain',(s,c)=>{
   txt(s,{x:x0+150,y:y+130,'font-size':9,'font-weight':600,fill:c.muted},'YFull '+D.versions.yfull+(zh()?' · 叶节点':' · leaf branch'));
   const _ysD=(D.y_snps||[]).map(r=>r.depth).filter(d=>d>0);
   txt(s,{x:x0,y:y+150,'font-size':8,'font-weight':600,fill:c.muted},_ysD.length?(zh()?`${_ysD.length} 个末端定义位点，深度 ${Math.min(..._ysD)}–${Math.max(..._ysD)}×，全部衍生态`:`${_ysD.length} terminal defining sites at ${Math.min(..._ysD)}-${Math.max(..._ysD)}x depth, all derived`):(zh()?'末端定义位点数据缺失':'terminal defining-site data unavailable'));
-  foot(s,c,520,296,zh()?'圆面积 = 该级衍生态位点数 · 最深色 = 终端支系 · 年代为 YFull 估计':'circle area = derived sites at that step · darkest = terminal · dates are YFull estimates');
+  foot(s,c,520,296,zh()?'图上只画末端 6 级（更早的 18 级见下方路径）· 圆面积 = 该级衍生态位点数 · 最深色 = 终端支系 · 年代为 YFull 估计':'only the last six steps are drawn (the earlier 18 are listed below) · circle area = derived sites at that step · darkest = terminal · dates are YFull estimates');
 });
 
 /* ── 01 mt strip ── */
