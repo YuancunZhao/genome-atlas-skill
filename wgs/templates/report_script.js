@@ -14,7 +14,10 @@ const V=name=>getComputedStyle(document.documentElement).getPropertyValue(name).
 const C=()=>({ink:V('--ink'),muted:V('--muted'),lab:V('--lab'),faint:V('--faint'),grid:V('--grid'),track:V('--track'),data:V('--data'),data2:V('--data2'),fd:V('--faintdata'),hero:V('--hero'),bg:V('--bg')});
 const fmt=n=>(n==null||Number.isNaN(n))?'—':n.toLocaleString('en-US');
 const CH = {}; const NUM={'font-weight':800};
-const foot=(s,c,w,y,txt_)=>txt(s,{x:w/2,y,'text-anchor':'middle','font-size':7,'font-weight':600,fill:c.faint,'letter-spacing':'.12em',class:'fade',style:'animation-delay:.9s'},txt_.toUpperCase());
+// 图注曾整体 toUpperCase()。全大写小字注是一种风格，但它会毁掉句子里的拉丁专名：中文图注里的
+// SouthEA 会印成 SOUTHEA、Mb 印成 MB、call_rate 印成 CALL_RATE，看起来像编码而不是面板名。
+// 保留字号/字距的注脚观感，去掉强制大写——信息正确优先于装饰。
+const foot=(s,c,w,y,txt_)=>txt(s,{x:w/2,y,'text-anchor':'middle','font-size':7,'font-weight':600,fill:c.faint,'letter-spacing':'.12em',class:'fade',style:'animation-delay:.9s'},txt_);
 // Clearing a figure with innerHTML='' is not portable: the containers are <svg> elements and
 // Safari throws on writing innerHTML to an SVG element, which took the whole render down with it.
 const clearEl=n=>{if(n.replaceChildren)n.replaceChildren();else while(n.firstChild)n.removeChild(n.firstChild)};
@@ -461,7 +464,9 @@ reveal('painting',(s,c)=>{
       if(so&&_P1) txt(s,{x:bx+w+7,y:y+13,'font-size':9,'font-weight':700,fill:c.muted},(so[_P1]*100).toFixed(0)+'%');
     }
   });
-  foot(s,c,900,496,zh()?'每条染色体两行 = 父母各给的一条单倍型 · 只画 ≥0.5 Mb 的非北方片段 · 右侧 = 该染色体的南方比例 · 灰条 = 无推断（数据缺失，不是 0）· 短臂留白 = 参考面板在该区无标记':'two rows per chromosome = the two parental haplotypes · only non-northern segments ≥0.5 Mb · right = southern share · grey = no inference (missing data, not zero) · blank short arms = no panel markers there');
+  // 面板名来自结果（calibration_panels），不是写死的"北方/南方"——换一对来源面板，这句话跟着换
+  foot(s,c,900,496,zh()?`每条染色体两行 = 父母各给的一条单倍型 · 只画 ≥0.5 Mb 的「${F.la_b}」片段 · 右侧 = 该染色体的「${F.la_b}」比例 · 灰条 = 无推断（数据缺失，不是 0）· 短臂留白 = 参考面板在该区无标记`
+                       :`two rows per chromosome = the two parental haplotypes · only ≥0.5 Mb segments of "${F.la_b}" · right = that chromosome's "${F.la_b}" share · grey = no inference (missing data, not zero) · blank short arms = no panel markers there`);
 });
 
 /* ── calibration ── */
