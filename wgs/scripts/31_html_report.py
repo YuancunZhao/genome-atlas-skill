@@ -17,6 +17,15 @@ if _src != _cand[0]:
     print(f"WARNING: rendering with the bundled example copy at {_src}.\n"
           f"         Copy it to {_cand[0]} and rewrite it for this sample before delivering.", flush=True)
 _TXT = _yaml.safe_load(open(_src, encoding="utf-8"))
+# When the sample copy is missing and the bundled example is used, the delivered HTML must
+# say so on its face -- a stdout warning is invisible to whoever opens the report file.
+_EXAMPLE_BANNER = "" if _src == _cand[0] else (
+    '<div style="margin:0 auto;max-width:900px;padding:10px 14px;border:1px solid #b45309;'
+    'border-radius:8px;color:#b45309;background:#fffbeb;font:13px/1.6 system-ui">'
+    '本报告的叙述文案来自<b>示例模板</b>，尚未针对该样本改写；数字由数据文件自动填充，'
+    '但所有解释性文字在交付前必须逐段核对。 / This report&apos;s narrative text is the '
+    '<b>bundled example copy</b>, not sample-specific wording; figures are data-driven but '
+    'every explanatory paragraph must be reviewed before delivery.</div>')
 _FILL = {"name_en": NAME_EN, "name_zh": NAME_ZH, "sample": SAMPLE,
          **{k: v for k, v in D.items() if isinstance(v, (str, int, float))}}
 class _Keep(dict):
@@ -149,7 +158,7 @@ def _payload_blocks():
 # The main script is wrapped so that a runtime failure reports itself: on a file:// page the
 # window.onerror listener only sees "Script error." when the detail is suppressed, but a catch
 # inside the same script always sees the real message. (Parse errors still only reach the console.)
-OUT.write_text(head + body
+OUT.write_text(head + _EXAMPLE_BANNER + body
                + _MARK("before-payload")
                + _payload_blocks()
                + _MARK("payload-loaded")

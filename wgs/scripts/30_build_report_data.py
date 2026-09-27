@@ -77,7 +77,18 @@ D["near_global"], D["knn_global"] = near(kg, me[pcs].values[0], pcs); D["near_ea
 cv = pd.read_csv(W/"05_clinvar/clinvar_all_hits.tsv", sep="\t", header=None, dtype=str, keep_default_na=False,
                  names=["chrom","pos","id","ref","alt","qual","geneinfo","clnsig","revstat","clndn","sigconf","eas_af","all_af","bcsq","gt","dp","gq","ad"])
 cls = cv.clnsig.str.extract(r"^([A-Za-z_/]+)")[0].value_counts()
-D["clinvar"] = {k: int(v) for k, v in cls.items()}; D["clinvar_total"] = len(cv); D["clinvar_date"] = "2026-09-05"
+D["clinvar"] = {k: int(v) for k, v in cls.items()}; D["clinvar_total"] = len(cv)
+# The ClinVar database date comes from the VCF actually annotated against (##fileDate),
+# not a hand-written constant that drifts as the database is refreshed.
+_cv_hdr = subprocess.run(["bcftools", "view", "-h", str(REF / "clinvar_grch37.vcf.gz")],
+                         capture_output=True, text=True)
+_fd = None
+for _l in _cv_hdr.stdout.splitlines():
+    _m = re.search(r"fileDate=(\d{4})-?(\d{2})-?(\d{2})", _l)
+    if _m:
+        _fd = _m
+        break
+D["clinvar_date"] = f"{_fd.group(1)}-{_fd.group(2)}-{_fd.group(3)}" if _fd else "-"
 lof = pd.read_csv(W/"05_clinvar/lof_table.tsv", sep="\t"); rare = pd.read_csv(W/"05_clinvar/lof_rare_final.tsv", sep="\t")
 D["lof"] = {"all": len(lof), "rare": len(rare), "rare_hom": int((rare.zyg == "hom/hemi").sum()), "rare_constrained": int((rare.oe_lof_upper < 0.6).sum())}
 # --- PGx
@@ -91,8 +102,8 @@ D["cyp2d6"] = open(_cy).read().split("\n")[1].split("\t")[1] if _cy.exists() els
 _t1k = W/"06_pgx/t1k/dayu_genotype.tsv"
 hla = pd.read_csv(_t1k, sep="\t", header=None) if _t1k.exists() else pd.DataFrame()
 D["hla"] = {r[0]: [str(r[2]).replace("HLA-", ""), str(r[5]).replace("HLA-", "") if str(r[5]) != "." else "-", int(r[4]), int(r[7])] for r in hla.itertuples(index=False) if str(r[0]).startswith("HLA-") and r[1] > 0}
-# --- PRS
-pr = pd.read_csv(W/"07_prs/prs_wgs.tsv", sep="\t"); D["prs"] = pr.round(1).fillna(-1).to_dict("records")
+# --- PRS (the template's tooltip reads pct_Han; step 12 names the same column pct_sub)
+pr = pd.read_csv(W/"07_prs/prs_wgs.tsv", sep="\t").rename(columns={"pct_sub": "pct_Han"}); D["prs"] = pr.round(1).fillna(-1).to_dict("records")
 # --- SV counts (13 writes sv_filtered.tsv; it is empty when no Delly VCF was produced)
 _sv_f = W/"08_sv/sv_filtered.tsv"
 sv = pd.read_csv(_sv_f, sep="\t", dtype={"chrom": str}) if _sv_f.exists() else pd.DataFrame(columns=["svtype", "dp_ratio", "genes"])
@@ -248,7 +259,7 @@ _ac = _read_tsv(W/"15_archaic/segments_carried.bed", header=None, names=["chrom"
 D["archaic"] = _ac.rename(columns={"source": "src"}).to_dict("records") if _ac is not None and len(_ac) else []
 # mutation spectrum (step 20)
 _sp = _read_tsv(W/"17_mutspec/spectrum96.tsv")
-D["spectrum"] = (_sp.rename(columns={"context": "ctx"})[["ctx", "n", "n_private", "frac", "frac_private"]].to_dict("records")
+D["spectrum"] = (_sp.rename(columns={"context": "ctx"})[["sub", "ctx", "n", "n_private", "frac", "frac_private"]].to_dict("records")
                  if _sp is not None and len(_sp) else [])
 # somatic signals (step 21)
 _sm = _read_tsv(W/"13_somatic/summary.tsv")
@@ -282,10 +293,12 @@ try:
         c, p = l.split("\t"); _dens.setdefault(c, []).append(int(p))
     D["density"] = []
     for c, pos in _dens.items():
+        # The circos ring steps i*5e6 over the array -- aggregate 1 Mb bins into 5 Mb sums so
+        # the ring's geometry and the bin size agree instead of sampling every fifth bin.
         n = D["chrlen"].get(c, 0) // 1_000_000 + 1
         counts = [0]*n
         for p in pos: counts[min(p // 1_000_000, n-1)] += 1
-        D["density"].append({"chrom": c, "counts": counts})
+        D["density"].append({"chrom": c, "counts": [sum(counts[i:i+5]) for i in range(0, n, 5)]})
 except Exception:
     D["density"] = []
 # Human Origins PCA (step 09b)
@@ -294,7 +307,8 @@ if _pa is not None and len(_pa):
     anc = _pa[_pa.kind == "ancient"]
     mod = _pa[_pa.kind != "ancient"]
     D["ho_ancient_pts"] = [{"label": r.label, "pc1": r.PC1_AVG, "pc2": r.PC2_AVG, "date": r.date} for r in anc.itertuples()]
-    D["ho_modern"] = [{"label": r.label, "pc1": r.PC1_AVG, "pc2": r.PC2_AVG} for r in mod.itertuples()]
+    # The template indexes ho_modern rows positionally (p[0]/p[1]/p[2]) -- arrays, not dicts.
+    D["ho_modern"] = [[r.label, r.PC1_AVG, r.PC2_AVG] for r in mod.itertuples()]
     _me = _pa[_pa.kind == "target"] if "target" in set(_pa.kind) else _pa.tail(1)
     D["ho_me"] = [float(_me.iloc[0].PC1_AVG), float(_me.iloc[0].PC2_AVG)]
     D["ho_prov"] = [{"label": r.label.split("_")[1] if r.label.startswith("Han_") else r.label,

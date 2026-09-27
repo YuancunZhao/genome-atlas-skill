@@ -159,6 +159,27 @@ def check_shapes(D):
     tel = next((s for s in (D.get("sections") or []) if s.get("id") == "telomere"), None)
     if tel and tel.get("code") == "insufficient_reads" and "100000" not in (tel.get("reason_zh") or "") + (tel.get("reason_en") or ""):
         fail("telomere insufficient_reads reason does not disclose the 100000 working gate")
+    # H2: template contract. The mutation-spectrum figure colours bars via d.sub, the PRS
+    # tooltip scales on r.pct_Han, the Human-Origins PCA indexes ho_modern rows positionally,
+    # and the circos ring steps density counts by 5 Mb -- any drift silently blanks a figure.
+    sub6 = {"C>A", "C>G", "C>T", "T>A", "T>C", "T>G"}
+    for r in (D.get("spectrum") or [])[:96]:
+        if r.get("sub") not in sub6:
+            fail(f"spectrum row {r.get('ctx')}: sub missing or not a canonical substitution (got {r.get('sub')!r})")
+            break
+    for p in (D.get("prs") or [])[:5]:
+        if "pct_Han" not in p:
+            fail("prs rows lack pct_Han (template tooltip scales on it; step 12 calls it pct_sub)")
+            break
+    for p in (D.get("ho_modern") or [])[:5]:
+        if not (isinstance(p, (list, tuple)) and len(p) == 3):
+            fail("ho_modern rows must be [label, pc1, pc2] arrays -- the PCA indexes them positionally")
+            break
+    for d in (D.get("density") or [])[:25]:
+        cl = D.get("chrlen", {}).get(d.get("chrom"), 0)
+        if cl and not (abs(len(d.get("counts") or []) - (cl // 5_000_000 + 1)) <= 1):
+            fail(f"density counts for {d.get('chrom')} are not 5 Mb bins ({len(d['counts'])} vs chrlen/{5_000_000:.0e})")
+            break
 
 
 def check_sections(D):
