@@ -25,6 +25,11 @@ callable_min_mapq: 20
 # 碱基质量阈值（mosdepth -Q）。与 callable_min_mapq（比对质量）是两回事：
 # 前者按读段上的碱基质量过滤，后者按读段的比对质量过滤。深度统计受前者影响。
 min_base_quality: 20
+# 变异召回（chrX/MT）：最低 QUAL，以及 mpileup 的深度上限。
+# 深度上限不是"质量"参数：太低会截断高深度位点（MT 杂合性需要深堆叠），太高会吃内存。
+min_variant_qual: 30
+mpileup_max_depth: 500
+mt_max_depth: 20000
 
 # --- reference populations (1000 Genomes labels). Defaults suit an East Asian sample; change for others.
 ref_superpop: EAS            # percentiles are "among the N individuals of this super-population"

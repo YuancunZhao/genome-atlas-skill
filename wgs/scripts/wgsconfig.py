@@ -116,6 +116,9 @@ BUILD = _ad.normalize_build(_g("build", "GRCh37"))
 MIN_DP = int(_g("callable_min_depth", 8))                 # callable mask: minimum depth
 MIN_MQ = int(_g("callable_min_mapq", 20))                 # callable mask: minimum mapping quality
 MIN_BQ = int(_g("min_base_quality", 20))                  # read depth/allele counting: minimum BASE quality
+MIN_VQ = float(_g("min_variant_qual", 30))                # variant recall (02 X/MT): minimum QUAL
+MPILEUP_MAX_DP = int(_g("mpileup_max_depth", 500))        # chrX chunks: per-file depth cap
+MT_MAX_DP = int(_g("mt_max_depth", 20000))                # MT: depth cap (heteroplasmy needs deep piles)
                                                           # (mosdepth -Q; distinct from mapping quality above)
 MEAN_DEPTH = _g("mean_depth", None)                       # filled in by 01_qc; used to normalise CNV depth ratios
 

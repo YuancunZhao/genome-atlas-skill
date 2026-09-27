@@ -18,6 +18,7 @@ out = {
   "PLINK2": c.PLINK2, "PICARD": c.PICARD, "PHARMCAT_DIR": c.PHARMCAT_DIR, "FLARE": c.FLARE,
   "JAVA": c.JAVA, "WHATSHAP": c.WHATSHAP,
   "MIN_DP": str(c.MIN_DP), "MIN_MQ": str(c.MIN_MQ), "MIN_BQ": str(c.MIN_BQ),
+  "MIN_VQ": str(c.MIN_VQ), "MPILEUP_MAX_DP": str(c.MPILEUP_MAX_DP), "MT_MAX_DP": str(c.MT_MAX_DP),
   # Local-ancestry sources and labels come from the validated options, not from the module defaults:
   # an unconfigured sample exports empty values and LOCAL_ENABLED=0, instead of inheriting a panel it
   # never asked for. SUPERPOP/SUBPOPS keep their previous meaning for PRS and other existing consumers.
