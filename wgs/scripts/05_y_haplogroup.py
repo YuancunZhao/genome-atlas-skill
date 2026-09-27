@@ -1,7 +1,8 @@
 #!/usr/bin/env python
-"""Y haplogroup by greedy descent of the YFull tree (v14) using pileup allele counts from the CRAM at every branch-defining
-SNP with a known hg19 position (ybrowse). A branch is 'derived' if the majority of its typed SNPs (depth>=2) show the
-derived allele. Reports the path, per-branch support, and the terminal branch; also lists private (novel) Y variants."""
+"""Y haplogroup by greedy descent of the configured YFull tree (current_version.txt records the exact
+version, 14.06.0 on this machine) using pileup allele counts from the CRAM at every branch-defining SNP with a known hg19
+position (ybrowse). A branch is 'derived' if the majority of its typed SNPs (depth>=2) show the derived allele.
+Reports the path, per-branch support and the terminal branch, and writes y_result.json for the report."""
 import sys, pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from wgsconfig import *  # noqa: F401,F403 -- P, W, REF, TOOLS, SAMPLE, THREADS ...
