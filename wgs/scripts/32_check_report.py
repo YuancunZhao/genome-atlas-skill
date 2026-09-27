@@ -9,10 +9,56 @@ Checks (P0_FIX_PLAN section 6, condensed):
   3. the rendered HTML contains no NaN / undefined / null / unfilled {placeholder}
   4. key-shape invariants the figures depend on
   5. reference naming: chr-prefixed names must not appear in the key tables
+  6. per-section status table (H1): status, reason code and bilingual reason are consistent
+  7. the report JS runs to completion under node with zero failed figures
 
 Exit code 0 = pass, 1 = at least one failure (details on stderr).
 """
-import json, pathlib, re, sys
+import json, pathlib, re, shutil, subprocess, sys, tempfile
+
+FAIL = []
+
+# Minimal DOM stub so the report script can be executed outside a browser. It is deliberately
+# dumb (every element is a fresh object) -- enough to catch a figure that throws at run time,
+# which the static checks above cannot see.
+DOM_STUB = r"""
+const fakeEl = () => ({
+  innerHTML: '', textContent: '', title: '',
+  style: { setProperty(){}, cursor: '' },
+  appendChild(){}, addEventListener(){}, removeEventListener(){},
+  setAttribute(){}, getAttribute: () => null, removeAttribute(){},
+  insertAdjacentHTML(){}, querySelectorAll: () => [], querySelector: () => null,
+  classList: { add(){}, remove(){}, toggle(){} },
+  getBBox: () => ({ x: 0, y: 0, width: 100, height: 10 }),
+  getBoundingClientRect: () => ({ x: 0, y: 0, width: 900, height: 300 }),
+  closest: () => null, contains: () => false, focus(){}, blur(){}, parentNode: null,
+});
+global.window = { __renderErrors: [], matchMedia: null, addEventListener(){}, devicePixelRatio: 1,
+                  location: { href: 'file://report.html' } };
+global.document = {
+  documentElement: { setAttribute(){}, style: { setProperty(){} } },
+  body: fakeEl(),
+  getElementById: () => fakeEl(),
+  querySelectorAll: () => [],
+  querySelector: () => null,
+  createElementNS: () => fakeEl(),
+  createElement: () => fakeEl(),
+  addEventListener(){},
+  title: '',
+};
+global.getComputedStyle = () => ({ getPropertyValue: () => '#123456' });
+global.localStorage = { getItem: () => null, setItem(){} };
+global.requestAnimationFrame = (cb) => 0;
+global.navigator = { userAgent: 'node' };
+"""
+
+NODE_RUNNER = """require(process.argv[2]);
+const fs = require('fs');
+try { eval(fs.readFileSync(process.argv[3], 'utf8')); }
+catch (e) { console.log('TOP-LEVEL ERROR: ' + e.message); process.exit(2); }
+const errs = (global.window && global.window.__renderErrors) || [];
+console.log('RENDER_ERRORS=' + JSON.stringify(errs));
+"""
 
 FAIL = []
 
@@ -118,6 +164,45 @@ def check_naming(root):
             fail(f"unexpected chromosome name '{c}' in {src}")
 
 
+def check_runtime(html_path):
+    """Run the report JS under node with a minimal DOM stub; no figure may fail.
+
+    Static checks cannot see a figure that throws at run time -- a circos crash on an
+    X-chromosome gene deletion shipped past all of them. Skipped, with a note, when node
+    is unavailable.
+    """
+    node = shutil.which("node")
+    if not node:
+        print("note: node was not found; the runtime figure check was skipped")
+        return
+    if html_path is None or not html_path.exists():
+        fail("report.html not found for the runtime check")
+        return
+    html = html_path.read_text(encoding="utf-8")
+    i, j = html.find("<script>") + len("<script>"), html.rfind("</script>")
+    if i < len("<script>") or j <= i:
+        fail("report.html has no inline <script> block")
+        return
+    with tempfile.TemporaryDirectory() as td:
+        p = pathlib.Path(td)
+        (p / "stub.js").write_text(DOM_STUB, encoding="utf-8")
+        (p / "runner.js").write_text(NODE_RUNNER, encoding="utf-8")
+        (p / "report.js").write_text(html[i:j], encoding="utf-8")
+        try:
+            r = subprocess.run([node, str(p / "runner.js"), str(p / "stub.js"), str(p / "report.js")],
+                               capture_output=True, text=True, timeout=180)
+        except subprocess.TimeoutExpired:
+            fail("the report JS did not finish within 180 s under node")
+            return
+    out = (r.stdout or "") + (r.stderr or "")
+    if "TOP-LEVEL ERROR" in out:
+        line = next((l for l in out.splitlines() if "TOP-LEVEL ERROR" in l), out[-200:])
+        fail(f"report JS throws at top level: {line}")
+    elif "RENDER_ERRORS=[]" not in out:
+        m = re.search(r"RENDER_ERRORS=(\[.*\])", out)
+        fail(f"figures failed to render: {m.group(1) if m else out.strip()[-200:]}")
+
+
 def main():
     root = pathlib.Path(__file__).resolve().parents[1]
     json_path = pathlib.Path(sys.argv[1]) if len(sys.argv) > 1 else root / "work/wgs/report_data.json"
@@ -134,6 +219,7 @@ def main():
         fail(f"{json_path} not found")
     check_html(html_path)
     check_naming(root)
+    check_runtime(html_path)
 
     if FAIL:
         print("FAILED:", file=sys.stderr)
