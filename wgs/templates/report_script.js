@@ -79,11 +79,16 @@ reveal('chromdepth',(s,c)=>{
 reveal('ychain',(s,c)=>{
   const P=D.ypath, n=P.length, x0=40, x1=490, y=100;
   el(s,'line',{x1:x0,y1:y,x2:x1,y2:y,stroke:c.ink,'stroke-width':1,class:'draw'});
-  P.forEach((p,i)=>{const x=x0+(x1-x0)*i/(n-1), r=4+Math.sqrt(p.der)*3, last=i===n-1;
+  // Radius is sqrt-normalised into a fixed range. Raw sqrt(der) made the root node ~90px across while
+  // the tip nodes were 4px: the wide part swallowed the labels of its neighbours. Area still scales
+  // with the derived-site count, which is what the caption promises.
+  const _maxDer=Math.max(1,...P.map(p=>p.der));
+  const _rad=der=>4.5+21.5*Math.sqrt(der/_maxDer);
+  P.forEach((p,i)=>{const x=x0+(x1-x0)*i/(n-1), r=_rad(p.der), last=i===n-1, lane=i%3;
+    const up=y-r-9-lane*10, dn=y+r+12+lane*10;      // three lanes: neighbours never share a baseline
     const cir=el(s,'circle',{cx:x,cy:y,r,fill:last?c.hero:c.data,stroke:c.bg,'stroke-width':1.5,class:'pop'}); cir.style.animationDelay=(i*110)+'ms'; tip(cir,`${p.snp} · ${p.der} derived / ${p.anc} ancestral · formed ${fmt(p.formed)} ybp`);
-    txt(s,{x,y:y-r-10,'text-anchor':'middle','font-size':last?11:9.5,'font-weight':last?800:700,fill:c.ink,...NUM},p.snp.replace('O-',''));
-    txt(s,{x,y:y+r+14,'text-anchor':'middle','font-size':7,'font-weight':600,fill:c.muted},p.der+(zh()?' 位点':' SNP'));
-    txt(s,{x,y:y+r+25,'text-anchor':'middle','font-size':7,fill:c.faint},'~'+fmt(p.formed)+(zh()?' 年前':' ybp'));
+    txt(s,{x,y:up,'text-anchor':'middle','font-size':last?11:9.5,'font-weight':last?800:700,fill:c.ink,stroke:c.bg,'stroke-width':2.4,style:'paint-order:stroke',...NUM},p.snp.replace('O-',''));
+    txt(s,{x,y:dn,'text-anchor':'middle','font-size':7,'font-weight':600,fill:c.muted,stroke:c.bg,'stroke-width':2.4,style:'paint-order:stroke'},p.der+(zh()?' 位点':' SNP')+' · ~'+fmt(p.formed)+(zh()?' 年前':' ybp'));
   });
   txt(s,{x:x0,y:y+80,'font-size':8,'font-weight':600,fill:c.muted},(D.ypath&&D.ypath.length)?(zh()?`YFull 树路径（共 ${D.ypath.length} 级）：${D.ypath.slice(0,8).map(p=>p.snp).join(' → ')} → … → ${D.ypath[D.ypath.length-1].snp}`:`YFull path (${D.ypath.length} levels): ${D.ypath.slice(0,8).map(p=>p.snp).join(' → ')} → … → ${D.ypath[D.ypath.length-1].snp}`):(zh()?'Y 路径数据缺失':'Y path data unavailable'));
   txt(s,{x:x0,y:y+96,'font-size':8,'font-weight':600,fill:c.muted},zh()?'逐级从 YFull 树下行，每级取衍生态支持最多的支系（明细见 y_terminal_snps.tsv）':'Walked down the YFull tree, taking the best derived-state-supported branch at each step');
