@@ -234,17 +234,35 @@ reveal('prs',(s,c)=>{
   foot(s,c,900,H-8,zh()?`菱形 = 在 ${(D.pop||{}).n_super||'—'} 名东亚人中的百分位 · 空心圆 = 在 ${(D.pop||{}).n_sub||'—'} 名汉族中 · 灰带 = 中间一半的人`:`diamond = percentile among ${(D.pop||{}).n_super||'—'} East Asians · hollow = among ${(D.pop||{}).n_sub||'—'} Han · band = middle half`);
 });
 
-/* ── 06 CNV depth panel ── */
+/* ── 06 SV panel (Delly): the slot used to hold a copy-number depth chart that no producer fills,
+      while the calls that do exist (3,619 SV, 10 whole-gene deletion events) went unshown. ── */
 reveal('cnv',(s,c)=>{
-  const rows=D.cnv||[], x0=120, x1=470, top=14, rh=24, X=v=>x0+(x1-x0)*Math.min(v,2.2)/2.2;
-  if(!rows.length){txt(s,{x:12,y:22,'font-size':10,fill:c.faint},zh()?'本版未生成 CNV 深度面板：没有拷贝数产物（调用层未接入）。':'CNV depth panel not generated in this build: no copy-number producer is wired up.');return}
-  [0,0.5,1,1.5,2].forEach(v=>{el(s,'line',{x1:X(v),y1:top-6,x2:X(v),y2:top+rows.length*rh,stroke:v===1?c.faint:c.grid,'stroke-width':v===1?1:.5,'stroke-dasharray':v===1?'':'2 3'});txt(s,{x:X(v),y:top+rows.length*rh+12,'text-anchor':'middle','font-size':7.5,fill:c.faint},v===1?(zh()?'1.0 = 两份':'1.0 = two copies'):v.toFixed(1))});
-  rows.forEach((r,i)=>{const y=top+i*rh+8, w=X(r.ratio)-x0;
-    txt(s,{x:x0-8,y:y+3,'text-anchor':'end','font-size':9,'font-weight':r.copies<2?800:600,fill:c.ink},r.locus);
-    const b=el(s,'rect',{x:x0,y:y-5,width:Math.max(w,1.5),height:10,rx:2,fill:r.copies===0?c.hero:(r.copies===1?c.data:c.data2),class:'fade',style:`animation-delay:${i*.05}s`}); tip(b,`${r.locus}: depth ratio ${r.ratio} · ${r.copies} copies · ${r.evidence}`);
-    txt(s,{x:X(r.ratio)+6,y:y+3,'font-size':8,'font-weight':800,fill:c.ink},r.copies+(zh()?' 份':(r.copies===1?' copy':' copies')));
-  });
-  foot(s,c,520,326,zh()?'条长 = 该区读段深度 / 全基因组平均 · 最深色 = 零份（纯合缺失）· SMN 来自专用工具':'bar = read depth in the locus / genome average · darkest = zero copies (homozygous deletion) · SMN from a dedicated caller');
+  const rows=D.sv_by_chrom||[], gd=D.sv_gene_dels||[], st=D.sv_gene_dels_stats||{}, cnt=D.sv_counts||{};
+  if(!rows.length){
+    txt(s,{x:12,y:22,'font-size':10,fill:c.faint},zh()?'本版没有结构变异产物（Delly 未产出）。':'No structural-variant calls in this build (Delly produced nothing).');return}
+  const x0=52, x1=270, top=32, rh=11.2, maxc=Math.max(1,...rows.map(r=>r.DEL+r.DUP+r.INV)), X=v=>x0+(x1-x0)*v/maxc;
+  txt(s,{x:x0-4,y:16,'font-size':8,'font-weight':600,fill:c.faint,'letter-spacing':'.06em'},zh()?'每条染色体上的 SV（堆叠）':'SV CALLS PER CHROMOSOME');
+  rows.forEach((r,i)=>{const y=top+i*rh; let acc=0;
+    txt(s,{x:x0-6,y:y+3,'text-anchor':'end','font-size':7.5,fill:c.faint},r.chrom);
+    [['DEL',c.data],['DUP',c.data2],['INV',c.faint]].forEach(([k,col])=>{const v=r[k]||0; if(!v)return;
+      const bx=X(acc), bw=Math.max(X(acc+v)-bx,.8);
+      const b=el(s,'rect',{x:bx,y:y-3.2,width:bw,height:6.4,rx:1,fill:col,class:'fade',style:`animation-delay:${i*.02}s`});
+      tip(b,`chr${r.chrom}: ${k} ${v}`); acc+=v});
+    txt(s,{x:X(acc)+5,y:y+3,'font-size':7,fill:c.faint},acc)});
+  const ly=top+rows.length*rh+16;
+  [['DEL',c.data],['DUP',c.data2],['INV',c.faint]].forEach(([k,col],i)=>{
+    el(s,'rect',{x:x0+i*92,y:ly-5.5,width:9,height:7,rx:1,fill:col});
+    txt(s,{x:x0+i*92+13,y:ly+1,'font-size':7.5,fill:c.muted},k+' '+fmt(cnt[k]||0))});
+  const rx=300, rtop=42, rrh=13, BW=38;
+  txt(s,{x:rx,y:16,'font-size':8,'font-weight':600,fill:c.faint,'letter-spacing':'.06em'},zh()?'整段缺失的基因':'WHOLE-GENE DELETIONS');
+  txt(s,{x:rx,y:27,'font-size':7.5,fill:c.muted},(st.events||0)+(zh()?' 个事件 / ':' events / ')+(st.genes||0)+(zh()?' 个基因 · 深度核验':' genes · depth-checked'));
+  gd.slice(0,14).forEach((r,i)=>{const y=rtop+i*rrh, f=(typeof r.frac==='number')?r.frac:null;
+    txt(s,{x:rx,y:y+3,'font-size':8,'font-weight':700,fill:c.ink},r.gene);
+    txt(s,{x:rx+110,y:y+3,'font-size':7.5,fill:c.faint},'chr'+r.chrom);
+    el(s,'line',{x1:rx+128,y1:y,x2:rx+128+BW,y2:y,stroke:c.grid,'stroke-width':3.4});
+    if(f!==null) el(s,'line',{x1:rx+128,y1:y,x2:rx+128+BW*Math.max(.04,Math.min(f,1)),y2:y,stroke:c.hero,'stroke-width':3.4});
+    txt(s,{x:rx+128+BW+6,y:y+3,'font-size':7.5,'font-weight':700,fill:c.ink},f===null?'—':f.toFixed(2)+'×')});
+  foot(s,c,520,324,zh()?`Delly 2.6.0 读段对判定 + 深度核验 · 共 ${fmt(D.sv_total||0)} 个 SV（大小中位 ${D.sv_size_median||'—'} bp）· 右侧条 = 该基因上读段深度 / 全基因组平均，越低越像真缺失`:`Delly 2.6.0 read-pair calls + depth checks · ${fmt(D.sv_total||0)} SVs (median size ${D.sv_size_median||'—'} bp) · right-hand bar = read depth over the gene / genome average, lower = more deletion-like`);
 });
 /* ── 06 STR panel ── */
 reveal('str',(s,c)=>{
@@ -331,7 +349,20 @@ F.segmax=Math.max(0,...((D.la_segments||[]).filter(g=>g.anc==='SouthEA').map(g=>
 F.snvn=fmt(D.spectrum.reduce((a,b)=>a+b.n,0));
 F.cpg=(D.spectrum.filter(x=>/\[C>T\]G/.test(x.ctx)).reduce((a,b)=>a+b.frac,0)*100).toFixed(1);
 
-const ANC_ZH={"China_Henan_Jiaozuoniecunsite_LBA_IA":"河南 焦作聂村 晚商–铁器时代","China_Shandong_Chengziya_Yueshi":"山东 城子崖 岳石文化","China_Henan_Pingliangtaisite_LN":"河南 平粮台 龙山文化","China_Baligang_BA_EasternZhou":"河南 八里岗 东周","China_Jinan_LiuJiaZhuang_Shang":"山东 济南刘家庄 商","China_Jining_YinJiaCheng_Longshan":"山东 济宁尹家城 龙山","China_Shandong_Chengziya_Longshan":"山东 城子崖 龙山","China_InnerMongolia_Erdaojingzi_LN":"内蒙古 二道井子 新石器晚期","China_Henan_Haojiatai_LN":"河南 郝家台 龙山","China_Baligang_LN_Longshan":"河南 八里岗 龙山","China_Shandong_Dinggong_LN":"山东 丁公 龙山","China_Henan_Wadiansite_LN":"河南 瓦店 龙山","China_Baligang_LN_Shijiahe":"河南 八里岗 石家河","China_Qingdao_BeiQian_Dawenkou":"山东 青岛北阡 大汶口","China_Baligang_LN_Yangshao":"河南 八里岗 仰韶","China_Shanxi_Shengedaliang_LN":"陕西 神圪垯梁 龙山","China_LBA_EIA":"中国 晚青铜–早铁器","China_Qinghai_Dacaozisite_IA":"青海 大草子 铁器时代","China_Qinghai_Lajiasite_LN":"青海 喇家 龙山","Japan_KofunPeriod":"日本 古坟时代"};
+const ANC_ZH={"China_Henan_Jiaozuoniecunsite_LBA_IA":"河南 焦作聂村 晚商–铁器时代","China_Shandong_Chengziya_Yueshi":"山东 城子崖 岳石文化","China_Henan_Pingliangtaisite_LN":"河南 平粮台 龙山文化","China_Baligang_BA_EasternZhou":"河南 八里岗 东周","China_Jinan_LiuJiaZhuang_Shang":"山东 济南刘家庄 商","China_Jining_YinJiaCheng_Longshan":"山东 济宁尹家城 龙山","China_Shandong_Chengziya_Longshan":"山东 城子崖 龙山","China_InnerMongolia_Erdaojingzi_LN":"内蒙古 二道井子 新石器晚期","China_Henan_Haojiatai_LN":"河南 郝家台 龙山","China_Baligang_LN_Longshan":"河南 八里岗 龙山","China_Shandong_Dinggong_LN":"山东 丁公 龙山","China_Henan_Wadiansite_LN":"河南 瓦店 龙山","China_Baligang_LN_Shijiahe":"河南 八里岗 石家河","China_Qingdao_BeiQian_Dawenkou":"山东 青岛北阡 大汶口","China_Baligang_LN_Yangshao":"河南 八里岗 仰韶","China_Shanxi_Shengedaliang_LN":"陕西 神圪垯梁 龙山","China_LBA_EIA":"中国 晚青铜–早铁器","China_Qinghai_Dacaozisite_IA":"青海 大草子 铁器时代","China_Qinghai_Lajiasite_LN":"青海 喇家 龙山","Japan_KofunPeriod":"日本 古坟时代",
+  // 补全：报告的"所属群体"列与散点标签会对所有出现过的群体取中文名，缺条目就会漏出英文 ID
+  "China_MLBA":"中国 中晚期青铜（含云南白羊村 M13）","China_MBA":"中国 中期青铜","China_LBA":"中国 晚期青铜",
+  "China_IA":"中国 铁器时代","China_IA_Hellenistic":"中国 铁器时代（希腊化期）","China_LN_Xiaoheyan":"中国 小河沿 新石器晚期",
+  "Taiwan_EN":"台湾 新石器早期","Taiwan_IA":"台湾 铁器时代",
+  "China_AmurRiverBasin_LatePaleolithic":"黑龙江流域 旧石器晚期","China_AmurRiverBasin_Mesolithic":"黑龙江流域 中石器","China_AmurRiverBasin_N":"黑龙江流域 新石器",
+  "China_Qinghai_Zongri":"青海 宗日",
+  "China_Tibet_Agangrong":"西藏 阿岗绒","China_Tibet_Chaxiutang":"西藏 茶秀塘","China_Tibet_Piyangjiweng":"西藏 皮央吉翁",
+  "China_Tibet_Gebusailu_IA":"西藏 格布赛鲁 铁器时代","China_Tibet_Butaxiongqu":"西藏 布塔雄曲","China_Tibet_Latuotanggu":"西藏 拉托塘果",
+  "China_Tibet_Pulanduowa_IA":"西藏 普兰多瓦 铁器时代","China_Tibet_Longsangquduo":"西藏 陇桑曲多","China_Tibet_Qulongsazha_IA":"西藏 曲龙萨扎 铁器时代",
+  "China_Tibet_Ounie":"西藏 欧聂","China_Tibet_Nudagang":"西藏 努达岗","China_Tibet_Sangdalongguo_IA":"西藏 桑达隆果 铁器时代",
+  "Mongolia_XiongnuPeriod":"蒙古 匈奴时期","Mongolia_East_N":"蒙古 东部 新石器","Mongolia_N":"蒙古 新石器",
+  "Japan_Nagabaka_2800BP":"日本 长坂 2800 BP","Japan_Chiba_HG_Jomon":"日本 千叶 绳文（狩猎采集）",
+  "Japan_Honshu_EarlyJomon":"日本 本州 绳文早期","Japan_Honshu_MidLateJomon":"日本 本州 绳文中晚期"};
 
 /* ── chromosome painting ── */
 reveal('painting',(s,c)=>{
@@ -441,6 +472,14 @@ reveal('timedist',(s,c)=>{
   // 拟合线改到 r 算出来之后再画（见下）：|r| 太小时不该给出"趋势"的视觉暗示
   rows.forEach(r=>{const d=el(s,'circle',{cx:X(r.date),cy:Y(r.d),r:3.6+Math.sqrt(r.n),fill:a.n,opacity:.78,stroke:c.bg,'stroke-width':1.2,class:'pop'});
     tip(d,`${r.label} · n=${r.n} · ${fmt(Math.round(r.date))} BP · d=${r.d.toFixed(4)}`)});
+  // The headline quotes an *individual* (BaiyangcunM13, d=0.0033) but rows hold group averages, so
+  // without this marker the quoted genome had no point anywhere in the figure. Plot it, labelled.
+  {const ni=(D.ho_near_individual||[])[0];
+   if(ni){const nx=X(ni.date), ny=Y(ni.d);
+     const dz=el(s,'circle',{cx:nx,cy:ny,r:4.6,fill:c.hero,stroke:c.bg,'stroke-width':1.6,class:'pop'});
+     tip(dz,`${ni.iid} · d=${ni.d.toFixed(4)} · ${fmt(Math.round(ni.date))} BP · ${ni.group}`);
+     txt(s,{x:nx,y:ny+16,'text-anchor':'middle','font-size':8.5,'font-weight':800,fill:c.hero,stroke:c.bg,'stroke-width':2.8,'paint-order':'stroke'},
+         (zh()?'最近个体 ':'nearest individual ')+ni.iid.replace(/\.(SG|AG|TW)$/,'')+' · '+ni.d.toFixed(4));}}
   const near=rows[0];
   // Say what the scatter actually shows: the correlation with age, the spread around the trend, and
   // the nearest group with its distance. Without these the panel was just dots.
@@ -456,12 +495,8 @@ reveal('timedist',(s,c)=>{
   txt(s,{x:x0+2,y:y0+11,'font-size':8.5,'font-weight':700,fill:c.ink,stroke:c.bg,'stroke-width':2.6,'paint-order':'stroke'},
       zh()?`${_n} 个古代人群 · 与年代相关 r=${_rr.toFixed(2)}（${Math.abs(_rr)<0.3?'几乎无趋势':'趋势明显'}）`
          :`${_n} ancient groups · r=${_rr.toFixed(2)} vs date (${Math.abs(_rr)<0.3?'no real trend':'clear trend'})`);
-  // The scatter plots *groups*; the report's headline quotes an *individual*. State both, or the
-  // reader cannot find the quoted genome anywhere in the figure.
-  {const _ni=(D.ho_near_individual||[])[0];
-   if(_ni) txt(s,{x:x0+2,y:y0+24,'font-size':8.5,'font-weight':800,fill:c.hero,stroke:c.bg,'stroke-width':2.6,'paint-order':'stroke'},
-     (zh()?'最近个体 ':'nearest individual ')+_ni.iid.replace(/\.(SG|AG|TW)$/,'')+' · d='+_ni.d.toFixed(4)
-       +(_ni.group&&ANC_ZH[_ni.group]?zh()?'（'+ANC_ZH[_ni.group]+'）':' ('+ANC_ZH[_ni.group]+')':''));}
+  // The scatter plots *groups*; the headline quotes an *individual*, which is now plotted and
+  // labelled by its own marker above -- so this block no longer duplicates that line of text.
   txt(s,{x:X(near.date)+10,y:Y(near.d)+3,'font-size':9,'font-weight':700,fill:c.ink,stroke:c.bg,'stroke-width':2.6,'paint-order':'stroke'},
       (ANC_ZH[near.label]||near.label.replace(/_/g,' ')) + (zh()?' · 最近群体 d=':' · nearest group d=') + near.d.toFixed(4));
   txt(s,{x:x0+W/2,y:y0+H+34,'text-anchor':'middle','font-size':8,'font-weight':700,fill:c.muted,'letter-spacing':'.08em'},zh()?'年代（距今年数）':'YEARS BEFORE PRESENT');

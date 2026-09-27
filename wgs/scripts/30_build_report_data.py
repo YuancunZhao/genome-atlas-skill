@@ -126,6 +126,15 @@ D["sv_gene_dels_stats"] = {"events": int(len(_wgd)), "genes": len({e["gene"] for
 D["n_sv_gene_del_events"] = int(D["sv_gene_dels_stats"]["events"])  # 10 DEL events...
 D["n_sv_gene_dels"] = len(D["sv_gene_dels"])                        # ...spanning these gene-event pairs (15)
 D["n_sv_gene_del_genes"] = int(D["sv_gene_dels_stats"]["genes"])
+# Per-chromosome SV tally + median size, so the copy-number slot in section 06 can show the calls
+# that actually exist instead of a depth chart no producer fills.
+if len(sv):
+    _g = sv.groupby("chrom").svtype.value_counts().unstack(fill_value=0)
+    D["sv_by_chrom"] = [{"chrom": c, "DEL": int(_g.loc[c].get("DEL", 0)), "DUP": int(_g.loc[c].get("DUP", 0)),
+                         "INV": int(_g.loc[c].get("INV", 0))} for c in [str(i) for i in range(1, 23)] if c in _g.index]
+    D["sv_size_median"] = int(sv["size"].median()) if "size" in sv.columns else 0
+else:
+    D["sv_by_chrom"] = []; D["sv_size_median"] = 0
 # SMN copies come from SMNCopyNumberCaller and STR lengths from ExpansionHunter; no step of
 # this repository runs either tool, so both sections degrade to "not assessed" when absent.
 _smn_f = W/"08_sv/smn/target.tsv"
