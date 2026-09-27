@@ -342,6 +342,43 @@ if _pa is not None and len(_pa):
     # averages 0.0495 -- the caption quotes the individual, so emit the individual list as well.
     D["ho_near_individual"] = [{"iid": str(r.iid), "group": str(r.label), "d": float(r.d), "date": float(r.date)}
                                for r in anc.nsmallest(12, "d").itertuples()]
+    # --- affinity ranking for the ancestry figure (W-T1). A group mean and a single-genome minimum
+    # are not the same statistic: the nearest genome (BaiyangcunM13.SG, d=0.0033) belongs to a group
+    # averaging 0.0495, 15x further out. Emit one table sorted by d, carrying kind/n/date/region, so
+    # the figure can put modern and ancient on a single axis and label which is which.
+    _reg_tsv = _read_tsv(pathlib.Path(__file__).resolve().parents[1] / "panel" / "aadr_site_regions.tsv",
+                         comment="#", keep_default_na=False)
+    # name_zh is only accepted when it actually starts with Han text: a column slip would otherwise
+    # put "north" on the figure as if it were the group's Chinese name.
+    _reg = ({str(r.label): (str(r.region) if str(r.region) in ("north", "south") else "",
+                            str(r.name_zh) if str(r.name_zh or "")[:1] and "\u4e00" <= str(r.name_zh)[0] <= "\u9fff" else "")
+             for r in _reg_tsv.itertuples()} if _reg_tsv is not None and len(_reg_tsv) else {})
+    _good = anc[anc.call_rate >= 0.5]
+    _ag = _good.groupby("label").agg(n=("d", "size"), d=("d", "mean"), date=("date", "mean"))
+    _ancient = _ag[_ag.n >= 2]
+    _modg = mod[mod.kind == "modern"].groupby("label").agg(n=("d", "size"), d=("d", "mean"))
+    _modg = _modg[_modg.n >= 2].nsmallest(10, "d")
+    def _aff(lab, kind, n, d, date_mean):
+        return {"label": str(lab), "kind": kind, "d": round(float(d), 5), "n": int(n),
+                "date_mean": int(date_mean), "region": _reg.get(str(lab), ("", ""))[0],
+                "name_zh": _reg.get(str(lab), ("", ""))[1]}
+    D["ho_affinity"] = sorted(
+        [_aff(k, "ancient", v.n, v.d, round(v.date)) for k, v in _ancient.iterrows()] +
+        [_aff(k, "modern", v.n, v.d, 0) for k, v in _modg.iterrows()], key=lambda r: r["d"])
+    # The strip holds the three closest ancient *groups*; the group of the closest ancient
+    # *individual* is emitted separately, because the caption quotes that genome and its group ranks
+    # far down the list -- without it the quoted genome has nothing to be compared against.
+    def _members(lab, limit=12):
+        return [{"iid": str(r.iid), "d": round(float(r.d), 5), "call_rate": round(float(r.call_rate), 3),
+                 "date": int(round(r.date))} for r in _good[_good.label == lab].nsmallest(limit, "d").itertuples()]
+    _strip_labs = [str(k) for k in _ancient.nsmallest(3, "d").index]
+    D["ho_affinity_strip"] = [dict(_aff(k, "ancient", _ancient.loc[k].n, _ancient.loc[k].d, round(_ancient.loc[k].date)),
+                                   mean_d=round(float(_ancient.loc[k].d), 5), members=_members(k)) for k in _strip_labs]
+    _tg = D["ho_near_individual"][0]["group"] if D["ho_near_individual"] else None
+    D["ho_target_group"] = (dict(_aff(_tg, "ancient", _ancient.loc[_tg].n, _ancient.loc[_tg].d, round(_ancient.loc[_tg].date)),
+                                 mean_d=round(float(_ancient.loc[_tg].d), 5), in_strip=_tg in _strip_labs,
+                                 members=_members(_tg))
+                            if _tg is not None and _tg in _ancient.index else None)
     # The template indexes ho_modern rows positionally (p[0]/p[1]/p[2]) -- arrays, not dicts.
     D["ho_modern"] = [[r.label, r.PC1_AVG, r.PC2_AVG] for r in mod.itertuples()]
     _me = _pa[_pa.kind == "target"] if "target" in set(_pa.kind) else _pa.tail(1)
@@ -351,6 +388,7 @@ if _pa is not None and len(_pa):
                      for r in mod[mod.label.str.startswith("Han_")].itertuples()]
 else:
     D["ho_ancient_pts"] = []; D["ho_modern"] = []; D["ho_me"] = [0.0, 0.0]; D["ho_prov"] = []
+    D["ho_affinity"] = []; D["ho_affinity_strip"] = []; D["ho_target_group"] = None
 _na = _read_tsv(W/"11_aadr/near_ancient.tsv")
 D["ho_near_ancient"] = _na.to_dict("records") if _na is not None and len(_na) else []
 # PRS site coverage, for the copy's transferability note

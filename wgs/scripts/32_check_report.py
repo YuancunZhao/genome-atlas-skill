@@ -192,6 +192,44 @@ def check_shapes(D):
             break
 
 
+    # W-T1: the affinity figure draws D.ho_affinity (modern + ancient on one distance axis) and the
+    # three closest ancient groups with their members. region is a hand-checked judgement layer, so
+    # the checks are about it staying honest: only China_ labels may carry one, and only n/s.
+    aff = D.get("ho_affinity") or []
+    if not aff:
+        fail("ho_affinity missing or empty (the ancestry figure has nothing to draw)")
+    else:
+        ds = [r.get("d") for r in aff]
+        if ds != sorted(ds):
+            fail("ho_affinity is not sorted by d")
+        if not any(r.get("kind") == "modern" for r in aff):
+            fail("ho_affinity carries no modern rows; the nearest-modern anchor would vanish")
+        for r in aff:
+            if r.get("kind") == "ancient" and int(r.get("n") or 0) < 2:
+                fail(f"ho_affinity ancient row {r.get('label')} has n<2")
+                break
+            if r.get("region") not in ("", None, "north", "south"):
+                fail(f"ho_affinity {r.get('label')} has region {r.get('region')!r}")
+                break
+            nz = str(r.get("name_zh") or "")
+            if nz and not ("\u4e00" <= nz[0] <= "\u9fff"):
+                fail(f"ho_affinity {r.get('label')} has a non-Han name_zh {nz!r} (column slip?)")
+                break
+            if r.get("region") and not str(r.get("label", "")).startswith("China_"):
+                fail(f"ho_affinity {r.get('label')} is not a China_ label but carries a region")
+                break
+        strip = D.get("ho_affinity_strip") or []
+        top3 = [x.get("label") for x in sorted([r for r in aff if r.get("kind") == "ancient"],
+                                               key=lambda r: r["d"])[:3]]
+        if [s2.get("label") for s2 in strip] != top3:
+            fail(f"ho_affinity_strip {[s2.get('label') for s2 in strip]} != the 3 closest ancient groups {top3}")
+        elif not all(s2.get("members") for s2 in strip):
+            fail("ho_affinity_strip rows must carry their members")
+        tg = D.get("ho_target_group")
+        if tg and not (tg.get("members") and tg.get("mean_d") is not None):
+            fail("ho_target_group must carry its members and its mean distance")
+
+
 def check_sections(D):
     """H1: every section carries a status; 'unavailable' must explain itself bilingually."""
     secs = D.get("sections")

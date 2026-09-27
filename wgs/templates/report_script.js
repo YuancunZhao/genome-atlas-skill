@@ -456,54 +456,71 @@ reveal('hopca',(s,c)=>{
 });
 
 /* ── distance vs time ── */
+/* ── affinity ranking (W-T1). Replaces the distance-vs-age scatter: a group mean and a single
+      genome's minimum are different statistics, so the old figure mixed them on one y-axis with a
+      time axis that carried no signal (r=0.09). Here both kinds share one distance axis, sorted,
+      with n and date per row, and the closest genome is shown against its own group below. ── */
 reveal('timedist',(s,c)=>{
-  const a=AC(), x0=54,y0=16,W=330,H=390;
-  const rows=D.ho_near_ancient.filter(r=>r.date>0).slice(0,14);
-  const dmax=Math.max(...rows.map(r=>r.d))*1.1, tmax=7600;
-  const X=v=>x0+W*(1-v/tmax), Y=v=>y0+H*(v/dmax);
-  el(s,'rect',{x:x0,y:y0,width:W,height:H,fill:'none',stroke:c.grid,'stroke-width':.6});
-  [7000,5000,3000,1000].forEach(v=>{el(s,'line',{x1:X(v),y1:y0,x2:X(v),y2:y0+H,stroke:c.grid,'stroke-width':.5});
-    txt(s,{x:X(v),y:y0+H+16,'text-anchor':'middle','font-size':8,fill:c.faint},fmt(v))});
-  [0,0.01,0.02].forEach(v=>{if(v>dmax)return; el(s,'line',{x1:x0,y1:Y(v),x2:x0+W,y2:Y(v),stroke:c.grid,'stroke-width':.5});
-    txt(s,{x:x0-8,y:Y(v)+3,'text-anchor':'end','font-size':8,fill:c.faint},v.toFixed(2))});
-  const xs=rows.map(r=>r.date), ys=rows.map(r=>r.d);
-  const mx=xs.reduce((p,q)=>p+q,0)/xs.length, my=ys.reduce((p,q)=>p+q,0)/ys.length;
-  const b1=xs.reduce((p,x,i)=>p+(x-mx)*(ys[i]-my),0)/xs.reduce((p,x)=>p+(x-mx)**2,0), b0=my-b1*mx;
-  // 拟合线改到 r 算出来之后再画（见下）：|r| 太小时不该给出"趋势"的视觉暗示
-  rows.forEach(r=>{const d=el(s,'circle',{cx:X(r.date),cy:Y(r.d),r:3.6+Math.sqrt(r.n),fill:a.n,opacity:.78,stroke:c.bg,'stroke-width':1.2,class:'pop'});
-    tip(d,`${r.label} · n=${r.n} · ${fmt(Math.round(r.date))} BP · d=${r.d.toFixed(4)}`)});
-  // The headline quotes an *individual* (BaiyangcunM13, d=0.0033) but rows hold group averages, so
-  // without this marker the quoted genome had no point anywhere in the figure. Plot it, labelled.
-  {const ni=(D.ho_near_individual||[])[0];
-   if(ni){const nx=X(ni.date), ny=Y(ni.d);
-     const dz=el(s,'circle',{cx:nx,cy:ny,r:4.6,fill:c.hero,stroke:c.bg,'stroke-width':1.6,class:'pop'});
-     tip(dz,`${ni.iid} · d=${ni.d.toFixed(4)} · ${fmt(Math.round(ni.date))} BP · ${ni.group}`);
-     txt(s,{x:nx,y:ny+16,'text-anchor':'middle','font-size':8.5,'font-weight':800,fill:c.hero,stroke:c.bg,'stroke-width':2.8,'paint-order':'stroke'},
-         (zh()?'最近个体 ':'nearest individual ')+ni.iid.replace(/\.(SG|AG|TW)$/,'')+' · '+ni.d.toFixed(4));}}
-  const near=rows[0];
-  // Say what the scatter actually shows: the correlation with age, the spread around the trend, and
-  // the nearest group with its distance. Without these the panel was just dots.
-  const _n=rows.length, _sx=xs.reduce((a,x)=>a+x,0), _sy=ys.reduce((a,y)=>a+y,0),
-        _sxx=xs.reduce((a,x)=>a+x*x,0), _syy=ys.reduce((a,y)=>a+y*y,0), _sxy=xs.reduce((a,x,i)=>a+x*ys[i],0);
-  const _rr=(_n*_sxy-_sx*_sy)/Math.sqrt((_n*_sxx-_sx*_sx)*(_n*_syy-_sy*_sy));
-  const _dmed=[...ys].sort((a,b)=>a-b)[Math.floor(_n/2)];
-  // The fit is drawn only when it means something. At |r| < 0.3 a dashed regression line implies a
-  // trend the data does not support -- this sample sits at r = 0.09, where the line was pure noise.
-  if(Math.abs(_rr)>=0.3) el(s,'line',{x1:X(500),y1:Y(b0+b1*500),x2:X(7200),y2:Y(b0+b1*7200),stroke:c.faint,'stroke-width':1.2,'stroke-dasharray':'4 4'});
-  el(s,'line',{x1:x0,y1:Y(_dmed),x2:x0+W,y2:Y(_dmed),stroke:c.grid,'stroke-width':.9,'stroke-dasharray':'2 3'});
-  txt(s,{x:x0+W-2,y:Y(_dmed)-4,'text-anchor':'end','font-size':7.5,'font-weight':600,fill:c.faint},(zh()?'距离中位 ':'median ')+_dmed.toFixed(3));
-  txt(s,{x:x0+2,y:y0+11,'font-size':8.5,'font-weight':700,fill:c.ink,stroke:c.bg,'stroke-width':2.6,'paint-order':'stroke'},
-      zh()?`${_n} 个古代人群 · 与年代相关 r=${_rr.toFixed(2)}（${Math.abs(_rr)<0.3?'几乎无趋势':'趋势明显'}）`
-         :`${_n} ancient groups · r=${_rr.toFixed(2)} vs date (${Math.abs(_rr)<0.3?'no real trend':'clear trend'})`);
-  // The scatter plots *groups*; the headline quotes an *individual*, which is now plotted and
-  // labelled by its own marker above -- so this block no longer duplicates that line of text.
-  txt(s,{x:X(near.date)+10,y:Y(near.d)+3,'font-size':9,'font-weight':700,fill:c.ink,stroke:c.bg,'stroke-width':2.6,'paint-order':'stroke'},
-      (ANC_ZH[near.label]||near.label.replace(/_/g,' ')) + (zh()?' · 最近群体 d=':' · nearest group d=') + near.d.toFixed(4));
-  txt(s,{x:x0+W/2,y:y0+H+34,'text-anchor':'middle','font-size':8,'font-weight':700,fill:c.muted,'letter-spacing':'.08em'},zh()?'年代（距今年数）':'YEARS BEFORE PRESENT');
-  txt(s,{x:x0-38,y:y0+H/2,'text-anchor':'middle','font-size':8,'font-weight':700,fill:c.muted,'letter-spacing':'.08em',transform:`rotate(-90 ${x0-38} ${y0+H/2})`},zh()?'到样本的距离':'DISTANCE TO SAMPLE');
-  foot(s,c,420,462,zh()?'圆越大样本越多 · 点线 = 距离中位数 · r = 与年代的相关 · 越靠左越古老 · |r|<0.3 时不画拟合线':'bigger circle = more individuals · dotted = median distance · r = correlation with date · older to the left · no fit drawn when |r|<0.3');
+  const rows=D.ho_affinity||[], strip=D.ho_affinity_strip||[], tg=D.ho_target_group, Z=zh(), a=AC();
+  const X0=152, X1=300, top=38, rh=13;
+  if(!rows.length){txt(s,{x:12,y:22,'font-size':10,fill:c.faint},Z?'本版没有古 DNA 投影表（09b 未产出）。':'No ancient-DNA projection table in this build (step 09b produced none).');return}
+  const nm=r=>Z?(r.name_zh||ANC_ZH[r.label]||r.label.replace(/_/g,' ')):r.label.replace(/_/g,' ');
+  const mods=rows.filter(r=>r.kind==='modern'), anc=rows.filter(r=>r.kind==='ancient');
+  const ancTop=anc.slice(0,20), keep=new Set(mods.concat(ancTop).map(r=>r.label));
+  const shown=rows.filter(r=>keep.has(r.label)), rest=anc.slice(20);   // rows is already sorted by d
+  const dmax=Math.max(...shown.map(r=>r.d))*1.10, X=v=>X0+(X1-X0)*v/dmax;
+  const COL=r=>r.kind==='modern'?c.data2:(r.region==='north'?a.n:(r.region==='south'?a.s:c.faint));
+  const yEnd=top+shown.length*rh;
+  [[Z?'现代':'modern',c.data2,0],[Z?'古代·北方':'ancient north',a.n,1],
+   [Z?'古代·南方':'ancient south',a.s,2],[Z?'未分类':'unclassified',c.faint,3]].forEach(l=>{
+    el(s,'rect',{x:98+l[2]*82,y:8,width:8,height:7,rx:1,fill:l[1]});
+    txt(s,{x:110+l[2]*82,y:14,'font-size':7.4,fill:c.muted},l[0])});
+  [0,0.02,0.04,0.06].forEach(v=>{if(v>dmax)return;
+    el(s,'line',{x1:X(v),y1:top-6,x2:X(v),y2:yEnd,stroke:c.grid,'stroke-width':.5});
+    txt(s,{x:X(v),y:yEnd+11,'text-anchor':'middle','font-size':7.4,fill:c.faint},v.toFixed(2))});
+  const m1=mods[0];
+  if(m1){el(s,'line',{x1:X(m1.d),y1:top-6,x2:X(m1.d),y2:yEnd,stroke:c.ink,'stroke-width':1,'stroke-dasharray':'4 3'});
+    txt(s,{x:X(m1.d)+4,y:top-10,'font-size':7.4,'font-weight':700,fill:c.ink},
+      (Z?'最近现代人群（':'nearest modern (')+nm(m1)+(Z?'）':'')+' d='+m1.d.toFixed(4));}
+  shown.forEach((r,i)=>{const y=top+i*rh, col=COL(r);
+    txt(s,{x:X0-8,y:y+3,'text-anchor':'end','font-size':7.6,'font-weight':r.kind==='modern'?700:500,fill:c.ink},nm(r));
+    const t=el(s,'line',{x1:X0,y1:y,x2:Math.max(X(r.d),X0+1.5),y2:y,stroke:col,'stroke-width':2.4,class:'fade',style:`animation-delay:${i*.012}s`});
+    tip(t,`${r.label} · ${r.kind} · n=${r.n} · d=${r.d.toFixed(5)}`+(r.date_mean?` · ${fmt(r.date_mean)} BP`:''));
+    el(s,'circle',{cx:X(r.d),cy:y,r:2.6,fill:col});
+    txt(s,{x:X1+6,y:y+3,'font-size':7,fill:c.muted},`n=${r.n}`+(r.date_mean?` · ≈${fmt(r.date_mean)} BP`:''));
+  });
+  if(rest.length){const y=yEnd+5;
+    txt(s,{x:X0-8,y:y+3,'text-anchor':'end','font-size':7.4,fill:c.faint},(Z?'其余 ':'rest of ')+rest.length+(Z?' 个古代群体':' ancient groups'));
+    el(s,'line',{x1:X0,y1:y,x2:X(rest[0].d),y2:y,stroke:c.grid,'stroke-width':2.4,'stroke-dasharray':'2 2'});
+    txt(s,{x:X1+6,y:y+3,'font-size':7,fill:c.faint},'d ≥ '+rest[0].d.toFixed(3));}
+  // The strip: the closest groups' own members on the same axis, so the gap between the closest
+  // genome and its group mean is visible rather than asserted in a caption.
+  const sy0=yEnd+(rest.length?24:10)+30, groups=strip.concat((tg&&!tg.in_strip)?[tg]:[]);
+  txt(s,{x:0,y:sy0-12,'font-size':8,'font-weight':600,fill:c.faint,'letter-spacing':'.06em'},
+      Z?'最近的古代群体：组内个体（竖线 = 组均值）':'CLOSEST ANCIENT GROUPS: MEMBERS (TICK = GROUP MEAN)');
+  groups.forEach((g,i)=>{const y=sy0+i*24;
+    txt(s,{x:X0-8,y:y+3,'text-anchor':'end','font-size':7.8,'font-weight':700,fill:c.ink},nm(g));
+    el(s,'line',{x1:X0,y1:y,x2:X1+30,y2:y,stroke:c.grid,'stroke-width':.5});
+    el(s,'line',{x1:X(g.mean_d),y1:y-7,x2:X(g.mean_d),y2:y+7,stroke:c.ink,'stroke-width':1.2});
+    g.members.forEach(m=>{
+      const hi=!!(tg&&tg.label===g.label&&String(m.iid).indexOf('BaiyangcunM13')===0);
+      const dot=el(s,'circle',{cx:X(m.d),cy:y,r:hi?4.2:3,fill:hi?c.hero:COL(g),stroke:c.bg,'stroke-width':1.1,class:'pop'});
+      tip(dot,`${m.iid} · d=${m.d.toFixed(5)} · call_rate ${m.call_rate} · ${fmt(m.date)} BP`);
+      if(hi)txt(s,{x:X(m.d),y:y-10,'text-anchor':'middle','font-size':7.4,'font-weight':800,fill:c.hero,stroke:c.bg,'stroke-width':2.4,'paint-order':'stroke'},
+        String(m.iid).replace(/\.(SG|AG)$/,'')+' · call_rate '+m.call_rate.toFixed(2));});
+    txt(s,{x:X1+36,y:y+3,'font-size':7,fill:c.muted},(Z?'均值 ':'mean ')+g.mean_d.toFixed(4)+' · n='+g.n);});
+  const ny=sy0+groups.length*24+14;
+  [Z?'距离 = HO-PCA 前 4 主成分的欧氏距离，越小越近；现代与古代在同一把尺上。'
+      :'distance = Euclidean distance in the first 4 HO-PCA components, smaller = closer; modern and ancient share one scale',
+   Z?'单个体的距离噪声大：BaiyangcunM13 与其群体均值的差距不构成亲缘结论。'
+      :'a single genome is noisy: the gap between BaiyangcunM13 and its group mean is not a kinship result',
+   Z?'本图（全局 PCA）与 FLARE 局部祖源（南北面板）是不同尺度，互不替代、也不矛盾。'
+      :'this figure (global PCA) and the FLARE local-ancestry panels are different scales: neither replaces nor contradicts the other',
+   Z?'区域着色依 panel/aadr_site_regions.tsv（秦岭—淮河分界）；未分类不猜色。'
+      :'regions follow panel/aadr_site_regions.tsv (Qinling-Huaihe line); unclassified rows are not colour-guessed'
+  ].forEach((line,i)=>txt(s,{x:0,y:ny+i*11,'font-size':7.4,fill:c.faint},line));
+  foot(s,c,420,ny+4*11+12,Z?'条形 = 到样本的距离 · 虚线 = 最近现代人群 · 竖线 = 组均值':'bar = distance to the sample · dashed = nearest modern group · tick = group mean');
 });
-
 /* ── archaic ideogram ── */
 reveal('archaic',(s,c)=>{
   const x0=30,x1=880,rows=11,rh=28,maxL=D.chrlen['1'];
