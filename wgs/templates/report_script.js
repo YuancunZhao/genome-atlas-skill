@@ -868,6 +868,12 @@ function deepRender(){
                     [`${F.ydr}`,zh()?'Y 染色体深度比（<0.45 才提示镶嵌性丢失）':'Y depth ratio (mosaic loss below 0.45)','y depth ratio'],
                     [`${F.chipalt}`,zh()?`${((D.chip_hotspots||{}).n_tested)||0} 个克隆性造血热点共 ${F.chipalt} 条 ALT 读段${(((D.chip_hotspots||{}).hotspots)||[]).length?`（最多：${((D.chip_hotspots.hotspots[0]||{}).hotspot)||''} ${(100*((D.chip_hotspots.hotspots[0]||{}).vaf||0)).toFixed(1)}%）`:''}；低水平读段是噪声敏感的观察，不构成 CHIP 证实，也不排除更低水平克隆`:`${F.chipalt} alt reads across ${((D.chip_hotspots||{}).n_tested)||0} CHIP hotspots${(((D.chip_hotspots||{}).hotspots)||[]).length?` (max: ${((D.chip_hotspots.hotspots[0]||{}).hotspot)||''} ${(100*((D.chip_hotspots.hotspots[0]||{}).vaf||0)).toFixed(1)}%)`:''}; low-level reads are a noise-prone observation, neither confirming CHIP nor excluding lower-level clones`,'clonal haematopoiesis'],
                     [`${F.telk7}`,zh()?`端粒重复读段（共 ${F.teltot} 条读段中），不足以估计端粒长度（k7≥100000 为工作门槛而非验证阈值；绝对长度另需 GC/读长校正）`:`telomeric reads of ${F.teltot} total, too few for a length estimate (k7>=100000 is a working gate, not a validated threshold; absolute lengths would need GC/read-length correction)`,'telomeric reads']]);
+  // §7 要求默认视图不重复堆叠个体榜；W-T1 要求 M13 与其群体均值的落差在图（strip）里可见。
+  // 两者并存的方式：strip 默认可见，这张逐个体的明细表默认折叠，展开后按同一距离排序。
+  const _sum=document.getElementById('ancd_sum');
+  if(_sum) _sum.textContent=(zh()?'展开：逐个体的距离明细（与上方 strip 同一距离、同一排序）'
+                                :'Expand: per-individual distances (same distances, same order as the strip above)')
+    +` · ${(D.ho_near_individual||[]).length}`;
   const tb=document.getElementById('tb_anc');
   // Individual level, not group level: the caption says the nearest ancient individual is M13 of
   // Baiyangcun, and that genome sits inside China_MLBA, whose *group average* ranks far lower. The
