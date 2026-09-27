@@ -44,9 +44,11 @@ else:
 ypath = []
 for l in open(W/"03_haplo/y_haplogroup_yfull.txt"):
     m = re.match(r"\s+(\S+)\s+der=\s*(\d+) anc=\s*(\d+) n/a=\s*(\d+)\s+formed=(\d+) tmrca=(\d+)", l)
-    if m: ypath.append({"snp": m.group(1), "der": int(m.group(2)), "anc": int(m.group(3)), "formed": int(m.group(5)), "tmrca": int(m.group(6))})
+    if m: ypath.append({"snp": m.group(1), "der": int(m.group(2)), "anc": int(m.group(3)), "na": int(m.group(4)), "formed": int(m.group(5)), "tmrca": int(m.group(6))})
 D["ypath"] = ypath; D["y_terminal"] = ypath[-1]["snp"]
-ysn = pd.read_csv(W/"03_haplo/y_terminal_snps.tsv", sep="\t"); D["y_snps"] = ysn[["branch", "snp", "depth", "n_der"]].to_dict("records")
+# Keep `n_anc` and `state` too: a branch with der=0 is "ancestral (genuinely negative)" when anc>0,
+# but "no hg19-mapped site / low coverage" when both are zero, and the figure must not conflate them.
+ysn = pd.read_csv(W/"03_haplo/y_terminal_snps.tsv", sep="\t"); D["y_snps"] = ysn[["branch", "snp", "depth", "n_der", "n_anc", "state"]].to_dict("records")
 # --- mt
 hg = pd.read_csv(W/"03_haplo/haplogrep3.txt", sep="\t")
 row = hg.iloc[0]; found = str(row["Found_Polys"]).split(); rem = [x.split(" ")[0] for x in str(row["Remaining_Polys"]).split(") ")]

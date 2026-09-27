@@ -97,9 +97,15 @@ reveal('ychain',(s,c)=>{
   const _maxDer=Math.max(1,...P.map(p=>p.der));
   const _rad=der=>7+20*Math.sqrt(der/_maxDer);
   P.forEach((p,i)=>{const x=base+(x1-base)*i/(n-1), r=_rad(p.der), last=i===n-1;
-    const cir=el(s,'circle',{cx:x,cy:y,r,fill:last?c.hero:c.data,stroke:c.bg,'stroke-width':1.5,class:'pop'}); cir.style.animationDelay=(i*110)+'ms'; tip(cir,`${p.snp} · ${p.der} derived / ${p.anc} ancestral · formed ${fmt(p.formed)} ybp`);
+    const cir=el(s,'circle',{cx:x,cy:y,r,fill:last?c.hero:c.data,stroke:c.bg,'stroke-width':1.5,class:'pop'}); cir.style.animationDelay=(i*110)+'ms';
+    // der>0: counted derived sites. der=0 with anc>0: genuinely ancestral. Both zero: the tree lists no
+    // hg19-mapped site for this branch, which is not the same as a coverage failure.
+    const _st = p.der>0 ? (p.der+(zh()?' 位点':' SNP'))
+             : (p.anc>0 ? (zh()?`0 衍/${p.anc} 祖`:`0 der/${p.anc} anc`)
+             : (p.na>0 ? (zh()?`覆盖不足 ${p.na}`:`low cov ${p.na}`) : (zh()?'无 hg19 位点':'no hg19 site')));
+    tip(cir,`${p.snp} · der=${p.der} anc=${p.anc} n/a=${p.na} · formed ${fmt(p.formed)} ybp`);
     txt(s,{x,y:y-r-10,'text-anchor':'middle','font-size':last?11.5:10,'font-weight':last?800:700,fill:c.ink,stroke:c.bg,'stroke-width':2.6,style:'paint-order:stroke',...NUM},p.snp.replace('O-',''));
-    txt(s,{x,y:y+r+14,'text-anchor':'middle','font-size':7.5,'font-weight':600,fill:c.muted,stroke:c.bg,'stroke-width':2.6,style:'paint-order:stroke'},p.der+(zh()?' 位点':' SNP'));
+    txt(s,{x,y:y+r+14,'text-anchor':'middle','font-size':7.5,'font-weight':600,fill:c.muted,stroke:c.bg,'stroke-width':2.6,style:'paint-order:stroke'},_st);
     txt(s,{x,y:y+r+26,'text-anchor':'middle','font-size':7,fill:c.faint,stroke:c.bg,'stroke-width':2.6,style:'paint-order:stroke'},'~'+fmt(p.formed)+(zh()?' 年前':' ybp'));
   });
   txt(s,{x:x0,y:y+80,'font-size':8,'font-weight':600,fill:c.muted},(D.ypath&&D.ypath.length)?(zh()?`YFull 树路径（共 ${D.ypath.length} 级）：${D.ypath.slice(0,8).map(p=>p.snp).join(' → ')} → … → ${D.ypath[D.ypath.length-1].snp}`:`YFull path (${D.ypath.length} levels): ${D.ypath.slice(0,8).map(p=>p.snp).join(' → ')} → … → ${D.ypath[D.ypath.length-1].snp}`):(zh()?'Y 路径数据缺失':'Y path data unavailable'));
@@ -107,8 +113,12 @@ reveal('ychain',(s,c)=>{
   txt(s,{x:x0,y:y+130,'font-size':24,'font-weight':700,fill:c.ink,...NUM},D.y_terminal);
   txt(s,{x:x0+150,y:y+130,'font-size':9,'font-weight':600,fill:c.muted},'YFull '+D.versions.yfull+(zh()?' · 叶节点':' · leaf branch'));
   const _ysD=(D.y_snps||[]).map(r=>r.depth).filter(d=>d>0);
-  txt(s,{x:x0,y:y+150,'font-size':8,'font-weight':600,fill:c.muted},_ysD.length?(zh()?`${_ysD.length} 个末端定义位点，深度 ${Math.min(..._ysD)}–${Math.max(..._ysD)}×，全部衍生态`:`${_ysD.length} terminal defining sites at ${Math.min(..._ysD)}-${Math.max(..._ysD)}x depth, all derived`):(zh()?'末端定义位点数据缺失':'terminal defining-site data unavailable'));
-  foot(s,c,520,296,zh()?'图上只画末端 6 级（更早的 18 级见下方路径）· 圆面积 = 该级衍生态位点数 · 最深色 = 终端支系 · 年代为 YFull 估计':'only the last six steps are drawn (the earlier 18 are listed below) · circle area = derived sites at that step · darkest = terminal · dates are YFull estimates');
+  const _ysState=(D.y_snps||[]).reduce((a,r)=>{a[r.state]=(a[r.state]||0)+1;return a;},{});
+  const _ysMin=_ysD.length?Math.min(..._ysD):0, _ysMax=_ysD.length?Math.max(..._ysD):0;
+  const _ysMed=_ysD.length?[..._ysD].sort((a,b)=>a-b)[Math.floor(_ysD.length/2)]:0;
+  txt(s,{x:x0,y:y+150,'font-size':8,'font-weight':600,fill:c.muted},_ysD.length?(zh()?`${_ysD.length} 个末端定义位点（${Object.entries(_ysState).map(([k,v])=>k+' '+v).join(' · ')}）· 实测深度 ${_ysMin}–${_ysMax}×（中位 ${_ysMed}×）`:`${_ysD.length} terminal defining sites (${Object.entries(_ysState).map(([k,v])=>k+' '+v).join(' · ')}) · observed depth ${_ysMin}-${_ysMax}x (median ${_ysMed}x)`):(zh()?'末端定义位点数据缺失':'terminal defining-site data unavailable'));
+  txt(s,{x:x0,y:y+163,'font-size':8,'font-weight':600,fill:c.faint},zh()?'质控门：MAPQ≥30 · BQ≥25 · DP≥5 · 读段一致性≥90%（深度不足的位点单列为 nocov，不并入衍生态计数）':'quality gates: MAPQ>=30 · BQ>=25 · DP>=5 · read concordance>=90% (under-covered sites are listed as nocov, never counted as derived)');
+  foot(s,c,520,296,zh()?'图上只画末端 6 级（更早 18 级见下方路径）· 圆面积 = 该级衍生态位点数 · 最深色 = 终端 · 每级位点均通过上述质控门':'only the last six steps are drawn (the earlier 18 are listed below) · circle area = derived sites at that step · darkest = terminal · every step passes the gates above');
 });
 
 /* ── 01 mt strip ── */
