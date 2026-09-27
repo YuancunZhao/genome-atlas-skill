@@ -102,6 +102,11 @@ if META.exists():
 for c in ("latitude", "longitude", "n_called_snps", "call_rate"):
     if c not in s.columns:
         s[c] = np.nan
+# samples.tsv written before AN1 carries "date"; the AN1 field is "date_mean_bp". Accept either, so a
+# panel produced by an older run still reports real dates instead of zeros.
+_DATE_COL = "date_mean_bp" if "date_mean_bp" in s.columns else ("date" if "date" in s.columns else None)
+if _DATE_COL and "date_mean_bp" not in s.columns:
+    s["date_mean_bp"] = pd.to_numeric(s[_DATE_COL], errors="coerce")
 
 recs = s.to_dict("records")
 groups_mod = ad.group_summaries(
@@ -123,8 +128,8 @@ _anc_rows = s[s.kind == "ancient"]
 _pub = {g["label"]: g for g in groups_anc if g["n"] >= MIN_GROUP_N}
 _dates = {}
 for g in _pub.values():
-    sub = pd.to_numeric(_anc_rows[_anc_rows.source_population_id == g["group_id"]].get("date_mean_bp"),
-                        errors="coerce").dropna()
+    sub = pd.to_numeric(_anc_rows[_anc_rows.source_population_id == g["group_id"]].get(_DATE_COL),
+                        errors="coerce").dropna() if _DATE_COL else pd.Series(dtype=float)
     _dates[g["label"]] = float(sub.mean()) if len(sub) else 0.0
 pd.DataFrame([{"label": g["label"], "n": g["n"], "d": g["distance_mean"], "date": _dates[g["label"]]}
               for g in _pub.values()]).to_csv(f"{W}/near_ancient.tsv", sep="\t", index=False)
@@ -132,6 +137,8 @@ s["d"] = s["distance_to_target"]
 if "date_mean_bp" in s.columns:
     s["date"] = s["date_mean_bp"]            # legacy alias; 30 reads 'date'
 s.to_csv(f"{W}/proj_annotated.tsv", sep="\t", index=False)
+if not s["date"].notna().any() if "date" in s.columns else True:
+    print("warning: no dates available in samples.tsv (run 08 again to get date_mean_bp)")
 
 def _clean(v):
     if isinstance(v, float) and (np.isnan(v) or np.isinf(v)):
