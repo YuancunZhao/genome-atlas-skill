@@ -19,19 +19,18 @@ for line in open(f"{W}/mt_pileup_ad.tsv"):
         rows.append((int(pos), ref, a, dp, n, n/dp if dp else 0))
 df = pd.DataFrame(rows, columns=["pos", "ref", "alt", "dp", "alt_reads", "af"])
 het = df[(df.dp >= 100) & (df.af >= 0.03) & (df.af <= 0.97) & (df.alt_reads >= 10)]
-hom = df[(df.af > 0.97)]
+hom = df[(df.af > 0.97) & (df.dp >= 100)]   # same coverage floor as the heteroplasmy call
 het.to_csv(f"{W}/mt_heteroplasmy.tsv", sep="\t", index=False)
 print("homoplasmic (AF>97%):", len(hom), " heteroplasmic (3-97%, DP>=100, >=10 reads):", len(het))
 print(het.to_string(index=False))
-# HSD for haplogrep3 from the 44 PASS VCF calls (homoplasmic)
-q = subprocess.run(["bcftools", "query", "-r", "MT", "-f", "%POS\t%REF\t%ALT\n", PASS_VCF], capture_output=True, text=True).stdout
-muts = []
-for l in q.splitlines():
-    p, r, a = l.split("\t"); p = int(p)
-    if len(r) == 1 and len(a) == 1: muts.append(f"{p}{a}")
-    elif len(r) == 1 and len(a) > 1: muts.append("".join(f"{p}.{i+1}{b}" for i, b in enumerate(a[1:])))
-    elif len(a) == 1 and len(r) > 1: muts.append(" ".join(f"{p+i+1}d" for i in range(len(r)-1)))
-with open(f"{W}/target_mt.hsd", "w") as f: f.write(f"SampleId\tRange\tHaplogroup\tPolymorphisms\n{SAMPLE}\t1-16569\t?\t" + "\t".join(muts) + "\n")
+# HSD for haplogrep3, built from the pileup's homoplasmic calls. The PASS VCF carries no MT records
+# (the call set has no MT interval), so building it from those left an empty mutation list and
+# haplogrep3 classified on no evidence at all -- only the low quality score hinted at it. Haplogrep
+# expects the mutations relative to rCRS (which is the pileup reference) as a space-separated list.
+muts = [f"{int(r.pos)}{r.alt}" for r in hom.itertuples() if len(r.ref) == 1 and len(r.alt) == 1]
+print("HSD mutations from the pileup (homoplasmic, DP>=100):", len(muts), file=sys.stderr)
+with open(f"{W}/target_mt.hsd", "w") as f:
+    f.write(f"SampleId\tRange\tHaplogroup\tPolymorphisms\n{SAMPLE}\t1-16569\t?\t" + " ".join(muts) + "\n")
 # haplogrep3 3.3.2 writes its report but then never exits: bound it with a timeout and
 _hg = subprocess.run(["timeout","180", HAPLOGREP3, "classify", "--tree", "phylotree-rcrs@17.2",
                       "--in", f"{W}/target_mt.hsd", "--out", f"{W}/haplogrep3.txt",
