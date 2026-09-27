@@ -52,8 +52,10 @@ window.__earlyErrors = [];
 window.addEventListener('error', function (e) { window.__earlyErrors.push((e.message || 'error') + ' @' + e.lineno + ':' + e.colno); });
 document.addEventListener('DOMContentLoaded', function () {
   var b = document.getElementById('bootstate'); if (!b) return;
-  if (window.__earlyErrors.length) { b.textContent = 'SCRIPT ERROR: ' + window.__earlyErrors.join(' | '); b.style.color = '#ffd0c8'; }
-  else if (b.textContent.indexOf('waiting') >= 0) { b.textContent = 'the report script never ran -- open the developer console (F12) for the reason'; b.style.color = '#ffd0c8'; }
+  if (b.textContent.indexOf('waiting') < 0) return;  // the report already reported itself -- do not overwrite it
+  if (window.__earlyErrors.length) { b.textContent = 'SCRIPT ERROR: ' + window.__earlyErrors.join(' | '); }
+  else { b.textContent = 'the report script never ran -- open the developer console (F12) for the reason'; }
+  b.style.color = '#ffd0c8';
 });
 </script>
 """
@@ -64,13 +66,17 @@ _BOOT = ('<div id="boot" style="position:fixed;top:0;left:0;right:0;z-index:9999
 head = _EARLY + head
 body = body + _BOOT
 js = open(S/"report_script.js", encoding="utf-8").read()
-js = (js.replace("__DATA__", json.dumps(D, ensure_ascii=False, separators=(",", ":"))).replace("__UI__", json.dumps(UI, ensure_ascii=False))
-        .replace("__FIND__", json.dumps(FIND, ensure_ascii=False)).replace("__PGX__", json.dumps(PGX, ensure_ascii=False)).replace("__PRS_EN__", json.dumps(PRS_ZH, ensure_ascii=False)).replace("__BLOOD__", json.dumps(BLOOD, ensure_ascii=False)))
+# The inline payload is dumped with indent=0 so that the data is not one 634 KB line: Safari's HTML
+# tokenizer choked on that, and the report script never parsed.
+_DUMP = lambda o: json.dumps(o, ensure_ascii=False, indent=0)
+js = (js.replace("__DATA__", _DUMP(D)).replace("__UI__", _DUMP(UI))
+        .replace("__FIND__", _DUMP(FIND)).replace("__PGX__", _DUMP(PGX)).replace("__PRS_EN__", _DUMP(PRS_ZH)).replace("__BLOOD__", _DUMP(BLOOD)))
 # The main script is wrapped so that a runtime failure reports itself: on a file:// page the
 # window.onerror listener only sees "Script error." when the detail is suppressed, but a catch
 # inside the same script always sees the real message. (Parse errors still only reach the console.)
 OUT.write_text(head + body + "<script>\ntry{\n" + js
                + "\n}catch(e){var _bf=document.getElementById('bootstate');"
                  "if(_bf){_bf.textContent='MAIN SCRIPT FAILED: '+(e&&e.message?e.message:e);_bf.style.color='#ffd0c8';}"
+                 "try{document.title='REPORT ERROR: '+(e&&e.message?e.message:e);}catch(_){}"
                  "console.error('[main script]',e);throw e;}\n</script>\n", encoding="utf-8")
 print("wrote", OUT, OUT.stat().st_size // 1024, "KB")
