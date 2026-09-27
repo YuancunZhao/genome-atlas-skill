@@ -456,6 +456,25 @@ if _pa is not None and len(_pa):
         # counts 供事实文案使用（记录数/合格数/有坐标数），来自 09b 的结构化结果
         D["ho_accession"] = {"counts": dict(_sum.get("counts") or {}),
                              "reference_release": _sum.get("reference_release") or ""}
+        # AN6：记录级精度按人工表细化。AADR 只区分"有坐标/没坐标"，而 panel/ancestry_locations.tsv
+        # 明确标了哪些来源只到地区级（province）——省级来源不该在地图上显示成一个精确遗址。
+        _prec = {}
+        if _loc is not None and len(_loc) and {"source_id", "precision"} <= set(_loc.columns):
+            for _sid, _pr in zip(_loc["source_id"], _loc["precision"]):
+                if str(_pr).strip():
+                    _prec[str(_sid).strip()] = str(_pr).strip()
+        # 注意：这里必须改 **ancestry 实际使用的那个对象**。30 里 AADR 的 summary.json 被读了两遍
+        # （AN2 段的 _sum 与 AN5 段的 _AADR_DOC），是两个独立 dict；改错一个，地图上就看不到变化。
+        _recs_meta = (_AADR_DOC or {}).get("records") or (_sum.get("records") or [])
+        _hit = 0
+        for _r in _recs_meta:
+            _p = _prec.get(str(_r.get("source_population_id") or ""))
+            if _p:
+                _r["location_precision"] = _p
+                _hit += 1
+        if _hit:
+            print(f"30: location_precision refined from the location table for {_hit} "
+                  f"of {len(_recs_meta)} records", file=sys.stderr)
         _tgg = _by_group.get(str(_tg)) if _tg else None
         D["ho_target_group"] = (dict(_aff(_tgg, "ancient"), mean_d=round(float(_tgg["distance_mean"]), 5),
                                      in_strip=any(g["group_id"] == _tgg["group_id"] for g in _strip),
