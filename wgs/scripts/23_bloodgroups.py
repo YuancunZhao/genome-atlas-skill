@@ -7,7 +7,10 @@ import pathlib
 from wgsconfig import *  # noqa: F401,F403 -- P, W, REF, TOOLS, SAMPLE, THREADS ...
 
 import subprocess, io, os, bisect, collections, pandas as pd, pysam
-P=str(P); V=f"{P}/wgs/00_input/{SAMPLE}.norm.vcf.gz"; W=f"{P}/wgs/16_panels"; os.makedirs(W,exist_ok=True)
+P=str(P); W=f"{P}/wgs/16_panels"; os.makedirs(W,exist_ok=True)
+# Step 01 writes target.*; fall back to the {SAMPLE}.* name of older run layouts.
+V=f"{P}/wgs/00_input/target.norm.vcf.gz"
+if not os.path.exists(V): V=f"{P}/wgs/00_input/{SAMPLE}.norm.vcf.gz"
 PANEL = pathlib.Path(__file__).resolve().parents[1] / "panel" / "blood_groups.tsv"
 MARK = [(r.system, r.rsid, r.variant, r.meaning) for r in pd.read_csv(PANEL, sep="\t").fillna("").itertuples()]
 pv=KG_PFILE+".pvar"

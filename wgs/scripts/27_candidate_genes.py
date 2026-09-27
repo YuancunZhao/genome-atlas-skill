@@ -7,8 +7,11 @@ from wgsconfig import *  # noqa: F401,F403 -- P, W, REF, TOOLS, SAMPLE, THREADS 
 
 import subprocess, pandas as pd, os, collections, bisect
 from gt_alleles import gt_alleles
-P=str(P); V=f"{P}/wgs/00_input/{SAMPLE}.norm.vcf.gz"; PV=KG_PFILE+".pvar"; W=f"{P}/wgs/20_behaviour"
+P=str(P); PV=KG_PFILE+".pvar"; W=f"{P}/wgs/20_behaviour"
 os.makedirs(W,exist_ok=True)
+# Step 01 writes target.*; fall back to the {SAMPLE}.* name of older run layouts.
+V=f"{P}/wgs/00_input/target.norm.vcf.gz"
+if not os.path.exists(V): V=f"{P}/wgs/00_input/{SAMPLE}.norm.vcf.gz"
 PANEL = pathlib.Path(__file__).resolve().parents[1] / "panel" / "candidate_genes.tsv"
 _cg = pd.read_csv(PANEL, sep="\t").fillna("")
 M = [(r.gene, r.rsid, r.variant_zh, r.claim_zh, r.evidence_zh) for r in _cg.itertuples()]

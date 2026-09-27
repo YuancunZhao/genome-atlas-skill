@@ -7,6 +7,9 @@ from wgsconfig import *  # noqa: F401,F403 -- P, W, REF, TOOLS, SAMPLE, THREADS 
 
 import os, subprocess, pandas as pd, numpy as np
 PROJ = str(P); W = f"{PROJ}/wgs/03_haplo"; os.makedirs(W, exist_ok=True)
+# Step 01 writes target.*; fall back to the {SAMPLE}.* name of older run layouts.
+PASS_VCF = f"{PROJ}/wgs/00_input/target.pass.vcf.gz"
+if not os.path.exists(PASS_VCF): PASS_VCF = f"{PROJ}/wgs/00_input/{SAMPLE}.pass.vcf.gz"
 rows = []
 for line in open(f"{W}/mt_pileup_ad.tsv"):
     pos, ref, alt, ad = line.rstrip("\n").split("\t"); alts = alt.split(","); ads = list(map(int, ad.split(",")))
@@ -21,7 +24,7 @@ het.to_csv(f"{W}/mt_heteroplasmy.tsv", sep="\t", index=False)
 print("homoplasmic (AF>97%):", len(hom), " heteroplasmic (3-97%, DP>=100, >=10 reads):", len(het))
 print(het.to_string(index=False))
 # HSD for haplogrep3 from the 44 PASS VCF calls (homoplasmic)
-q = subprocess.run(["bcftools", "query", "-r", "MT", "-f", "%POS\t%REF\t%ALT\n", f"{PROJ}/wgs/00_input/{SAMPLE}.pass.vcf.gz"], capture_output=True, text=True).stdout
+q = subprocess.run(["bcftools", "query", "-r", "MT", "-f", "%POS\t%REF\t%ALT\n", PASS_VCF], capture_output=True, text=True).stdout
 muts = []
 for l in q.splitlines():
     p, r, a = l.split("\t"); p = int(p)

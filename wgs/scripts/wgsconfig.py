@@ -45,12 +45,19 @@ NAME_EN = str(_g("name_en", SAMPLE))
 SEX = str(_g("sex", "male")).lower()
 
 # P is the work root: every path below hangs off it, and every script writes only inside it.
-P = pathlib.Path(_g("work_dir", ROOT / "work")).expanduser().resolve()
+# Relative work/ref/tools dirs are anchored at the pipeline root (this wgs/ directory), never
+# at the caller's CWD: resolving against the CWD made every output path depend on which
+# directory a step happened to be launched from.
+def _anchored(v):
+    p = pathlib.Path(v)
+    return (p if p.is_absolute() else ROOT / p).expanduser().resolve()
+
+P = _anchored(_g("work_dir", ROOT / "work"))
 W = P / "wgs"                      # analysis outputs, one directory per step
 DATA = P / "data"
 RAW = DATA / "raw"
-REF = pathlib.Path(_g("ref_dir", DATA / "ref")).expanduser().resolve()
-TOOLS = pathlib.Path(_g("tools_dir", P / "tools")).expanduser().resolve()
+REF = _anchored(_g("ref_dir", DATA / "ref"))
+TOOLS = _anchored(_g("tools_dir", P / "tools"))
 PGS = DATA / "pgs"
 REPORT = P / "report"
 for d in (DATA, RAW, REF, TOOLS, PGS, W, REPORT):

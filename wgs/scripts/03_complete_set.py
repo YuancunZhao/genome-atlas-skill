@@ -10,6 +10,9 @@ import numpy as np, pandas as pd
 
 PROJ = os.environ.get("PROJ", str(P)); WGS = f"{PROJ}/wgs"
 OUT = f"{WGS}/02_complete"; os.makedirs(OUT, exist_ok=True)
+# Step 01 writes target.*; {SAMPLE}.* names survive only in older run layouts.
+NORM_VCF = f"{WGS}/00_input/target.norm.vcf.gz"
+if not os.path.exists(NORM_VCF): NORM_VCF = f"{WGS}/00_input/{SAMPLE}.norm.vcf.gz"
 PVAR = f"{PROJ}/data/ref/all_phase3.pvar"
 XVCF = f"{WGS}/00_input/X.recall.vcf.gz"
 CHRS = [str(c) for c in range(1, 23)] + (["X"] if os.path.exists(XVCF) else [])
@@ -39,7 +42,7 @@ out.write(f"#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\t{SAMPLE}\n")
 stats = []
 for c in CHRS:
     sites = pv[pv.chrom == c]
-    src = XVCF if c == "X" else f"{WGS}/00_input/{SAMPLE}.norm.vcf.gz"
+    src = XVCF if c == "X" else NORM_VCF
     w = pd.read_csv(io.StringIO(q(["bcftools", "query", "-r", c, "-f", "%POS\t%REF\t%ALT\t%FILTER\t[%GT]\n", src])),
                     sep="\t", header=None, names=["pos", "ref", "alt", "flt", "gt"], dtype={"pos": np.int64}, na_filter=False)
     ok = w[(w.flt == "PASS") | (c == "X")]  # X recall was already QUAL/DP filtered

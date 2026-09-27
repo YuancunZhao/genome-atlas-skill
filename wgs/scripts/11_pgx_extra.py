@@ -7,7 +7,10 @@ from wgsconfig import *  # noqa: F401,F403 -- P, W, REF, TOOLS, SAMPLE, THREADS 
 
 import subprocess, pandas as pd, os, collections, bisect
 from gt_alleles import gt_alleles
-P=str(P); V=f"{P}/wgs/00_input/{SAMPLE}.norm.vcf.gz"
+P=str(P)
+# Step 01 writes target.*; fall back to the {SAMPLE}.* name of older run layouts.
+V=f"{P}/wgs/00_input/target.norm.vcf.gz"
+if not os.path.exists(V): V=f"{P}/wgs/00_input/{SAMPLE}.norm.vcf.gz"
 os.makedirs(f"{P}/wgs/16_panels", exist_ok=True)
 PV=KG_PFILE+".pvar"
 PANEL = pathlib.Path(__file__).resolve().parents[1] / "panel" / "pgx_extra.tsv"

@@ -8,7 +8,7 @@ from wgsconfig import *  # noqa: F401,F403 -- P, W, REF, TOOLS, SAMPLE, THREADS 
 
 import json, csv, subprocess, collections, os, sys
 import pandas as pd
-P = str(P); W = f"{P}/wgs/03_haplo"; CRAM = f"{P}/wgs/00_input/{SAMPLE}.cram"; REF = FASTA
+P = str(P); W = f"{P}/wgs/03_haplo"; CRAM = READS if os.path.exists(READS) else f"{P}/wgs/00_input/{SAMPLE}.cram"; REF = FASTA
 # 1. SNP index: name -> (pos, anc, der)
 idx = {}
 with open(f"{YTREE}/snps_hg19.csv", newline="") as f:
