@@ -40,4 +40,18 @@ tar xzf "$TOOLS/pharmcat/pharmcat-preprocessor-$PC.tar.gz" -C "$TOOLS/pharmcat"
 [ -d "$TOOLS/SMNCopyNumberCaller" ] || git clone -q https://github.com/Illumina/SMNCopyNumberCaller.git "$TOOLS/SMNCopyNumberCaller"
 "$TOOLS/env/bin/pip" install -q -r "$TOOLS/Cyrius/requirements.txt" -r "$TOOLS/pharmcat/preprocessor/requirements.txt"
 [ -x "$TOOLS/haplogrep3" ] || { curl -sSL -o /tmp/h3.zip https://github.com/genepi/haplogrep3/releases/latest/download/haplogrep3-3.2.2-linux.zip; unzip -o -q /tmp/h3.zip -d "$TOOLS"; chmod +x "$TOOLS/haplogrep3"; }
+# --- Optional cross-check tools (never part of the pipeline; §4: two tools agreeing is not
+# independent validation, it only rules out a copied-wrong table). Installed into the same conda env
+# as everything else, so one environment reproduces the whole tool set.
+if [ "${WITH_CROSSCHECK:-1}" = "1" ]; then
+  # Yleaf: an independent Y-haplogroup caller. Ships its own hg19/hg38/t2t tables (449 MB) and can use
+  # several published trees (yfull, yfull_v10, ftdna, isogg), which is what makes it useful as a check
+  # against step 05. Verified here as Yleaf 4.1.4.
+  if [ ! -x "$TOOLS/env/bin/Yleaf" ]; then
+    "$TOOLS/env/bin/pip" install -q "git+https://github.com/genid/Yleaf.git" \
+      || echo "  note: Yleaf not installed (no network?); rerun with WITH_CROSSCHECK=1 when reachable"
+  fi
+  [ -x "$TOOLS/env/bin/Yleaf" ] && echo "  Yleaf (cross-check only) -> $TOOLS/env/bin/Yleaf"
+fi
+
 echo "tools installed under $TOOLS"
