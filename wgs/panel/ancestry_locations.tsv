@@ -1,0 +1,100 @@
+# 人工地点覆盖表（AN1）。**只覆盖可核查的纠错与翻译**，不重复 .anno 已经给出的坐标：
+# 坐标/年代由 08 从 .anno 自动规范化进 `11_aadr/reference_metadata.tsv`，本表只在需要纠正或补译时填写。
+# 精度一律 region：本表只知道到省，不得显示成精确村址（§7.3）。没有中文名就留空，显示时回退原始名称。
+# location_id 稳定且与个体 ID 独立；同一群体的不同遗址在 reference_metadata.tsv 里按 locality 区分。
+# 列：dataset	source_id	location_id	label_zh	label_en	locality	latitude	longitude	precision	source_url	note
+dataset	source_id	location_id	label_zh	label_en	locality	latitude	longitude	precision	source_url	note
+AADR	China_AmurRiverBasin_LatePaleolithic	AADR:China_AmurRiverBasin_LatePaleolithic	黑龙江流域 旧石器晚期	China AmurRiverBasin LatePaleolithic				region		省份=黑龙江流域；region=north；黑龙江流域在秦岭—淮河以北
+AADR	China_AmurRiverBasin_Mesolithic	AADR:China_AmurRiverBasin_Mesolithic	黑龙江流域 中石器	China AmurRiverBasin Mesolithic				region		省份=黑龙江流域；region=north；同上
+AADR	China_AmurRiverBasin_N	AADR:China_AmurRiverBasin_N	黑龙江流域 新石器	China AmurRiverBasin N				region		省份=黑龙江流域；region=north；同上
+AADR	China_AmurRiverBasin_UP	AADR:China_AmurRiverBasin_UP	黑龙江流域 旧石器晚期(UP)	China AmurRiverBasin UP				region		省份=黑龙江流域；region=north；同上
+AADR	China_Baligang_BA_EasternZhou	AADR:China_Baligang_BA_EasternZhou	河南 八里岗 东周	China Baligang BA EasternZhou				region		省份=河南；region=north；八里岗遗址在河南淅川，淮河以北的河南境
+AADR	China_Baligang_LN_Longshan	AADR:China_Baligang_LN_Longshan	河南 八里岗 龙山	China Baligang LN Longshan				region		省份=河南；region=north；同上
+AADR	China_Baligang_LN_Shijiahe	AADR:China_Baligang_LN_Shijiahe	河南 八里岗 石家河	China Baligang LN Shijiahe				region		省份=河南；region=north；同上
+AADR	China_Baligang_LN_Yangshao	AADR:China_Baligang_LN_Yangshao	河南 八里岗 仰韶	China Baligang LN Yangshao				region		省份=河南；region=north；同上
+AADR	China_Baligang_N_Yangshao	AADR:China_Baligang_N_Yangshao	河南 八里岗 仰韶(新石器)	China Baligang N Yangshao				region		省份=河南；region=north；同上
+AADR	China_Baligang_LN_Qujialing	AADR:China_Baligang_LN_Qujialing	河南 八里岗 屈家岭	China Baligang LN Qujialing				region		省份=河南；region=north；同上
+AADR	China_Fujian_QiheCave_Epipaleolithic	AADR:China_Fujian_QiheCave_Epipaleolithic	福建 奇和洞 旧石器晚期	China Fujian QiheCave Epipaleolithic				region		省份=福建；region=south；福建在淮河以南
+AADR	China_Guangxi_BandaCave_NorthernAndSouthernDynasties	AADR:China_Guangxi_BandaCave_NorthernAndSouthernDynasties	广西 坂大洞 南北朝	China Guangxi BandaCave NorthernAndSouthernDynasties				region		省份=广西；region=south；广西在淮河以南
+AADR	China_Guangxi_BaojianshanCaveA_N	AADR:China_Guangxi_BaojianshanCaveA_N	广西 宝剑山A洞 新石器	China Guangxi BaojianshanCaveA N				region		省份=广西；region=south；同上
+AADR	China_Guangxi_Dushan_N	AADR:China_Guangxi_Dushan_N	广西 独山 新石器	China Guangxi Dushan N				region		省份=广西；region=south；同上
+AADR	China_Guangxi_LadaCave_NorthernAndSouthernDynasties	AADR:China_Guangxi_LadaCave_NorthernAndSouthernDynasties	广西 拉大洞 南北朝	China Guangxi LadaCave NorthernAndSouthernDynasties				region		省份=广西；region=south；同上
+AADR	China_Guangxi_ShenxianCave	AADR:China_Guangxi_ShenxianCave	广西 神仙洞	China Guangxi ShenxianCave				region		省份=广西；region=south；同上
+AADR	China_Henan_Haojiatai_IA	AADR:China_Henan_Haojiatai_IA	河南 郝家台 铁器时代	China Henan Haojiatai IA				region		省份=河南；region=north；郝家台遗址在河南舞阳，淮河以北
+AADR	China_Henan_Haojiatai_LN	AADR:China_Henan_Haojiatai_LN	河南 郝家台 龙山	China Henan Haojiatai LN				region		省份=河南；region=north；同上
+AADR	China_Henan_Jiaozuoniecunsite_LBA_IA	AADR:China_Henan_Jiaozuoniecunsite_LBA_IA	河南 焦作聂村 晚商–铁器时代	China Henan Jiaozuoniecunsite LBA IA				region		省份=河南；region=north；焦作在黄河以北
+AADR	China_Henan_Pingliangtaisite_LN	AADR:China_Henan_Pingliangtaisite_LN	河南 平粮台 龙山	China Henan Pingliangtaisite LN				region		省份=河南；region=north；平粮台遗址在河南淮阳
+AADR	China_Henan_Wadian_LN	AADR:China_Henan_Wadian_LN	河南 瓦店 龙山	China Henan Wadian LN				region		省份=河南；region=north；瓦店遗址在河南禹州，淮河以北
+AADR	China_Henan_Wadiansite_LN	AADR:China_Henan_Wadiansite_LN	河南 瓦店 龙山	China Henan Wadiansite LN				region		省份=河南；region=north；同上
+AADR	China_Henan_Wanggousite_MN	AADR:China_Henan_Wanggousite_MN	河南 王沟 新石器中	China Henan Wanggousite MN				region		省份=河南；region=north；河南境，淮河以北
+AADR	China_Henan_Xiaowusite_MN	AADR:China_Henan_Xiaowusite_MN	河南 小吴 新石器中	China Henan Xiaowusite MN				region		省份=河南；region=north；河南境，淮河以北
+AADR	China_Henan_Xisima_LShang	AADR:China_Henan_Xisima_LShang	河南 西司马 晚商	China Henan Xisima LShang				region		省份=河南；region=north；河南境，淮河以北
+AADR	China_IA	AADR:China_IA	中国 铁器时代（跨区域）	China IA				region		region=unclassified；跨区域聚合标签，无单一遗址；区域不适用
+AADR	China_IA_Hellenistic	AADR:China_IA_Hellenistic	中国 铁器时代（希腊化期）	China IA Hellenistic				region		region=unclassified；跨区域聚合标签，无单一遗址；区域不适用
+AADR	China_InnerMongolia_Erdaojingzi_LN	AADR:China_InnerMongolia_Erdaojingzi_LN	内蒙古 二道井子 新石器晚期	China InnerMongolia Erdaojingzi LN				region		省份=内蒙古；region=north；内蒙古在秦岭—淮河以北
+AADR	China_InnerMongolia_Haminmanghasite_MN	AADR:China_InnerMongolia_Haminmanghasite_MN	内蒙古 哈民忙哈 新石器中	China InnerMongolia Haminmanghasite MN				region		省份=内蒙古；region=north；同上
+AADR	China_InnerMongolia_Yumin_EN	AADR:China_InnerMongolia_Yumin_EN	内蒙古 裕民 新石器早期	China InnerMongolia Yumin EN				region		省份=内蒙古；region=north；同上
+AADR	China_Jinan_LiuJiaZhuang_Shang	AADR:China_Jinan_LiuJiaZhuang_Shang	山东 济南刘家庄 商	China Jinan LiuJiaZhuang Shang				region		省份=山东；region=north；山东在淮河以北
+AADR	China_Jining_YinJiaCheng_Longshan	AADR:China_Jining_YinJiaCheng_Longshan	山东 济宁尹家城 龙山	China Jining YinJiaCheng Longshan				region		省份=山东；region=north；同上
+AADR	China_LBA	AADR:China_LBA	中国 晚期青铜	China LBA				region		region=unclassified；跨区域聚合标签，无单一遗址；区域不适用
+AADR	China_LBA_EIA	AADR:China_LBA_EIA	中国 晚青铜–早铁器	China LBA EIA				region		region=unclassified；跨区域聚合标签，无单一遗址；区域不适用
+AADR	China_LN_Xiaoheyan	AADR:China_LN_Xiaoheyan	内蒙古 小河沿 新石器晚期	China LN Xiaoheyan				region		省份=内蒙古；region=north；小河沿文化分布内蒙古东部—辽宁西部，属北方
+AADR	China_MBA	AADR:China_MBA	中国 中期青铜	China MBA				region		region=unclassified；跨区域聚合标签，无单一遗址；区域不适用
+AADR	China_MLBA	AADR:China_MLBA	中国 中晚期青铜	China MLBA				region		region=unclassified；跨区域聚合标签，无单一遗址；区域不适用
+AADR	China_Qingdao_BeiQian_Dawenkou	AADR:China_Qingdao_BeiQian_Dawenkou	山东 青岛北阡 大汶口	China Qingdao BeiQian Dawenkou				region		省份=山东；region=north；山东在淮河以北
+AADR	China_Qinghai_Dacaozisite_IA	AADR:China_Qinghai_Dacaozisite_IA	青海 大草子 铁器时代	China Qinghai Dacaozisite IA				region		省份=青海；region=north；青海东部属黄河流域，在秦岭以西的北方区
+AADR	China_Qinghai_DulanWayanReservoirSite_Classical	AADR:China_Qinghai_DulanWayanReservoirSite_Classical	青海 都兰哇沿水库 历史时期	China Qinghai DulanWayanReservoirSite Classical				region		省份=青海；region=north；同上
+AADR	China_Qinghai_Jinchankousite_LN	AADR:China_Qinghai_Jinchankousite_LN	青海 金蝉口 龙山	China Qinghai Jinchankousite LN				region		省份=青海；region=north；同上
+AADR	China_Qinghai_Lajiasite_LN	AADR:China_Qinghai_Lajiasite_LN	青海 喇家 龙山	China Qinghai Lajiasite LN				region		省份=青海；region=north；同上
+AADR	China_Qinghai_Pukagongma	AADR:China_Qinghai_Pukagongma	青海 普卡贡玛	China Qinghai Pukagongma				region		省份=青海；region=north；同上
+AADR	China_Qinghai_Yushu	AADR:China_Qinghai_Yushu	青海 玉树	China Qinghai Yushu				region		省份=青海；region=north；同上
+AADR	China_Qinghai_Zongri	AADR:China_Qinghai_Zongri	青海 宗日	China Qinghai Zongri				region		省份=青海；region=north；同上
+AADR	China_Shandong_Bianbian_EN	AADR:China_Shandong_Bianbian_EN	山东 扁扁洞 新石器早期	China Shandong Bianbian EN				region		省份=山东；region=north；山东在淮河以北
+AADR	China_Shandong_BoshanMountain_EN	AADR:China_Shandong_BoshanMountain_EN	山东 博山 新石器早期	China Shandong BoshanMountain EN				region		省份=山东；region=north；同上
+AADR	China_Shandong_Chengziya_LN	AADR:China_Shandong_Chengziya_LN	山东 城子崖 龙山(晚期)	China Shandong Chengziya LN				region		省份=山东；region=north；同上
+AADR	China_Shandong_Chengziya_Longshan	AADR:China_Shandong_Chengziya_Longshan	山东 城子崖 龙山	China Shandong Chengziya Longshan				region		省份=山东；region=north；同上
+AADR	China_Shandong_Chengziya_Yueshi	AADR:China_Shandong_Chengziya_Yueshi	山东 城子崖 岳石	China Shandong Chengziya Yueshi				region		省份=山东；region=north；同上
+AADR	China_Shandong_Dinggong_LN	AADR:China_Shandong_Dinggong_LN	山东 丁公 龙山	China Shandong Dinggong LN				region		省份=山东；region=north；同上
+AADR	China_Shandong_Dinggong_LateAntiquity	AADR:China_Shandong_Dinggong_LateAntiquity	山东 丁公 晚期古代	China Shandong Dinggong LateAntiquity				region		省份=山东；region=north；同上
+AADR	China_Shanxi_Shengedaliang_LN	AADR:China_Shanxi_Shengedaliang_LN	山西 神圪垯梁 龙山	China Shanxi Shengedaliang LN				region		省份=山西；region=north；山西在秦岭—淮河以北（AADR 的 Shanxi 指山西省）
+AADR	China_TianyuanCave_UP	AADR:China_TianyuanCave_UP	北京 田园洞 旧石器晚期	China TianyuanCave UP				region		省份=北京；region=north；田园洞在北京周口店，属北方
+AADR	China_Tibet_Agangrong	AADR:China_Tibet_Agangrong	西藏 阿岗绒	China Tibet Agangrong				region		省份=西藏；region=south；西藏在秦岭—淮河以南（青藏高原，按本表粗分入 south）
+AADR	China_Tibet_Butaxiongqu	AADR:China_Tibet_Butaxiongqu	西藏 布塔雄曲	China Tibet Butaxiongqu				region		省份=西藏；region=south；同上
+AADR	China_Tibet_Chaxiutang	AADR:China_Tibet_Chaxiutang	西藏 茶秀塘	China Tibet Chaxiutang				region		省份=西藏；region=south；同上
+AADR	China_Tibet_Dama	AADR:China_Tibet_Dama	西藏 达玛	China Tibet Dama				region		省份=西藏；region=south；同上
+AADR	China_Tibet_Gachong	AADR:China_Tibet_Gachong	西藏 嘎冲	China Tibet Gachong				region		省份=西藏；region=south；同上
+AADR	China_Tibet_Gangre	AADR:China_Tibet_Gangre	西藏 岗热	China Tibet Gangre				region		省份=西藏；region=south；同上
+AADR	China_Tibet_Gebusailu_IA	AADR:China_Tibet_Gebusailu_IA	西藏 格布赛鲁 铁器时代	China Tibet Gebusailu IA				region		省份=西藏；region=south；同上
+AADR	China_Tibet_Jiesang	AADR:China_Tibet_Jiesang	西藏 结桑	China Tibet Jiesang				region		省份=西藏；region=south；同上
+AADR	China_Tibet_Kangyu	AADR:China_Tibet_Kangyu	西藏 康玉	China Tibet Kangyu				region		省份=西藏；region=south；同上
+AADR	China_Tibet_Latuotanggu	AADR:China_Tibet_Latuotanggu	西藏 拉托塘果	China Tibet Latuotanggu				region		省份=西藏；region=south；同上
+AADR	China_Tibet_Longsangquduo	AADR:China_Tibet_Longsangquduo	西藏 陇桑曲多	China Tibet Longsangquduo				region		省份=西藏；region=south；同上
+AADR	China_Tibet_Nudagang	AADR:China_Tibet_Nudagang	西藏 努达岗	China Tibet Nudagang				region		省份=西藏；region=south；同上
+AADR	China_Tibet_Ounie	AADR:China_Tibet_Ounie	西藏 欧聂	China Tibet Ounie				region		省份=西藏；region=south；同上
+AADR	China_Tibet_Piyangjiweng	AADR:China_Tibet_Piyangjiweng	西藏 皮央吉翁	China Tibet Piyangjiweng				region		省份=西藏；region=south；同上
+AADR	China_Tibet_Pulanduowa_IA	AADR:China_Tibet_Pulanduowa_IA	西藏 普兰多瓦 铁器时代	China Tibet Pulanduowa IA				region		省份=西藏；region=south；同上
+AADR	China_Tibet_Qulongsazha_IA	AADR:China_Tibet_Qulongsazha_IA	西藏 曲龙萨扎 铁器时代	China Tibet Qulongsazha IA				region		省份=西藏；region=south；同上
+AADR	China_Tibet_Redilong_IA	AADR:China_Tibet_Redilong_IA	西藏 热地龙 铁器时代	China Tibet Redilong IA				region		省份=西藏；region=south；同上
+AADR	China_Tibet_Sangdalongguo_IA	AADR:China_Tibet_Sangdalongguo_IA	西藏 桑达隆果 铁器时代	China Tibet Sangdalongguo IA				region		省份=西藏；region=south；同上
+AADR	China_Tibet_SdingChung	AADR:China_Tibet_SdingChung	西藏 丁冲	China Tibet SdingChung				region		省份=西藏；region=south；同上
+AADR	China_Tibet_Shigou	AADR:China_Tibet_Shigou	西藏 石沟	China Tibet Shigou				region		省份=西藏；region=south；同上
+AADR	China_Tibet_Sila	AADR:China_Tibet_Sila	西藏 色拉	China Tibet Sila				region		省份=西藏；region=south；同上
+AADR	China_Tibet_Tingcun	AADR:China_Tibet_Tingcun	西藏 亭村	China Tibet Tingcun				region		省份=西藏；region=south；同上
+AADR	China_Tibet_Yusa	AADR:China_Tibet_Yusa	西藏 玉萨	China Tibet Yusa				region		省份=西藏；region=south；同上
+AADR	China_Tibet_Zhangcun	AADR:China_Tibet_Zhangcun	西藏 樟村	China Tibet Zhangcun				region		省份=西藏；region=south；同上
+AADR	Japan_Chiba_HG_Jomon	AADR:Japan_Chiba_HG_Jomon	日本 千叶 绳文	Japan Chiba HG Jomon				region		省份=Japan；region=unclassified；非 China_ 前缀，区域留空
+AADR	Japan_Hamanaka2	AADR:Japan_Hamanaka2	日本 滨中2	Japan Hamanaka2				region		省份=Japan；region=unclassified；非 China_ 前缀，区域留空
+AADR	Japan_Honshu_EarlyJomon	AADR:Japan_Honshu_EarlyJomon	日本 本州 绳文早期	Japan Honshu EarlyJomon				region		省份=Japan；region=unclassified；非 China_ 前缀，区域留空
+AADR	Japan_Honshu_MidLateJomon	AADR:Japan_Honshu_MidLateJomon	日本 本州 绳文中晚期	Japan Honshu MidLateJomon				region		省份=Japan；region=unclassified；非 China_ 前缀，区域留空
+AADR	Japan_Ikawazu_Jomon	AADR:Japan_Ikawazu_Jomon	日本 岩津 绳文	Japan Ikawazu Jomon				region		省份=Japan；region=unclassified；非 China_ 前缀，区域留空
+AADR	Japan_KofunPeriod	AADR:Japan_KofunPeriod	日本 古坟时代	Japan KofunPeriod				region		省份=Japan；region=unclassified；非 China_ 前缀，区域留空
+AADR	Japan_Nagabaka_2800BP	AADR:Japan_Nagabaka_2800BP	日本 长坂 2800 BP	Japan Nagabaka 2800BP				region		省份=Japan；region=unclassified；非 China_ 前缀，区域留空
+AADR	Japan_Shikoku_InitialJomon	AADR:Japan_Shikoku_InitialJomon	日本 四国 绳文初期	Japan Shikoku InitialJomon				region		省份=Japan；region=unclassified；非 China_ 前缀，区域留空
+AADR	Japan_Shikoku_LateJoman	AADR:Japan_Shikoku_LateJoman	日本 四国 绳文晚期	Japan Shikoku LateJoman				region		省份=Japan；region=unclassified；非 China_ 前缀，区域留空
+AADR	Mongolia_East_N	AADR:Mongolia_East_N	蒙古 东部 新石器	Mongolia East N				region		省份=Mongolia；region=unclassified；非 China_ 前缀，区域留空
+AADR	Mongolia_MLBA	AADR:Mongolia_MLBA	蒙古 中晚期青铜	Mongolia MLBA				region		省份=Mongolia；region=unclassified；非 China_ 前缀，区域留空
+AADR	Mongolia_N	AADR:Mongolia_N	蒙古 新石器	Mongolia N				region		省份=Mongolia；region=unclassified；非 China_ 前缀，区域留空
+AADR	Mongolia_XiongnuPeriod	AADR:Mongolia_XiongnuPeriod	蒙古 匈奴时期	Mongolia XiongnuPeriod				region		省份=Mongolia；region=unclassified；非 China_ 前缀，区域留空
+AADR	Mongolia_XiongnuPeriod_XianbeiPeriod	AADR:Mongolia_XiongnuPeriod_XianbeiPeriod	蒙古 匈奴–鲜卑时期	Mongolia XiongnuPeriod XianbeiPeriod				region		省份=Mongolia；region=unclassified；非 China_ 前缀，区域留空
+AADR	Taiwan_EN	AADR:Taiwan_EN	台湾 新石器早期	Taiwan EN				region		省份=Taiwan；region=unclassified；非 China_ 前缀，区域留空
+AADR	Taiwan_IA	AADR:Taiwan_IA	台湾 铁器时代	Taiwan IA				region		省份=Taiwan；region=unclassified；非 China_ 前缀，区域留空

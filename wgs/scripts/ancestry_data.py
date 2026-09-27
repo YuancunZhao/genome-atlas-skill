@@ -16,7 +16,10 @@ Two jobs, both deliberately free of side effects at import time:
 
 Nothing here knows a sample name, a haplogroup or a population count.
 """
-import json, os, pathlib
+import json, math, os, pathlib, re, sys
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+from gt_alleles import gt_alleles  # noqa: E402  复用它，不另写一个 GT 解析器
 
 SCHEMA_VERSION = 1
 STATES = ("ok", "disabled", "unavailable", "failed")
@@ -281,3 +284,279 @@ def _cli(argv=None):
 
 if __name__ == "__main__":
     raise SystemExit(_cli())
+
+
+# ─────────────────────────────────────────── AN1: metadata, dosage and locations
+
+# The .anno header carries a paragraph of documentation in every column name, so columns are matched
+# by prefix. This table is the only place where those raw names appear; nothing downstream may depend
+# on them. Required columns fail loudly; optional ones become None rather than "" or 0.
+_ANNO_ALIASES = (
+    ("record_id", ("Genetic ID",)),
+    ("master_id", ("Persistent Genetic ID",)),
+    ("individual_id", ("Individual ID",)),
+    ("source_population_id", ("Group ID",)),
+    ("locality", ("Locality",)),
+    ("political_entity", ("Political Entity",)),
+    ("latitude", ("Latitude",)),
+    ("longitude", ("Longitude",)),
+    ("date_mean_bp", ("Date mean in BP",)),
+    ("date_sd_bp", ("Date standard deviation in BP",)),
+    ("date_raw", ("Full Date",)),
+    ("date_basis", ("Method for Determining Date",)),
+    ("genotype_representation", ("Suffices",)),
+    ("data_type", ("Data type",)),
+    ("y_hg_raw", ("Y haplogroup in terminal",)),
+    ("y_hg_isogg_raw", ("Y haplogroup  in ISOGG",)),
+    ("mt_hg_raw", ("mtDNA haplogroup",)),
+    ("publication", ("Publication abbreviation",)),
+    ("doi", ("doi for publication",)),
+    ("assessment", ("ASSESSMENT WARNINGS",)),
+)
+_REQUIRED_ANNO = ("record_id",)
+# 一个区间出现的位置（考古上下文区间、或 95.4% CI 的 calBCE 区间）。BP 基准固定 1950。
+_DATE_RANGE = re.compile(r"(\d{3,5})\s*[-–]\s*(\d{3,5})\s*(?:cal)?\s*(BCE|BC|CE|BP)", re.I)
+
+
+def _cell(value):
+    """空单元格在 AADR 里写作 '..'；统一成 None。"""
+    if value is None:
+        return None
+    v = str(value).strip()
+    return None if v in ("", "..", "nan", "NA", "N/A") else v
+
+
+def _coord(value, lo, hi):
+    if value is None:
+        return None
+    try:
+        x = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(x) or not (lo <= x <= hi):
+        return None
+    return x
+
+
+def _number(value):
+    if value is None:
+        return None
+    try:
+        x = float(str(value).replace(",", ""))
+    except ValueError:
+        return None
+    return x if math.isfinite(x) else None
+
+
+def _dates_from_raw(raw):
+    """从 Full Date 里取可信区间，返回 (min_bp, max_bp)。BP 基准 1950。不可解析时 (None, None)。"""
+    if not raw:
+        return None, None
+    m = _DATE_RANGE.search(raw)
+    if not m:
+        return None, None
+    a, b = int(m.group(1)), int(m.group(2))
+    axis = m.group(3).upper()
+    if axis in ("BCE", "BC"):
+        lo_bp, hi_bp = 1950 + min(a, b), 1950 + max(a, b)
+    else:  # 已经是 BP
+        lo_bp, hi_bp = min(a, b), max(a, b)
+    return lo_bp, hi_bp
+
+
+def normalize_metadata(rows, dataset, release):
+    """把 .anno 的原始行规范化成 7.3 的统一记录。
+
+    只在这里适配原始列名。年代未知保持 None（不填 0 伪装现代）；坐标缺失或越界保持 None（不变成
+    (0,0)，也不保留假位置）；来源没有给出的字段一律 None。
+    """
+    if not rows:
+        return []
+    cols = list(rows[0].keys())
+    picked = {}
+    for field, prefixes in _ANNO_ALIASES:
+        for c in cols:
+            if any(c.startswith(p) for p in prefixes):
+                picked[field] = c
+                break
+    missing = [f for f in _REQUIRED_ANNO if f not in picked]
+    if missing:
+        raise ValueError(
+            f"the .anno file has no column for {missing}; expected one starting with "
+            f"{[p for f in missing for p in dict(_ANNO_ALIASES)[f]]}. Refusing to guess."
+        )
+
+    out = []
+    for row in rows:
+        get = lambda f: _cell(row.get(picked[f])) if f in picked else None  # noqa: E731
+        lat = _coord(get("latitude"), -90.0, 90.0)
+        lon = _coord(get("longitude"), -180.0, 180.0)
+        raw = get("date_raw")
+        mean, sd = _number(get("date_mean_bp")), _number(get("date_sd_bp"))
+        basis = get("date_basis")
+        lo, hi = _dates_from_raw(raw)
+        if mean is None and lo is not None and hi is not None:
+            mean = int(round((lo + hi) / 2))
+            basis = "contextual_range_midpoint"   # 区间中点，不是把 SD 冒充 95% 区间
+        out.append({
+            "record_id": get("record_id"),
+            "individual_id": get("individual_id") or get("master_id") or get("record_id"),
+            "master_id": get("master_id") or get("record_id"),
+            "source_version_id": get("record_id"),
+            "genotype_representation": (get("genotype_representation") or "").upper() or None,
+            "dataset": dataset, "reference_release": release,
+            "kind": "unknown",                       # 由 assign_kind 依据面板选择决定，绝不按年代切
+            "source_population_id": get("source_population_id"),
+            "label": get("source_population_id"),
+            "locality": get("locality"),
+            "location_id": None,
+            "latitude": lat, "longitude": lon,
+            "location_precision": "site" if (lat is not None and lon is not None) else "unknown",
+            "location_source": "anno" if (lat is not None and lon is not None) else None,
+            "date_mean_bp": mean,
+            "date_sd_bp": sd,
+            "date_min_bp": lo, "date_max_bp": hi,
+            "date_basis": basis, "date_raw": raw,
+            "publication": get("publication"),
+            "y_hg_raw": get("y_hg_raw"), "mt_hg_raw": get("mt_hg_raw"),
+            "hg_source_tree": "YFull12.03" if get("y_hg_raw") else None,
+            "hg_call_source": "aadr_automatic" if get("y_hg_raw") else None,
+            "hg_qc": get("assessment"),
+            "pc1": None, "pc2": None, "pc3": None, "pc4": None,
+            "n_reference_snps": None, "n_called_snps": None, "call_rate": None,
+            "eligible": None, "exclusion_reason": None,
+            "distance_to_target": None, "group_id": None,
+        })
+    return out
+
+
+def location_key_of(record):
+    """(dataset, population, locality) —— 同一群体的不同遗址必须是不同地点，绝不共用一个坐标。"""
+    return "{}:{}:{}".format(record.get("dataset") or "", record.get("source_population_id") or "",
+                             (record.get("locality") or "").strip().lower() or "unknown")
+
+
+def _representation_rank(rep):
+    """来源推荐的表示优先：SG/DG（高覆盖二倍体）> HO > AG/TW/其它。"""
+    rep = (rep or "").upper()
+    if rep in ("SG", "DG"):
+        return 3
+    if rep == "HO":
+        return 2
+    if rep in ("AG", "TW", "WGC", "AA", "EC"):
+        return 1
+    return 0
+
+
+def dedupe_by_master_id(records):
+    """同一个人的多种技术表示只算一个人；丢弃者带原因保留，供详情使用。"""
+    groups = {}
+    for r in records:
+        groups.setdefault(r.get("master_id") or r.get("record_id"), []).append(r)
+    kept, dropped = [], []
+    for master, rows in groups.items():
+        if len(rows) == 1:
+            kept.append(rows[0])
+            continue
+        ranked = sorted(rows, key=lambda r: (-_representation_rank(r.get("genotype_representation")),
+                                             str(r.get("record_id"))))
+        kept.append(ranked[0])
+        for r in ranked[1:]:
+            dropped.append({"record_id": r.get("record_id"), "master_id": master,
+                            "reason_code": "duplicate_representation",
+                            "detail": f"{r.get('genotype_representation')} not used; "
+                                      f"{ranked[0].get('record_id')} ({ranked[0].get('genotype_representation')}) kept"})
+    kept.sort(key=lambda r: str(r.get("record_id")))
+    dropped.sort(key=lambda r: str(r.get("record_id")))
+    return {"kept": kept, "dropped": dropped}
+
+
+def assign_kind(records, ancient_prefixes, modern_groups):
+    """kind 由面板选择决定：现代/古代名单来自配置，不用年代阈值切片。
+
+    两边都命中说明配置重叠，直接拒绝——否则同一条记录会同时进两个 PCA 集合。
+    """
+    modern = [str(x) for x in (modern_groups or [])]
+    prefixes = [str(x) for x in (ancient_prefixes or [])]
+    for p in prefixes:
+        clash = [m for m in modern if m.startswith(p)]
+        if clash:
+            raise ValueError(f"aadr_modern and aadr_ancient_prefix overlap: {clash} would match prefix {p!r}")
+    for r in records:
+        pop = str(r.get("source_population_id") or "")
+        if pop in modern:
+            r["kind"] = "modern"
+        elif any(pop.startswith(p) for p in prefixes):
+            r["kind"] = "ancient"
+        else:
+            r["kind"] = "unknown"      # 不进现代/古代 PCA 集合
+    return records
+
+
+LOCATION_COLUMNS = ("dataset", "source_id", "location_id", "label_zh", "label_en", "locality",
+                    "latitude", "longitude", "precision", "source_url", "note")
+
+
+def load_locations(path):
+    """读人工地点覆盖表，返回 {location_id: row}。缺列直接报错，不静默降级。
+
+    表只用于可核查的纠错与翻译：没有中文名就留空，显示时回退到原始名称（不要求中文）。
+    """
+    path = pathlib.Path(path)
+    header, rows = None, []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip() or line.startswith("#"):
+            continue
+        parts = line.split("\t")
+        if header is None:
+            header = [p.strip() for p in parts]
+            missing = [c for c in LOCATION_COLUMNS if c not in header]
+            if missing:
+                raise ValueError(f"{path.name} is missing columns {missing}; expected {list(LOCATION_COLUMNS)}")
+            continue
+        rows.append(dict(zip(header, parts)))
+    out = {}
+    for r in rows:
+        lid = (r.get("location_id") or "").strip()
+        if not lid:
+            continue
+        lat = _coord(r.get("latitude"), -90.0, 90.0)
+        lon = _coord(r.get("longitude"), -180.0, 180.0)
+        out[lid] = {"dataset": (r.get("dataset") or "").strip(), "source_id": (r.get("source_id") or "").strip(),
+                    "location_id": lid, "label_zh": (r.get("label_zh") or "").strip(),
+                    "label_en": (r.get("label_en") or "").strip(), "locality": (r.get("locality") or "").strip(),
+                    "latitude": lat, "longitude": lon,
+                    "precision": (r.get("precision") or "").strip() or ("site" if lat is not None else "unknown"),
+                    "source_url": (r.get("source_url") or "").strip(), "note": (r.get("note") or "").strip()}
+    return out
+
+
+# ─────────────────────────────────────────── allele dosage
+
+def a1_dosage_with_reason(gt, ref, alt, a1):
+    """返回 (dosage, reason)。dosage 是 a1 在二倍体二等位 GT 里的拷贝数，无法确定时为 None。
+
+    只接受 a1 与 REF/ALT 明确相同的记录；缺失、三倍性、越界索引、多等位一律记 None 并给出原因。
+    不猜链翻转：无法解释的等位基因不会退化成"参考纯合"。
+    """
+    alts = [a for a in str(alt).split(",") if a not in ("", ".")]
+    if len(alts) != 1 or ref is None:
+        return None, "not_biallelic"
+    alleles = gt_alleles(gt, ref, alts[0])
+    if alleles is None:
+        return None, "all_missing"
+    if len(alleles) != 2:
+        return None, "not_diploid"
+    if any(a is None for a in alleles):
+        return None, "partial_missing"
+    if any(a not in (ref, alts[0]) for a in alleles):
+        return None, "allele_not_observable"
+    if a1 == ref:
+        return sum(1 for a in alleles if a == ref), ""
+    if a1 == alts[0]:
+        return sum(1 for a in alleles if a == alts[0]), ""
+    return None, "a1_not_ref_or_alt"
+
+
+def a1_dosage(gt, ref, alt, a1):
+    return a1_dosage_with_reason(gt, ref, alt, a1)[0]
