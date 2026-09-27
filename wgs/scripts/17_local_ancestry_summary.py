@@ -105,3 +105,14 @@ json.dump({
     "chroms_contributing": _chroms,
 }, open(f"{W}/local_ancestry.json", "w", encoding="utf-8"), ensure_ascii=False, indent=1)
 print(f"wrote {W}/local_ancestry.json ({len(ANC)} panels, chroms {_chroms})")
+
+# AN5：把这次汇总的状态写进 manifest，30 据此判断能不能用这份结果（而不是看文件在不在）。
+import ancestry_data as _ad
+_ad.write_manifest(f"{W}/manifest.json", _ad.build_manifest(
+    SAMPLE, "17-local-ancestry", state=("ok" if len(sg) else "unavailable"),
+    reason_code=("" if len(sg) else "no_segments"),
+    parameters={"panels": list(ANC), "missing_chroms": list(missing),
+                "aggregation": "marker_counts_for_global; segment_spans_for_per_chrom"},
+    outputs=["12_localanc/local_ancestry.json", "12_localanc/segments.tsv", "12_localanc/global.tsv",
+             "12_localanc/calibration.tsv"]))
+print(f"wrote {W}/manifest.json (state={'ok' if len(sg) else 'unavailable'})")

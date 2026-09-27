@@ -289,11 +289,35 @@ if _ph.exists():
 else:
     D["phase"] = {"het": 0, "phased": 0, "blocks": 0, "n50_kb": 0.0, "max_mb": 0.0}
 # local ancestry (steps 16/16b/17/17b)
+# AN5（§7）：祖源各节的状态来自结构化结果与 manifest 校验。缺 manifest、指纹不符或文件损坏都
+# 直接标成 unavailable 并给出原因代码，绝不"读旧路径猜结果"，也不用 0% 假值兜底。
+def _analysis_state(dir_path, expected=None):
+    """(state, reason_code, doc)。doc 是 summary.json / local_ancestry.json 的内容或 None。"""
+    import ancestry_data as _ad
+    d = pathlib.Path(dir_path)
+    man = _ad.read_manifest(d / "manifest.json")
+    if not man:
+        return "unavailable", "missing_manifest", None
+    if not _ad.manifest_matches(man, {"sample_id": SAMPLE, **(expected or {})}):
+        return "unavailable", "stale_result", None
+    for name in ("summary.json", "local_ancestry.json"):
+        sj = d / name
+        if sj.exists():
+            try:
+                return str(man.get("state") or "ok"), str(man.get("reason_code") or ""), json.loads(sj.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                return "unavailable", "unreadable_result", None
+    return "unavailable", "missing_result", None
+
+_LA_STATE, _LA_REASON, _LA_DOC = _analysis_state(W/"12_localanc")
+_AADR_STATE, _AADR_REASON, _AADR_DOC = _analysis_state(W/"11_aadr")
 _g = W/"12_localanc/global.tsv"
 if _g.exists():
     D["la_global"] = {a: float(f) for a, f in (l.split() for l in open(_g).read().strip().split("\n"))}
 else:
-    D["la_global"] = {"European": 0.0, "SouthEA": 0.0, "SouthAsian": 0.0, "NorthEA": 0.0}
+    _gl = ((_LA_DOC or {}).get("global") or [])
+    D["la_global"] = ({str(g["panel_id"]): float(g["value"]) for g in _gl} if _gl else {})
+    D["la_state"], D["la_reason"] = _LA_STATE, _LA_REASON
 _pc = _read_tsv(W/"12_localanc/per_chrom.tsv", dtype={"chrom": str})
 D["la_per_chrom"] = _pc[["chrom", "NorthEA", "SouthEA"]].to_dict("records") if _pc is not None and len(_pc) else []
 _sg = _read_tsv(W/"12_localanc/segments.tsv", dtype={"chrom": str})
@@ -533,9 +557,26 @@ _need("prs", _has("prs"), *_MISS_OUT, ev="07_prs/prs_wgs.tsv", detail=len(D.get(
 _need("behaviour", _has("behaviour"), *_MISS_OUT, ev="20_behaviour/", detail=len(D.get("behaviour") or []))
 _need("candidate", _has("candidate"), *_MISS_OUT, ev="20_behaviour/candidate_genes.tsv", detail=len(D.get("candidate") or []))
 _need("ancestry", _has("pca_global") and _has("near_global"), *_MISS_OUT, ev="04_ancestry/")
-_need("local_ancestry", _has("la_segments") or _has("la_global"), *_MISS_OUT, ev="12_localanc/segments.tsv")
+# 祖源节按分析状态报告（§7 的原因码）：禁用、参考不足、结果缺失彼此可区分。
+_LA_CODES = {
+    "disabled_by_config": ("配置未启用局部祖源（未显式给出两个来源面板）", "local ancestry is disabled by the configuration"),
+    "missing_manifest":   ("找不到 manifest：旧结果需重建，不能直接复用", "no manifest: the result predates the contract and must be rebuilt"),
+    "stale_result":       ("结果的 manifest 与当前样本/配置/参考指纹不一致，需重算", "the result's manifest does not match this sample/configuration; rebuild it"),
+    "missing_result":     ("未找到该分析的结构化结果", "no structured result for this analysis"),
+    "unreadable_result":  ("结构化结果损坏，需重跑该步", "the structured result is unreadable; rerun the step"),
+    "no_segments":        ("该分析没有产出任何片段", "the analysis produced no segments"),
+}
+_sec("local_ancestry", "ok" if _LA_STATE == "ok" else "unavailable",
+     None if _LA_STATE == "ok" else _LA_REASON,
+     None if _LA_STATE == "ok" else _LA_CODES.get(_LA_REASON, ("未启用或不可用", "not available"))[0],
+     None if _LA_STATE == "ok" else _LA_CODES.get(_LA_REASON, ("未启用或不可用", "not available"))[1],
+     ev="12_localanc/local_ancestry.json", detail=f"state={_LA_STATE}")
 _need("archaic", _has("archaic"), *_MISS_OUT, ev="15_archaic/segments_all.tsv")
-_need("aadr", _has("ho_modern"), *_MISS_OUT, ev="11_aadr/proj_annotated.tsv")
+_sec("aadr", "ok" if (_AADR_STATE == "ok" and _has("ho_modern")) else "unavailable",
+     None if _AADR_STATE == "ok" else _AADR_REASON,
+     None if _AADR_STATE == "ok" else _LA_CODES.get(_AADR_REASON, ("未启用或不可用", "not available"))[0],
+     None if _AADR_STATE == "ok" else _LA_CODES.get(_AADR_REASON, ("未启用或不可用", "not available"))[1],
+     ev="11_aadr/summary.json", detail=f"state={_AADR_STATE}")
 _need("clinvar", D.get("clinvar_total", 0) > 0, *_MISS_OUT, ev="05_clinvar/clinvar_all_hits.tsv", detail=D.get("clinvar_total"))
 _need("lof", _has("lof"), *_MISS_OUT, ev="05_clinvar/lof_table.tsv", detail=D.get("lof"))
 D["sections"] = _SEC
