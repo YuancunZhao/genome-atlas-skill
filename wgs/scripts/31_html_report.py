@@ -53,8 +53,8 @@ window.addEventListener('error', function (e) { window.__earlyErrors.push((e.mes
 document.addEventListener('DOMContentLoaded', function () {
   var b = document.getElementById('bootstate'); if (!b) return;
   if (b.textContent.indexOf('waiting') < 0) return;  // the report already reported itself -- do not overwrite it
-  if (window.__earlyErrors.length) { b.textContent = 'SCRIPT ERROR: ' + window.__earlyErrors.join(' | '); }
-  else { b.textContent = 'the report script never ran; last progress marker: ' + (window.__boot || 'none'); }
+  b.textContent = 'the report did not finish; last progress marker: ' + (window.__boot || 'none')
+    + (window.__earlyErrors.length ? ' | errors: ' + window.__earlyErrors.join(' | ') : '');
   b.style.color = '#ffd0c8';
 });
 </script>
@@ -70,26 +70,40 @@ _BOOT = ('<div id="boot" style="position:fixed;top:0;left:0;right:0;z-index:9999
 head = _EARLY + head
 body = body + _BOOT
 js = open(S/"report_script.js", encoding="utf-8").read()
-# The inline payload is dumped with indent=0 (a single 634 KB line choked Safari's tokenizer) and
-# split from the logic, so that a parse failure can be localised by the progress markers.
-_DUMP = lambda o: json.dumps(o, ensure_ascii=False, indent=0)
-_REPL = {"__DATA__": _DUMP(D), "__UI__": _DUMP(UI), "__FIND__": _DUMP(FIND),
-         "__PGX__": _DUMP(PGX), "__PRS_EN__": _DUMP(PRS_ZH), "__BLOOD__": _DUMP(BLOOD)}
-def _subst(s):
-    for k, v in _REPL.items(): s = s.replace(k, v)
-    return s
+
+# --- payload assembly. Safari refused to parse the inline data as one big literal (634 KB on a
+# single line, then 669 KB spread over many lines). Each object is now emitted as a series of
+# ~100 KB string chunks in small <script> blocks and rebuilt with JSON.parse, and every step
+# records a progress marker, so a failure names the object it died on.
+_CHUNK = 100_000
+_DATA_OBJS = [("D", D), ("BLOODV3", BLOOD), ("UI", UI), ("FIND", FIND), ("PGX", PGX), ("PRS_EN", PRS_ZH)]
+_PH = ("__DATA__", "__UI__", "__FIND__", "__PGX__", "__BLOOD__", "__PRS_EN__")
 _lines = js.split("\n")
-_decl = [i for i, l in enumerate(_lines) if any(p in l for p in _REPL)]
-_split = (max(_decl) + 1) if _decl and max(_decl) < 60 else 0     # 0 = do not split (safe fallback)
-js_data = _subst("\n".join(_lines[:_split]))
-js_code = _subst("\n".join(_lines[_split:]))
+_decl = {i for i, l in enumerate(_lines) if any(p in l for p in _PH)}
+if not _decl:
+    raise SystemExit("31_html_report: no payload placeholder found in report_script.js")
+js_code = "\n".join(l for i, l in enumerate(_lines) if i not in _decl)   # logic only; payload is built below
+
+def _payload_blocks():
+    out = []
+    for name, obj in _DATA_OBJS:
+        s = json.dumps(obj, ensure_ascii=False)
+        chunks = [s[i:i + _CHUNK] for i in range(0, len(s), _CHUNK)] or [""]
+        out.append(_MARK(name + ":chunks"))
+        for ci, ch in enumerate(chunks):
+            out.append('<script>window.__c_%s_%d=%s;</script>\n'
+                       % (name, ci, json.dumps(ch, ensure_ascii=False)))
+        out.append('<script>window.__boot=%s;var %s=JSON.parse([%s].join(""));</script>\n'
+                   % (json.dumps(name + ":parsed"), name,
+                      ",".join("window.__c_%s_%d" % (name, i) for i in range(len(chunks)))))
+    return "".join(out)
 # The main script is wrapped so that a runtime failure reports itself: on a file:// page the
 # window.onerror listener only sees "Script error." when the detail is suppressed, but a catch
 # inside the same script always sees the real message. (Parse errors still only reach the console.)
 OUT.write_text(head + body
-               + _MARK("before-main-script")
-               + "<script>" + js_data + "</script>\n"
-               + _MARK("data-loaded")
+               + _MARK("before-payload")
+               + _payload_blocks()
+               + _MARK("payload-loaded")
                + "<script>\ntry{\n" + js_code
                + "\n}catch(e){var _bf=document.getElementById('bootstate');"
                  "if(_bf){_bf.textContent='MAIN SCRIPT FAILED: '+(e&&e.message?e.message:e);_bf.style.color='#ffd0c8';}"
