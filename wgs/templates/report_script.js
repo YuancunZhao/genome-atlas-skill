@@ -25,18 +25,18 @@ F.cvn=fmt(D.clinvar_total); F.cvd=D.clinvar_date; F.lof=D.lof.all; F.lofr=D.lof.
 F.rho_i=D.prs_rho.imputed; F.rho_s=D.prs_rho.subset; F.sv=fmt(D.sv_total); F.rohn=D.roh_stats.n; F.rohmb=D.roh_stats.total_mb; F.rohmax=D.roh_stats.max_mb;
 F.yterm=D.y_terminal; F.yformed=fmt(D.ypath[D.ypath.length-1].formed); F.mthg=D.mt.hg; F.mtq=D.mt.quality; F.mtn=D.mt.found.length; F.mtp=D.mt.private.length;
 
-const renderAll=()=>{document.documentElement.setAttribute('lang',LANG==='zh'?'zh-Hans':'en');
+const renderAll=()=>{try{document.documentElement.setAttribute('lang',LANG==='zh'?'zh-Hans':'en');
   document.querySelectorAll('[data-i18n]').forEach(e=>{e.innerHTML=t(e.getAttribute('data-i18n'))});
   document.getElementById('langbtn').textContent=t('toggle');
   document.title = TITLE();
   window.__renderErrors=[];
-  for(const id in CH){const n=document.getElementById(id);n.innerHTML='';
+  for(const id in CH){const n=document.getElementById(id);if(!n)continue;n.innerHTML='';
     try{CH[id](n,C())}catch(e){window.__renderErrors.push(id);console.error('[render] '+id,e);
       const err=document.createElementNS('http://www.w3.org/2000/svg','text');
       err.setAttribute('x',8);err.setAttribute('y',16);err.setAttribute('font-size',10);err.setAttribute('fill','#b3261e');
       err.textContent=id+': '+(e&&e.message?e.message:e);n.appendChild(err)}}
   if(window.__renderErrors.length)console.warn('[render] failed figures:',window.__renderErrors.join(', '));
-  renderKpi(); renderFindings(); renderPgx(); renderHla(); renderMisc(); if(typeof deepRender==='function') deepRender();};
+  renderKpi(); renderFindings(); renderPgx(); renderHla(); renderMisc(); if(typeof deepRender==='function') deepRender();}catch(e){console.error('[renderAll]',e);try{document.body.insertAdjacentHTML('afterbegin','<div style="margin:14px auto;max-width:900px;padding:10px 14px;border:1px solid #b3261e;border-radius:8px;color:#b3261e;font:13px/1.5 system-ui">render error: '+(e&&e.message?e.message:e)+'</div>')}catch(_){}}};
 document.getElementById('langbtn').addEventListener('click',()=>{LANG=zh()?'en':'zh';try{localStorage.setItem('dayu-lang',LANG)}catch(e){};renderAll()});
 if(window.matchMedia){window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change',renderAll)}
 const prsName=n=>zh()?(PRS_EN[n]||n):n;
@@ -451,7 +451,7 @@ reveal('circos',(s,c)=>{
     const big=(a1-a0)>Math.PI?1:0;
     return el(s,'path',{d:`M${x0} ${y0}A${r1} ${r1} 0 ${big} 1 ${x1} ${y1}L${x2} ${y2}A${r0} ${r0} 0 ${big} 0 ${x3} ${y3}Z`,fill,opacity:op===undefined?1:op});
   };
-  const at=(ch,pos)=>{const [a0,a1]=arcs[ch];return a0+(a1-a0)*pos/D.chrlen[ch]};
+  const at=(ch,pos)=>{const A=arcs[ch];if(!A)return 0;const [a0,a1]=A;return a0+(a1-a0)*pos/D.chrlen[ch]};
   const R={lab:410, ideo:[372,392], dens:[318,368], la:[292,314], arch:[272,288], roh:[256,268]};
   CHR22.forEach(ch=>{
     const [a0,a1]=arcs[ch];
@@ -497,7 +497,7 @@ reveal('circos',(s,c)=>{
     const p=arc(R.roh[0],R.roh[1],at(r.chrom,r.start),Math.max(at(r.chrom,r.end),at(r.chrom,r.start)+0.0016),c.ink,r.mb>=1.5?.95:.45);
     tip(p,`chr${r.chrom}:${fmt(r.start)}-${fmt(r.end)} · ${r.mb} Mb`);
   });
-  const DEL=(D.sv_gene_dels||[]).map(g=>[g.chrom,g.pos,g.gene,g.frac]);
+  const DEL=(D.sv_gene_dels||[]).filter(g=>CHR22.indexOf(String(g.chrom))>=0).map(g=>[g.chrom,g.pos,g.gene,g.frac]);
   DEL.forEach(([ch,pos,name,drop])=>{
     const t=at(ch,pos); const [x0,y0]=P(R.roh[0]-3,t),[x1,y1]=P(R.roh[0]-drop,t);
     el(s,'line',{x1:x0,y1:y0,x2:x1,y2:y1,stroke:c.faint,'stroke-width':.8});
