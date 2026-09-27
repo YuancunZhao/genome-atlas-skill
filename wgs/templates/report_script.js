@@ -34,11 +34,23 @@ const gEm=h=>h.replace(/>([^<>]+)</g,(m,t)=>'>'+t.replace(/\b[A-Z][A-Z0-9]{2,11}
 const K=D.kpi;
 F.depth=K.depth_auto; F.x=K.depth_x; F.y=K.depth_y; F.mt=fmt(K.depth_mt); F.callable=K.callable_gb; F.pass=fmt(K.pass_records); F.snv=fmt(K.snv); F.indel=fmt(K.indel); F.titv=K.titv;
 F.cmp=fmt(D.chip.compared); F.nocall=D.chip.nocall??'—'; F.nonp=D.chip.nocall_nopass??'—'; F.indel_n=D.chip.in_deletion??'—';
-F.ng=fmt(D.anc.n_global); F.ne=fmt(D.anc.n_eas); F.knn=Object.entries(D.knn_eas).map(([k,v])=>`${k} ${v}`).join(' · '); F.knng=Object.entries(D.knn_global).map(([k,v])=>`${k} ${v}`).join(' · ');
-F.near=Object.keys(D.near_eas)[0]; F.nearg=Object.entries(D.near_global).slice(0,2).map(([k,v])=>`${k} ${v}`).join(' ≈ ');
+// AN5（§7）：KPI 与单倍群标量改从报告契约取（D.ancestry / D.lineages），而不是散落的派生键。
+// 这里也修掉了缺 Y 时的无保护访问：D.ypath[D.ypath.length-1] 在没有 Y 结果时抛异常，
+// 整个 renderAll 随之中断，20 张图一起变空白——一个缺失的模块不该带走整页。
+const _AN=(D.ancestry&&D.ancestry.analyses)||[];
+const _byScope=s=>_AN.find(a=>a.scope===s)||{};
+const _byData=d=>_AN.find(a=>a.dataset===d)||{};
+const _grp=a=>Array.isArray(a.groups)?a.groups:((a.groups&&a.groups.ancient)||[]);
+const _ranked=a=>_grp(a).filter(g=>g.rank&&!g.small_group).sort((x,y)=>x.rank-y.rank);
+const _sp=a=>Array.isArray(a.supported_path)?a.supported_path:[];
+F.ng=fmt(D.anc.n_global); F.ne=fmt(D.anc.n_eas);
+F.knn=_ranked(_byScope('regional')).slice(0,3).map(g=>`${g.label} n=${g.n}`).join(' · ')||'—';
+F.knng=_ranked(_byData('1000G')).slice(0,3).map(g=>`${g.label} n=${g.n}`).join(' · ')||'—';
+F.near=(_ranked(_byScope('regional'))[0]||{}).label||(_ranked(_byData('1000G'))[0]||{}).label||'—';
+F.nearg=_ranked(_byData('1000G')).slice(0,2).map(g=>`${g.label} ${(1*g.distance_mean).toFixed(4)}`).join(' ≈ ')||'—';
 F.cvn=fmt(D.clinvar_total); F.cvd=D.clinvar_date; F.lof=D.lof.all; F.lofr=D.lof.rare; F.lofh=D.lof.rare_hom;
 F.rho_i=D.prs_rho.imputed; F.rho_s=D.prs_rho.subset; F.sv=fmt(D.sv_total); F.rohn=D.roh_stats.n; F.rohmb=D.roh_stats.total_mb; F.rohmax=D.roh_stats.max_mb;
-F.yterm=D.y_terminal; F.yformed=fmt(D.ypath[D.ypath.length-1].formed); F.mthg=D.mt.hg; F.mtq=D.mt.quality; F.mtn=D.mt.found.length; F.mtp=D.mt.private.length;
+F.yterm=((D.lineages||{}).y||{}).reported_hg||D.y_terminal||"—"; F.yformed=(()=>{const p=_sp((D.lineages||{}).y||{})||[];return p.length?fmt(p[p.length-1].formed):"—";})(); F.mthg=((D.lineages||{}).mt||{}).reported_hg||((D.mt||{}).hg)||"—"; F.mtq=((D.lineages||{}).mt||{}).call_quality||((D.mt||{}).quality)||"—"; F.mtn=((D.mt||{}).found||[]).length; F.mtp=((D.mt||{}).private||[]).length;
 
 const renderAll=()=>{try{document.documentElement.setAttribute('lang',LANG==='zh'?'zh-Hans':'en');
   {const _bs=document.getElementById('bootstate');if(_bs)_bs.textContent='rendering…';}

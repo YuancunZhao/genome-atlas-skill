@@ -475,6 +475,37 @@ else:
     D["ho_affinity"] = []; D["ho_affinity_strip"] = []; D["ho_target_group"] = None
 _na = _read_tsv(W/"11_aadr/near_ancient.tsv")
 D["ho_near_ancient"] = _na.to_dict("records") if _na is not None and len(_na) else []
+# --- AN5（§7 报告契约）：把各分析的结构化结果组装成 D.ancestry / D.lineages。
+# 这是模板与 AN6 要消费的形状；旧键（ho_*/near_eas/…）只作为尚未迁移的视图的过渡，不再各自算一套。
+_kg_state, _kg_reason, _kg_doc = _analysis_state(W/"04_ancestry")
+_AADR_DOC = _AADR_DOC if isinstance(_AADR_DOC, dict) else None
+_anc_analyses = []
+for _doc, _st, _rs in ((_AADR_DOC, _AADR_STATE, _AADR_REASON), (_kg_doc, _kg_state, _kg_reason)):
+    if not isinstance(_doc, dict):
+        continue
+    if "analyses" in _doc:                      # 04b 的 summary.json：多个参考空间
+        for _a in _doc["analyses"]:
+            _anc_analyses.append(dict(_a, state=_st or _a.get("state"), reason_code=_rs or _a.get("reason_code", "")))
+    else:                                       # 09b 的 summary.json：单个 AADR 空间
+        _anc_analyses.append({k: _doc.get(k) for k in
+                              ("analysis_id", "dataset", "reference_release", "scope", "components", "metric",
+                               "thresholds", "counts", "target", "records", "groups", "sources")}
+                             | {"state": _st, "reason_code": _rs})
+_default = next((a.get("analysis_id") for a in _anc_analyses if a.get("dataset") == "AADR"), "")
+D["ancestry"] = {"schema_version": 1, "default_analysis_id": _default or
+                 (_anc_analyses[0].get("analysis_id") if _anc_analyses else ""),
+                 "analyses": _anc_analyses,
+                 "local": (_LA_DOC if isinstance(_LA_DOC, dict) else {})}
+# 父母系：以 05/06 的结构化结果 + 04 的历史视图为准（lineage_history.json）
+_lh = None
+_lhf = W/"03_haplo/lineage_history.json"
+if _lhf.exists():
+    try:
+        _lh = json.loads(_lhf.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        _lh = None
+D["lineages"] = {"y": (_lh or {}).get("y"), "mt": (_lh or {}).get("mt")}
+
 # PRS site coverage, for the copy's transferability note
 _pr = D.get("prs") or []
 _cov = [r.get("coverage_pct") for r in _pr if isinstance(r.get("coverage_pct"), (int, float)) and r["coverage_pct"] >= 0]
