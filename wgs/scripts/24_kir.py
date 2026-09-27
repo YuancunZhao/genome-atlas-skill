@@ -30,6 +30,7 @@ print("KIR haplotype:", hap)
 # HLA ligands come from this run's T1K HLA typing; the previous hard-coded genotype and the
 # concluding sentence described the example sample, not this one.
 import re as _re
+from hla_semantics import a311 as _a311, bw_epitope as _bw, c_ligand as _cl, two_fields as _two
 _hla_f = f"{P}/wgs/06_pgx/t1k/dayu_genotype.tsv"
 hla = {"A": [], "B": [], "C": []}
 if _os.path.exists(_hla_f):
@@ -38,15 +39,17 @@ if _os.path.exists(_hla_f):
         _g = _f[0].replace("HLA-", "")
         if _g not in hla: continue
         _vals = [_f[2]] + ([_f[5]] if len(_f) > 5 and _f[1].isdigit() and int(_f[1]) > 1 and _f[5] != "." else [])
-        hla[_g] = [_re.sub(r"^HLA-[A-Z0-9]+\*", "", v).rsplit(":", 1)[0] for v in _vals]
-C1={"01","03","07","08","12","14","16"}; C2={"02","04","05","06","15","17","18"}
-cg=[("C1" if a.split(":")[0] in C1 else "C2" if a.split(":")[0] in C2 else "?") for a in hla["C"]]
-BW4={"13:01","27:05","44:02","44:03","51:01","52:01","53:01","57:01","58:01","38:01","37:01","47:01","49:01","57:03","59:01","63:01","77:01"}
-bw=["Bw4" if a in BW4 else "Bw6" for a in hla["B"]]
+        hla[_g] = [_two(_re.sub(r"^HLA-[A-Z0-9]+\*", "", v)) for v in _vals]
+cg=[_cl(a) for a in hla["C"]]
+bw=[_bw(a) for a in hla["B"]]
+# KIR3DL2's ligands are the HLA-A3/A11 groups; A was typed by the same run but never used.
+_a3 = _a311(hla["A"])
 print("HLA-C ligands: " + (", ".join(f"C*{a} = {g}" for a, g in zip(hla["C"], cg)) or "no C allele typed") + f"  ->  {'/'.join(cg) or '?'}")
 print("HLA-B epitopes: " + (", ".join(f"B*{a} = {e}" for a, e in zip(hla["B"], bw)) or "no B allele typed") + f"  ->  {'/'.join(bw) or '?'}")
+print("HLA-A3/A11 (KIR3DL2 ligands): " + (", ".join(_a3) or "none of the typed A alleles"))
 _act = sorted(pres & {"KIR2DS1","KIR2DS2","KIR2DS3","KIR2DS5","KIR3DS1"})
 print("KIR-ligand check: KIR2DL3 " + ("present with a C1 ligand" if ("KIR2DL3" in pres and "C1" in cg) else "present without a detected C1 ligand" if "KIR2DL3" in pres else "absent")
       + "; KIR3DL1 " + ("present with a Bw4 ligand" if ("KIR3DL1" in pres and "Bw4" in bw) else "present without a detected Bw4 ligand" if "KIR3DL1" in pres else "absent")
+      + "; KIR3DL2 " + ("present with an A3/A11 ligand" if ("KIR3DL2" in pres and _a3) else "present without an A3/A11 ligand" if "KIR3DL2" in pres else "absent")
       + "; activating KIRs: " + (", ".join(_act) or "none"))
-open(f"{W}/kir_summary.txt","w").write(f"haplotype\t{hap}\npresent\t{','.join(sorted(pres))}\nC_ligands\t{'/'.join(cg)}\nB_epitopes\t{'/'.join(bw)}\n")
+open(f"{W}/kir_summary.txt","w").write(f"haplotype\t{hap}\npresent\t{','.join(sorted(pres))}\nC_ligands\t{'/'.join(cg)}\nB_epitopes\t{'/'.join(bw)}\nA311_ligands\t{','.join(_a3)}\n")

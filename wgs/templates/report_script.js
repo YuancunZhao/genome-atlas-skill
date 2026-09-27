@@ -445,9 +445,11 @@ function statGrid(id,rows){const n=document.getElementById(id); if(!n)return;
   n.innerHTML=rows.map(([v,r,l])=>`<div class="kpi"><div class="v">${v}</div><div class="r">${r}</div><div class="l">${l}</div></div>`).join('')}
 function deepRender(){
   const hd=document.getElementById('tb_hlad');
-  if(hd) hd.innerHTML=D.hla_disease.map(r=>{const yes=r.carried==='yes';
+  if(hd) hd.innerHTML=D.hla_disease.map(r=>{const st=r.carried, yes=st==='yes', unk=st==='unknown'||st==='';
     const cond=zh()?r.condition:r.condition_en, req=zh()?r.requirement:r.requirement_en, nt=zh()?r.note:r.note_en;
-    return `<tr><td class="gene">${cond}</td><td class="rs">${req}</td><td class="g" style="color:${yes?'var(--ancs)':'var(--muted)'}">${yes?(zh()?'携带':'yes'):(zh()?'未携带':'no')}</td><td>${nt}</td></tr>`}).join('');
+    const cell=unk?(zh()?'未分型':'unknown'):(yes?(zh()?'携带':'yes'):(zh()?'未携带':'no'));
+    const col=unk?'#c9a227':(yes?'var(--ancs)':'var(--muted)');
+    return `<tr><td class="gene">${cond}</td><td class="rs">${req}</td><td class="g" style="color:${col}">${cell}</td><td>${nt}</td></tr>`}).join('');
   const cd=document.getElementById('tb_cand');
   if(cd) cd.innerHTML=D.candidate.map(r=>`<tr><td class="gene">${r.gene}</td><td class="rs">${r.rsid} · ${zh()?r.variant:(r.variant_en||r.variant)}</td><td class="g">${r.genotype}</td><td class="rs">${zh()?r.popular_claim:(r.popular_claim_en||'')}</td><td>${zh()?r.what_evidence_supports:(r.evidence_en||'')}</td></tr>`).join('');
   statGrid('k_la',[[`${F.north}<small>%</small>`,zh()?`北方东亚成分，比北京汉平均高 ${F.sdchb} 个标准差`:`northern East Asian; ${F.sdchb} sd above the Beijing Han mean`,'northern east asian'],
