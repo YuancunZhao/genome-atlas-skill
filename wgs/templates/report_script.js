@@ -380,17 +380,27 @@ function renderMisc(){  const _roh5=zh()?((D.roh_stats.n_gt5?`${D.roh_stats.n_gt
 /* ══════════ deep-dive additions (phase 6) ══════════ */
 const AC=()=>({n:V('--ancn'),s:V('--ancs'),a:V('--arch')});
 const CHR22=[...Array(22)].map((_,i)=>String(i+1));
-const calCHB=(D.la_calib||[]).find(x=>x.pop==='CHB')||{}, calCHS=(D.la_calib||[]).find(x=>x.pop==='CHS')||{};
-const CALCH=['1','2','6','22'];
+/* AN6（§7）：校准面板、人数与染色体一律来自结构化结果，不再写死 CHB/CHS 与 1/2/6/22。
+   配置里换一组来源面板或换几条染色体，这里会跟着变；拿不到就以空数组降级（图上不出现假值）。 */
+const _LOC=(D.ancestry&&D.ancestry.local)||{};
+const _CAL=Array.isArray(_LOC.calibration)?_LOC.calibration:[];
+const _SRC=((_LOC.panels||[]).find(p=>p.role==='source')||{});
+// 参与比较的面板来自校准结果本身（配置的 la_labels），不是 FLARE 的列顺序。
+const _SRCLAB=((_LOC.calibration_panels||[])[0])||_SRC.label||_SRC.id||'';
+const CALCH=(Array.isArray(_LOC.calibration_chroms)&&_LOC.calibration_chroms.length)
+  ? _LOC.calibration_chroms.map(String) : [];
 const calLen=CALCH.reduce((a,c)=>a+(D.chrlen[c]||0),0)||1;
-const dayuCal=CALCH.reduce((a,c)=>{const r=(D.la_per_chrom||[]).find(x=>String(x.chrom)===c);return a+((r&&r.NorthEA!=null?r.NorthEA:0)*(D.chrlen[c]||0))},0)/calLen;
+const _perChrom=(_LOC.per_chrom||[]).length?(_LOC.per_chrom||[]):(D.la_per_chrom||[]);
+const dayuCal=CALCH.reduce((a,c)=>{const r=_perChrom.find(x=>String(x.chrom)===String(c)&&(!_SRCLAB||String(x.panel_id||x.anc||'')===_SRCLAB||x.panel_id===undefined));
+  const v=r?(r.value!=null?r.value:r[_SRCLAB]):null;return a+((v!=null?v:0)*(D.chrlen[c]||0))},0)/calLen;
 const _lg=D.la_global||{};
 F.north=_lg.NorthEA!=null?(_lg.NorthEA*100).toFixed(1):'—';
 F.south=_lg.SouthEA!=null?(_lg.SouthEA*100).toFixed(1):'—';
 F.noise=(_lg.European!=null&&_lg.SouthAsian!=null)?((_lg.European+_lg.SouthAsian)*100).toFixed(1):'—';
-F.chb=calCHB.north_mean!=null?(calCHB.north_mean*100).toFixed(0):'—'; F.chs=calCHS.north_mean!=null?(calCHS.north_mean*100).toFixed(0):'—';
+F.chb=_CAL[0]&&_CAL[0].north_mean!=null?(_CAL[0].north_mean*100).toFixed(0):'—';
+F.chs=_CAL[1]&&_CAL[1].north_mean!=null?(_CAL[1].north_mean*100).toFixed(0):'—';
 F.dayucal=isFinite(dayuCal)?(dayuCal*100).toFixed(1):'—';
-F.sdchb=(calCHB.north_mean!=null&&calCHB.north_sd)?((dayuCal-calCHB.north_mean)/calCHB.north_sd).toFixed(1):'—';
+F.sdchb=(_CAL[0]&&_CAL[0].north_mean!=null&&_CAL[0].north_sd)?((dayuCal-_CAL[0].north_mean)/_CAL[0].north_sd).toFixed(1):'—';
 F.archmb=D.archaic_summary.span_mb; F.neamb=D.archaic_summary.neanderthal_mb; F.denmb=D.archaic_summary.denisovan_mb;
 F.archn=D.archaic_summary.merged; F.archpct=(D.archaic_summary.span_mb/2875*100).toFixed(1);
 F.phhet=fmt(D.phase.het); F.phased=fmt(D.phase.phased); F.phpct=D.phase.het>0?(D.phase.phased/D.phase.het*100).toFixed(1):'—';
@@ -449,13 +459,17 @@ reveal('painting',(s,c)=>{
 /* ── calibration ── */
 reveal('calib',(s,c)=>{
   const a=AC(), x0=170,x1=770,y0=34,rh=32;
-  const rows=[{lab:NAME(),n:dayuCal,sd:0,me:true},
-              {lab:zh()?'北京汉 CHB · 20 人':'Beijing Han (CHB), n=20',n:calCHB.north_mean,sd:calCHB.north_sd},
-              {lab:zh()?'南方汉 CHS · 20 人':'southern Han (CHS), n=20',n:calCHS.north_mean,sd:calCHS.north_sd}];
+  if(!_CAL.length){txt(s,{x:12,y:22,'font-size':10,fill:c.faint},
+    zh()?'本版没有留出校准结果（未运行或来源面板不足）':'No holdout calibration in this build (not run, or too few reference individuals)');return}
+  // 每个校准群体一行：名字、人数、均值与标准差都来自结果本身
+  const rows=[{lab:NAME(),n:dayuCal,sd:0,me:true}].concat(
+    _CAL.map(x=>({lab:`${x.population} · n=${x.n}`,n:x.north_mean,sd:x.north_sd||0})));
   const X=v=>x0+(x1-x0)*(v-0.5)/0.5;
   [0.5,0.6,0.7,0.8,0.9,1].forEach(v=>{el(s,'line',{x1:X(v),y1:y0-12,x2:X(v),y2:y0+rows.length*rh-10,stroke:c.grid,'stroke-width':.7});
     txt(s,{x:X(v),y:y0+rows.length*rh+6,'text-anchor':'middle','font-size':8,fill:c.faint},(v*100)+'%')});
-  txt(s,{x:x0,y:14,'font-size':8,'font-weight':600,fill:c.faint,'letter-spacing':'.08em'},zh()?'1、2、6、22 号染色体的北方东亚成分':'NORTHERN EAST ASIAN SHARE, CHROMOSOMES 1, 2, 6, 22');
+  txt(s,{x:x0,y:14,'font-size':8,'font-weight':600,fill:c.faint,'letter-spacing':'.08em'},
+    (zh()?`${CALCH.join('、')} 号染色体上的「${_SRCLAB||'来源面板'}」成分`
+        :`"${_SRCLAB||'source panel'}" share on chromosome(s) ${CALCH.join(', ')}`));
   rows.forEach((r,i)=>{const y=y0+i*rh;
     txt(s,{x:x0-12,y:y+4,'text-anchor':'end','font-size':10.5,'font-weight':r.me?800:600,fill:r.me?c.ink:c.lab},r.lab);
     if(r.sd>0){el(s,'line',{x1:X(r.n-r.sd),y1:y,x2:X(r.n+r.sd),y2:y,stroke:c.faint,'stroke-width':1.4});

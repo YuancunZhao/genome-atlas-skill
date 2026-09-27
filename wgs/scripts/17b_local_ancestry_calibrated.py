@@ -31,6 +31,16 @@ def _an_labels(work):
     raise SystemExit("no FLARE .model with an ancestry list; cannot label the columns")
 
 anc = _an_labels(W)
+# §7：比较的是**配置里的两个来源面板**，不是 FLARE 的列顺序。列顺序由参考面板首次出现的次序决定
+# （这里是 European/SouthEA/SouthAsian/NorthEA），拿 anc[0]/anc[1] 当"北方/南方"会把欧洲面板
+# 当成来源面板——数值看着合理，含义完全错了。
+_PANELS = [str(x) for x in (OPT.get("la_labels") or [])]
+if len(_PANELS) != 2:
+    raise SystemExit("local_ancestry_labels must name the two source panels to compare")
+A_COL, B_COL = _PANELS[0], _PANELS[1]
+for _c in (A_COL, B_COL):
+    if _c not in anc and _c not in dy.columns and False:
+        raise SystemExit(f"{_c} is not among the calibration columns {anc}")
 gw={a:np.average(dy[a],weights=dy.w) for a in anc}
 print(f"{NAME_EN}, length-weighted over 22 autosomes:")
 for a in anc: print(f"  {a:12s} {gw[a]*100:5.2f}%")
@@ -45,15 +55,31 @@ if cal:
     out=[]
     for pop,g in cd.groupby("Population"):
         per=g.groupby("SAMPLE").apply(lambda x: pd.Series({a:np.average(x[a],weights=x.w) for a in anc}),include_groups=False)
-        out.append((pop,len(per),per.NorthEA.mean(),per.NorthEA.std(),per.SouthEA.mean(),per.SouthEA.std()))
-        print(f"  {pop}: n={len(per)}  NorthEA {per.NorthEA.mean()*100:.1f}% (sd {per.NorthEA.std()*100:.1f})  SouthEA {per.SouthEA.mean()*100:.1f}% (sd {per.SouthEA.std()*100:.1f})")
+        out.append((pop, len(per), per[A_COL].mean(), per[A_COL].std(), per[B_COL].mean(), per[B_COL].std()))
+        print(f"  {pop}: n={len(per)}  {A_COL} {per[anc[0]].mean()*100:.1f}% (sd {per[anc[0]].std()*100:.1f})  {B_COL} {per[B_COL].mean()*100:.1f}% (sd {per[B_COL].std()*100:.1f})")
     # {NAME_EN} restricted to the same chromosomes for a fair comparison
     same=dy[dy.chrom.isin(set(cd.chrom))]
-    dn=np.average(same.NorthEA,weights=same.w); ds=np.average(same.SouthEA,weights=same.w)
-    print(f"  {NAME_EN} (same chromosomes): NorthEA {dn*100:.1f}%  SouthEA {ds*100:.1f}%")
+    dn=np.average(same[A_COL],weights=same.w); ds=np.average(same[B_COL],weights=same.w)
+    print(f"  {NAME_EN} (same chromosomes): {A_COL} {dn*100:.1f}%  {B_COL} {ds*100:.1f}%")
     for pop,n,m,s,ms,ss in out:
         print(f"    vs {pop}: {NAME_EN} is {(dn-m)/s:+.1f} sd on NorthEA")
     pd.DataFrame(out,columns=["pop","n","north_mean","north_sd","south_mean","south_sd"]).to_csv(f"{W}/calibration.tsv",sep="\t",index=False)
+    # §7/AN6：把校准结果写回结构化结果，报告才能用**真实的**群体、人数与染色体，而不是写死 CHB/CHS
+    # 与 1/2/6/22。这里同时记下实际参与汇总的染色体集合。
+    import json as _json
+    _lj = pathlib.Path(f"{W}/local_ancestry.json")
+    if _lj.exists():
+        try:
+            _d = _json.loads(_lj.read_text(encoding="utf-8"))
+            _d["calibration"] = [{"population": p, "n": n, "north_mean": m, "north_sd": sd,
+                                  "south_mean": ms, "south_sd": ss} for p, n, m, sd, ms, ss in out]
+            _d["calibration_chroms"] = sorted(set(str(c) for c in cd.chrom), key=lambda x: int(x))
+            _d["calibration_panels"] = [A_COL, B_COL]   # 参与比较的两个来源面板（来自配置）
+            _lj.write_text(_json.dumps(_d, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+            print(f"wrote calibration for {len(out)} population(s) over chromosomes "
+                  f"{_d['calibration_chroms']} into local_ancestry.json")
+        except (OSError, _json.JSONDecodeError) as e:
+            print(f"warning: could not attach calibration to local_ancestry.json ({e})", file=sys.stderr)
 pd.Series(gw).to_csv(f"{W}/dayu_global.tsv",sep="\t",header=False)
 dy.to_csv(f"{W}/per_chrom.tsv",sep="\t",index=False)
 print(f"\nper-chromosome SouthEA share ({NAME_EN}):")
