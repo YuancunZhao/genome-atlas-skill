@@ -66,5 +66,11 @@ body = body + _BOOT
 js = open(S/"report_script.js", encoding="utf-8").read()
 js = (js.replace("__DATA__", json.dumps(D, ensure_ascii=False, separators=(",", ":"))).replace("__UI__", json.dumps(UI, ensure_ascii=False))
         .replace("__FIND__", json.dumps(FIND, ensure_ascii=False)).replace("__PGX__", json.dumps(PGX, ensure_ascii=False)).replace("__PRS_EN__", json.dumps(PRS_ZH, ensure_ascii=False)).replace("__BLOOD__", json.dumps(BLOOD, ensure_ascii=False)))
-OUT.write_text(head + body + "<script>\n" + js + "\n</script>\n", encoding="utf-8")
+# The main script is wrapped so that a runtime failure reports itself: on a file:// page the
+# window.onerror listener only sees "Script error." when the detail is suppressed, but a catch
+# inside the same script always sees the real message. (Parse errors still only reach the console.)
+OUT.write_text(head + body + "<script>\ntry{\n" + js
+               + "\n}catch(e){var _bf=document.getElementById('bootstate');"
+                 "if(_bf){_bf.textContent='MAIN SCRIPT FAILED: '+(e&&e.message?e.message:e);_bf.style.color='#ffd0c8';}"
+                 "console.error('[main script]',e);throw e;}\n</script>\n", encoding="utf-8")
 print("wrote", OUT, OUT.stat().st_size // 1024, "KB")
