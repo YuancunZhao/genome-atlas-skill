@@ -590,7 +590,8 @@ reveal('geomap',(s,c)=>{
                 {l:0,h:1500,zh:'1500 BP 以内',en:'< 1500 BP'},
                 {l:1500,h:5000,zh:'1500–5000 BP',en:'1500–5000 BP'},
                 {l:5000,h:1000000,zh:'5000 BP 以上',en:'> 5000 BP'}];
-  let cur=0;
+  let cur=0, sel=null;              // sel = 选中的记录 ID（稳定键），点与列表共用
+  const LBOX=document.getElementById('geomap_list');
   const bandY=mapH+40;
   const draw=()=>{
     clearEl(s);
@@ -606,12 +607,17 @@ reveal('geomap',(s,c)=>{
     const dists=placed.map(r=>Number(r.distance_to_target)).filter(Number.isFinite);
     const dmax=dists.length?Math.max(...dists):0;
     placed.forEach(r=>{
-      const p=P(r), lab=String(r.source_population_id||r.label||'');
-      const isTop=top5.includes(lab), site=(r.location_precision||'site')==='site';
+      const p=P(r), lab=String(r.source_population_id||r.label||''), rid=String(r.record_id||'');
+      const isSel=sel&&String(r.record_id||'')===sel;
+      const isTop=top5.includes(lab)||isSel, site=(r.location_precision||'site')==='site';
       const t=dmax>0&&Number.isFinite(Number(r.distance_to_target))?Math.min(1,Number(r.distance_to_target)/dmax):1;
-      const op=isTop?1:(0.18+0.5*(1-t));
+      const op=isSel?1:(isTop?1:(0.18+0.5*(1-t)));
       const n=site?el(s,'circle',{cx:p.x,cy:p.y,r:isTop?4:2.1,fill:isTop?c.hero:c.data,'fill-opacity':op,stroke:c.bg,'stroke-width':isTop?.8:.4,class:'pop'})
                   :el(s,'rect',{x:p.x-(isTop?3.4:2),y:p.y-(isTop?3.4:2),width:isTop?6.8:4,height:isTop?6.8:4,rx:1,fill:isTop?c.hero:c.data,'fill-opacity':op,stroke:c.bg,'stroke-width':.4,class:'pop'});
+      n.setAttribute('tabindex','0'); n.setAttribute('role','button');
+      const pick=()=>{ sel=(sel===rid)?null:rid; draw(); };
+      n.addEventListener('click',pick);
+      n.addEventListener('keydown',(e)=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();pick()}});
       tip(n,`${lab||r.record_id} · ${r.locality||''} ${site?(Z?'遗址级':'site'):(Z?'地区级':'region')}`+
             (Number.isFinite(Number(r.date_mean_bp))?` · ${fmt(Math.round(r.date_mean_bp))} BP`:'')+
             (Number.isFinite(Number(r.distance_to_target))?` · d=${Number(r.distance_to_target).toFixed(4)}`:''));
@@ -652,6 +658,23 @@ reveal('geomap',(s,c)=>{
       b.addEventListener('keydown',(e)=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();go()}});
       txt(s,{x:x0+w/2,y:y+12.5,'text-anchor':'middle','font-size':8,'font-weight':700,fill:on?c.bg:c.ink},Z?r.zh:r.en);
     });
+    // ── 列表：与地图共用同一个 sel（稳定 ID），两边互选；缺坐标的行标出来但仍可选中
+    if(LBOX){
+      LBOX.textContent='';
+      ranked.slice(0,12).forEach(g=>{
+        const hit=placed.filter(r=>String(r.source_population_id)===String(g.label));
+        const rid=hit.length?String(hit[0].record_id||''):'';
+        const row=document.createElement('div');
+        row.tabIndex=0; row.setAttribute('role','button');
+        row.style.cssText='cursor:pointer;padding:1px 3px;border-radius:3px'+(rid&&rid===sel?';background:currentColor;opacity:.14':'');
+        row.textContent=`${g.rank}. ${ANC_ZH[g.label]||g.label} · n=${g.n}`+
+          (rid?` · d=${Number(g.distance_mean).toFixed(4)}`:(Z?' · 未定位':' · unplaced'));
+        const pick=()=>{ if(!rid) return; sel=(sel===rid)?null:rid; draw(); };
+        row.addEventListener('click',pick);
+        row.addEventListener('keydown',(e)=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();pick()}});
+        LBOX.appendChild(row);
+      });
+    }
     // 计数：分别说明"范围外"与"年代未知"，后者既不算命中也不算排除
     const note=document.getElementById('geomap_note');
     if(note) note.textContent=(Z
