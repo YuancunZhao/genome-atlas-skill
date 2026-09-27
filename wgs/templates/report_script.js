@@ -531,6 +531,53 @@ function drawGeoMap(svg, locations, selectedId, onSelect, opts) {
   return { placed: placed.length, unplaced: unplaced };
 }
 
+/* ── AN6 地理分布：把同一份合格记录按采样/发现地点画在世界底图上 ─────────────────
+   位置是**参考样本的来源地**，不是把目标样本投成某个坐标（§7）。点只画有坐标的记录；精度只到
+   地区级的用方框，遗址级用圆点，两者不能看起来一样。距离用透明度而不是大小：否则样本量大的
+   群体看起来就像"祖源份额更大"。前五名加深并标注，其余淡显。 */
+reveal('geomap',(s,c)=>{
+  const A=(D.ancestry&&D.ancestry.analyses)||[], Z=zh();
+  const a=A.find(x=>x.dataset==='AADR')||A[0]||{};
+  const all=(a.records||[]);
+  const groups=(Array.isArray(a.groups)?a.groups:((a.groups||{}).ancient||[]));
+  const ranked=groups.filter(g=>g.rank&&!g.small_group).sort((x,y)=>x.rank-y.rank);
+  const top5=ranked.slice(0,5).map(g=>String(g.label));
+  const placed=all.filter(r=>geoValid(r.latitude,r.longitude));
+  const unplaced=all.length-placed.length;
+  const VB={w:900,h:430}, pad={l:26,t:26};
+  const sc=Math.min((VB.w-2*pad.l)/360,(VB.h-2*pad.t)/180);
+  const ox=pad.l+((VB.w-2*pad.l)-360*sc)/2, oy=pad.t+((VB.h-2*pad.t)-180*sc)/2;
+  const P=r=>{const q=geoXY(r.latitude,r.longitude);return {x:ox+q.x*sc, y:oy+q.y*sc};};
+  el(s,'use',{href:'#world_land',x:ox,y:oy,width:360*sc,height:180*sc,fill:c.grid,'fill-opacity':.55,stroke:'none'});
+  const dists=placed.map(r=>Number(r.distance_to_target)).filter(Number.isFinite);
+  const dmax=dists.length?Math.max(...dists):0;
+  placed.forEach(r=>{
+    const p=P(r), lab=String(r.source_population_id||r.label||'');
+    const isTop=top5.includes(lab), site=(r.location_precision||'site')==='site';
+    const t=dmax>0&&Number.isFinite(Number(r.distance_to_target))?Math.min(1,Number(r.distance_to_target)/dmax):1;
+    const op=isTop?1:(0.18+0.5*(1-t));
+    const n=site?el(s,'circle',{cx:p.x,cy:p.y,r:isTop?4:2.1,fill:isTop?c.hero:c.data,'fill-opacity':op,stroke:c.bg,'stroke-width':isTop?.8:.4,class:'pop'})
+                :el(s,'rect',{x:p.x-(isTop?3.4:2),y:p.y-(isTop?3.4:2),width:isTop?6.8:4,height:isTop?6.8:4,rx:1,fill:isTop?c.hero:c.data,'fill-opacity':op,stroke:c.bg,'stroke-width':.4,class:'pop'});
+    tip(n,`${lab||r.record_id} · ${r.locality||''} ${site?(Z?'遗址级':'site'):(Z?'地区级':'region')}`+
+          (Number.isFinite(Number(r.distance_to_target))?` · d=${Number(r.distance_to_target).toFixed(4)}`:''));
+  });
+  // 前五名标注（放在点的右上方，避免互相压字）
+  ranked.slice(0,5).forEach((g,i)=>{
+    const hit=placed.find(r=>String(r.source_population_id)===String(g.label));
+    if(!hit) return;
+    const p=P(hit);
+    txt(s,{x:p.x+6,y:p.y-3-i*9,'font-size':8,'font-weight':700,fill:c.ink,stroke:c.bg,'stroke-width':2.2,'paint-order':'stroke'},
+        `${g.rank}. ${ANC_ZH[g.label]||g.label} · n=${g.n}`);
+  });
+  txt(s,{x:pad.l,y:16,'font-size':8,'font-weight':600,fill:c.faint,'letter-spacing':'.06em'},
+      Z?'参考样本的来源地（不是目标样本的坐标）':'WHERE THE REFERENCE SAMPLES COME FROM (NOT THE TARGET)');
+  const note=document.getElementById('geomap_note');
+  if(note) note.textContent=(Z
+    ? `已定位 ${placed.length} 条 · 未定位 ${unplaced} 条（缺经纬度，只在列表中出现，不落点）· 深色 = 距离最近的前五名 · 圆点 = 遗址级坐标，方框 = 地区级坐标 · 底图 Natural Earth 1:110m（public domain）`
+    : `${placed.length} placed · ${unplaced} unplaced (no coordinates: listed, not plotted) · emphasised = five closest · circles = site-level, squares = region-level · base map Natural Earth 1:110m (public domain)`);
+  foot(s,c,900,VB.h-6,Z?'离线底图，无外部请求 · 部分记录只有省级坐标，不显示为精确遗址':'offline base map, no external requests · some records are province-level only and are not shown as precise sites');
+});
+
 /* ── affinity ranking (W-T1). Replaces the distance-vs-age scatter: a group mean and a single
       genome's minimum are different statistics, so the old figure mixed them on one y-axis with a
       time axis that carried no signal (r=0.09). Here both kinds share one distance axis, sorted,

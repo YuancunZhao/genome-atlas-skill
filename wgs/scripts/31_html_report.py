@@ -61,6 +61,25 @@ head = open(S/"report_head.html", encoding="utf-8").read()
 head = re.sub(r"<title>.*?</title>", f"<title>{NAME_ZH}</title>", head, count=1)
 body = open(S/"report_body.html", encoding="utf-8").read()
 
+# --- AN6 底图内嵌入口：地图是离线的，轮廓以一次性的 <symbol> 注入页面，所有地图用 <use> 引用它。
+# 文件缺失时不是静默失败：boot 诊断里会写明未加载轮廓，地图仍能画出点。
+_WORLD = pathlib.Path(__file__).resolve().parents[1] / "panel" / "world_land.svg"
+if _WORLD.exists():
+    import re as _re
+    _svg = _WORLD.read_text(encoding="utf-8")
+    _m = _re.search(r"<metadata>(.*?)</metadata>", _svg, _re.S)
+    _meta = _m.group(1).strip() if _m else ""
+    _d = _re.search(r'<path[^>]*\bd="([^"]+)"', _svg)
+    if _d:
+        body = body.replace("<!--WORLD_LAND-->",
+                            '<svg width="0" height="0" aria-hidden="true" style="position:absolute">'
+                            "<defs><symbol id=\"world_land\" viewBox=\"0 0 360 180\"><path fill=\"currentColor\" "
+                            'fill-rule="evenodd" d="' + _d.group(1) + '"/></symbol></defs></svg>')
+    _WORLD_NOTE = "" if _d else "map outline unavailable (panel/world_land.svg has no path)"
+else:
+    _WORLD_NOTE = "map outline unavailable (panel/world_land.svg not found)"
+body = body.replace("<!--WORLD_LAND-->", "")  # 占位符无论如何都要清掉
+
 # --- build stamp + boot diagnostics. The report must work from file:// on a machine with no
 # network, so a silent failure has to be impossible: the strip states whether the script ran,
 # and if not, why not.

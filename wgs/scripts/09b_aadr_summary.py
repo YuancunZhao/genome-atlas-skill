@@ -20,6 +20,8 @@ import pandas as pd, numpy as np
 import ancestry_data as ad
 
 W = f"{P}/wgs/11_aadr"
+# .anno 的位置：配置里的 aadr_prefix 或 aadr_annotation（与 08/05 同一规则）
+ANNO = str(AADR_ANNOTATION) if str(AADR_ANNOTATION or "").strip() else str(AADR).replace(".patch.PUB", ".PUB") + ".anno"
 ANALYSIS_ID = "aadr-human-origins"
 
 
@@ -91,6 +93,18 @@ if "record_id" not in s.columns:
 # requires the history views to read it, and the earlier code never carried it into this summary at
 # all -- which is why every record looked unmapped). Only columns this frame lacks are merged in.
 META = pathlib.Path(f"{W}/reference_metadata.tsv")
+if not META.exists():
+    # §7：元数据加载不能依赖 08 已运行。没有缓存时直接读 .anno（只读注释，不碰基因型），
+    # 并把规范化结果写成缓存供后续步骤复用。没有这一步，地图拿不到任何坐标。
+    try:
+        import ancestry_data as _ad
+        _anno = pd.read_csv(ANNO, sep="\t", dtype=str, low_memory=False)
+        _anno.columns = [c.strip() for c in _anno.columns]
+        _recs = _ad.normalize_metadata(_anno.to_dict("records"), dataset="AADR", release="from-anno")
+        pd.DataFrame(_recs).to_csv(META, sep="\t", index=False)
+        print(f"note: normalised .anno directly ({len(_recs)} records) -> {META.name}", file=sys.stderr)
+    except Exception as _e:                                  # 读不到就继续，只是没有坐标
+        print(f"note: could not read .anno for metadata ({_e})", file=sys.stderr)
 if META.exists():
     m = pd.read_csv(META, sep="\t", low_memory=False)
     take = [c for c in ("record_id", "locality", "location_id", "latitude", "longitude",
