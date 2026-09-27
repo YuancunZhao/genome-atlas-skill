@@ -4,9 +4,34 @@ import sys, pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from wgsconfig import *  # noqa: F401,F403 -- P, W, REF, TOOLS, SAMPLE, THREADS ...
 
-import glob, gzip, io, os, subprocess, pandas as pd, numpy as np
+import glob, gzip, io, json, os, subprocess, pandas as pd, numpy as np
 P=str(P); W=f"{P}/wgs/12_localanc"
-ANC=["European","SouthEA","SouthAsian","NorthEA"]
+
+
+def an_labels(work):
+    """AN 索引 → 面板标签，来自 FLARE 的 .model（VCF 头只写 "Ancestry of first haplotype"，没有标签）。
+
+    这是唯一权威来源：写死 NorthEA/SouthEA/European/SouthAsian 的列表在换参考面板时会静默错位，
+    让百分比挂到错误的面板上。
+    """
+    for m in sorted(glob.glob(f"{work}/la.*.model")) + sorted(glob.glob(f"{work}/calib.*.model")):
+        try:
+            lines = open(m, encoding="utf-8", errors="replace").read().split("\n")
+        except OSError:
+            continue
+        for i, l in enumerate(lines):
+            if l.strip().lower().startswith("# list of ancestries"):
+                for j in range(i + 1, min(i + 4, len(lines))):
+                    row = lines[j].strip()
+                    if row and not row.startswith("#"):
+                        return row.split("\t")
+    return []
+
+
+ANC = an_labels(W)
+if not ANC:
+    print("no FLARE .model with an ancestry list found; cannot label AN indices", file=sys.stderr)
+    raise SystemExit(2)
 segs=[]; tot=np.zeros(len(ANC)); n_mark=0; missing=[]
 for f in sorted(glob.glob(f"{W}/la.*.anc.vcf.gz"),key=lambda x:int(x.split("la.")[1].split(".")[0])):
     c=f.split("la.")[1].split(".")[0]
@@ -44,3 +69,39 @@ print(big.head(10).to_string(index=False))
 sw=sg.groupby("anc").agg(n=("mb","size"),mb=("mb","sum"),median_mb=("mb","median"))
 print("\nsegment counts:"); print(sw.round(2).to_string())
 pd.Series(dict(zip(ANC,frac))).to_csv(f"{W}/global.tsv",sep="\t",header=False)
+
+# --- structured result (7.3 Local). Three different quantities are kept apart on purpose: marker
+# counts, length-weighted posterior, and segment spans. Merging them into one percentage is how a
+# figure ends up disagreeing with its own table.
+def _panel_rows():
+    try:
+        rows = [l.split("\t") for l in open(f"{W}/ref.panel", encoding="utf-8").read().split("\n") if l.strip()]
+    except OSError:
+        return []
+    n = {}
+    for r in rows:
+        if len(r) >= 2:
+            n[r[1]] = n.get(r[1], 0) + 1
+    # A panel is a source if it carries one of the configured source labels (the control panel keeps its
+    # own population names and is not relabelled as one of the sources).
+    _src = {x for x in (os.environ.get("LA_LAB_A", ""), os.environ.get("LA_LAB_B", "")) if x}
+    return [{"id": lab, "label": lab, "reference_pops": [lab], "n_reference": int(n.get(lab, 0)),
+             "role": "source" if lab in _src else "control"} for lab in ANC]
+
+
+_chroms = sorted({str(c) for c in sg.chrom}, key=lambda x: int(x)) if len(sg) else []
+json.dump({
+    "state": "ok" if len(sg) else "unavailable",
+    "reason_code": "" if len(sg) else "no_segments",
+    "panels": _panel_rows(),
+    "global": [{"panel_id": a, "value": float(v)} for a, v in zip(ANC, frac)],
+    "per_chrom": [{"panel_id": r.anc, "chrom": str(r.chrom),
+                   "value": float(r.mb / sg[sg.chrom == r.chrom].mb.sum())} for r in
+                  sg.groupby(["chrom", "anc"]).mb.sum().reset_index().itertuples()],
+    "calibration": [],                       # filled by 17b when the holdout calibration ran
+    "missing_chroms": missing,
+    "aggregation_method": "marker_counts_for_global; segment_spans_for_per_chrom",
+    "n_markers": int(n_mark),
+    "chroms_contributing": _chroms,
+}, open(f"{W}/local_ancestry.json", "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+print(f"wrote {W}/local_ancestry.json ({len(ANC)} panels, chroms {_chroms})")

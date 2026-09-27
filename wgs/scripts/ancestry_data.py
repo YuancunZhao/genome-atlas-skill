@@ -16,7 +16,7 @@ Two jobs, both deliberately free of side effects at import time:
 
 Nothing here knows a sample name, a haplogroup or a population count.
 """
-import json, math, os, pathlib, re, sys
+import json, math, os, pathlib, random, re, sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from gt_alleles import gt_alleles  # noqa: E402  复用它，不另写一个 GT 解析器
@@ -270,20 +270,45 @@ def _cli(argv=None):
     不是调度器，不扫目录、不推断状态：run_all 已经知道自己在跳过哪一步。
     """
     import argparse
-    ap = argparse.ArgumentParser(description="ancestry manifest helper (AN0)")
-    ap.add_argument("--disabled", metavar="ANALYSIS_ID", required=True)
-    ap.add_argument("--out", required=True)
-    ap.add_argument("--sample", required=True)
+    ap = argparse.ArgumentParser(description="ancestry helpers (AN0/AN3)")
+    ap.add_argument("--pick-holdout", metavar="PSAM", help="select calibration holdouts from a .psam")
+    ap.add_argument("--pops", default="", help="comma-separated populations to hold out")
+    ap.add_argument("--n", type=int, default=20)
+    ap.add_argument("--seed", type=int, default=1)
+    ap.add_argument("--check-samples", metavar="VCF", help="verify a subset VCF carries exactly these samples")
+    ap.add_argument("--expect", metavar="FILE", help="file with the expected sample names, one per line")
+    ap.add_argument("--disabled", metavar="ANALYSIS_ID")
+    ap.add_argument("--out", help="output path (holdout list, or the manifest to write)")
+    ap.add_argument("--sample")
     ap.add_argument("--reason", default="disabled_by_config")
     a = ap.parse_args(argv)
+    if a.pick_holdout:
+        rows = read_psam(a.pick_holdout)
+        out = pick_holdout(rows, [p for p in a.pops.split(",") if p], a.n, a.seed)
+        print(f"state={out['state']} reason={out['reason_code']} per_pop={out['per_pop']} "
+              f"ids={len(out['ids'])} {out['detail']}")
+        if a.out and out["state"] == "ok":
+            pathlib.Path(a.out).write_text("\n".join(out["ids"]) + "\n", encoding="utf-8")
+        elif a.out:
+            pathlib.Path(a.out).write_text("", encoding="utf-8")
+        return 0 if out["state"] == "ok" else 2
+    if a.check_samples:
+        got = set(read_vcf_samples(a.check_samples))
+        want = {l.strip() for l in pathlib.Path(a.expect).read_text(encoding="utf-8").splitlines() if l.strip()}
+        if got == want:
+            print(f"sample set matches ({len(got)} names)")
+            return 0
+        print(f"sample set mismatch: missing={sorted(want - got)[:5]} unexpected={sorted(got - want)[:5]}",
+              file=sys.stderr)
+        return 3
+    if not a.disabled or not a.out or not a.sample:
+        ap.error("--disabled requires --out and --sample")
     m = disabled_manifest(a.sample, a.disabled, a.reason)
     write_manifest(a.out, m)
     print(f"wrote {a.out} (state=disabled, reason={a.reason})")
     return 0
 
 
-if __name__ == "__main__":
-    raise SystemExit(_cli())
 
 
 # ─────────────────────────────────────────── AN1: metadata, dosage and locations
@@ -645,3 +670,78 @@ def group_summaries(records, min_group_n):
         g["rank"] = i
     out.sort(key=lambda g: (g["small_group"], g["distance_mean"], g["group_id"]))
     return out
+
+
+# ─────────────────────────────────────────── AN3: holdout selection
+
+def pick_holdout(rows, pops, n, seed):
+    """按固定 seed 无放回抽取校准 holdout。
+
+    每个配置群体取 `min(n, floor(群体人数/5))` 人：留下 1/5 在外面，剩下的仍是可用的参考面板。
+    抽不满 2 人、或抽取后该群体剩余参考不足 2 人 → 返回 unavailable，而不是拿一两个人硬估 SD；
+    未配置的群体不参与；配置里写了参考面板没有的群体则明确报错。
+    """
+    by_pop = {}
+    for r in rows:
+        pop, iid = str(r.get("population") or ""), str(r.get("iid") or "")
+        if pop and iid:
+            by_pop.setdefault(pop, []).append(iid)
+    wanted = [str(p) for p in (pops or [])]
+    if not wanted:
+        return {"state": "unavailable", "reason_code": "no_populations_configured",
+                "detail": "local_ancestry_calibration_pops is empty and no source panel is configured",
+                "ids": [], "per_pop": {}}
+    missing = [p for p in wanted if p not in by_pop]
+    if missing:
+        return {"state": "unavailable", "reason_code": "unknown_population",
+                "detail": f"not present in the reference panel: {missing}", "ids": [], "per_pop": {}}
+    rng = random.Random(int(seed))
+    ids, per_pop = [], {}
+    for p in wanted:
+        pool = sorted(set(by_pop[p]))          # 排序后抽样只依赖 iid 集合与 seed，与输入顺序无关
+        want = min(int(n), len(pool) // 5)
+        if want < 2:
+            return {"state": "unavailable", "reason_code": "insufficient_holdout",
+                    "detail": f"{p}: {len(pool)} individuals give {want} holdouts, need >=2",
+                    "ids": [], "per_pop": {}}
+        if len(pool) - want < 2:
+            return {"state": "unavailable", "reason_code": "insufficient_reference",
+                    "detail": f"{p}: {len(pool) - want} individuals would remain in the reference, need >=2",
+                    "ids": [], "per_pop": {}}
+        ids += rng.sample(pool, want)
+        per_pop[p] = want
+    return {"state": "ok", "reason_code": "", "detail": "", "ids": ids, "per_pop": per_pop}
+
+
+def read_psam(path, population_column="Population"):
+    """读 1000G .psam（#IID 与 Population 两列）。只做解析，不做选择。"""
+    rows, header = [], None
+    for line in pathlib.Path(path).read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        parts = line.split("\t")
+        if header is None:
+            header = [p.lstrip("#") for p in parts]
+            continue
+        rec = dict(zip(header, parts))
+        rows.append({"iid": rec.get("IID", ""), "population": rec.get(population_column, "")})
+    return rows
+
+
+def read_vcf_samples(path):
+    """读 VCF/BCF 的样本名列表（只解析 #CHROM 头；bgzip 由调用方负责解压）。"""
+    import gzip
+    opener = gzip.open if str(path).endswith(".gz") else open
+    with opener(path, "rt", encoding="utf-8", errors="replace") as fh:
+        for line in fh:
+            if line.startswith("##"):
+                continue
+            if line.startswith("#CHROM"):
+                cols = line.rstrip("\n").split("\t")
+                return cols[9:]
+            break
+    return []
+
+
+if __name__ == "__main__":
+    raise SystemExit(_cli())

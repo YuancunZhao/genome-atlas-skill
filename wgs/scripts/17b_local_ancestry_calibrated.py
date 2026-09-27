@@ -13,7 +13,24 @@ for f in glob.glob(f"{W}/la.*.global.anc.gz"):
     c=os.path.basename(f).split(".")[1]
     d=pd.read_csv(f,sep="\t"); d["chrom"]=c; rows.append(d)
 dy=pd.concat(rows); dy["w"]=dy.chrom.map(LEN)
-anc=["NorthEA","SouthEA","European","SouthAsian"]
+# Labels come from the FLARE .model, in the same order as the data columns (AN3): a hard-coded list
+# would attach percentages to the wrong panel as soon as the configured panels change.
+import glob as _glob
+def _an_labels(work):
+    for m in sorted(_glob.glob(f"{work}/la.*.model")) + sorted(_glob.glob(f"{work}/calib.*.model")):
+        try:
+            lines = open(m, encoding="utf-8", errors="replace").read().split("\n")
+        except OSError:
+            continue
+        for i, l in enumerate(lines):
+            if l.strip().lower().startswith("# list of ancestries"):
+                for j in range(i + 1, min(i + 4, len(lines))):
+                    row = lines[j].strip()
+                    if row and not row.startswith("#"):
+                        return row.split("\t")
+    raise SystemExit("no FLARE .model with an ancestry list; cannot label the columns")
+
+anc = _an_labels(W)
 gw={a:np.average(dy[a],weights=dy.w) for a in anc}
 print(f"{NAME_EN}, length-weighted over 22 autosomes:")
 for a in anc: print(f"  {a:12s} {gw[a]*100:5.2f}%")
