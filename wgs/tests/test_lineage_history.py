@@ -47,6 +47,31 @@ class TestMatchLineage(unittest.TestCase):
         self.assertNotEqual(lh.match_lineage("mt:A1", "mt:A13", parents), "exact")
 
 
+class TestCanonicalize(unittest.TestCase):
+    """AADR 的标签来自 YFull 12.03，我们的树是 14.06.0：比较之前必须规范化，并说清做了什么。"""
+
+    def test_placeholder_labels_are_missing_not_branches(self):
+        # AADR 用这些字符串表示"没有标签"（实测 (female) 9409 行、(sex unknown) 1122 行）
+        for v in ("", "..", "nan", "n/a", "n/a (female)", "n/a (sex unknown)", "N/A"):
+            self.assertEqual(lh.canonicalize(v, "y", {}), ("", "missing"), v)
+
+    def test_alias_maps_an_older_name_to_the_current_node(self):
+        h = {"aliases": {"y:I-V6473": "y:I-V6473-新名"}}
+        self.assertEqual(lh.canonicalize("I-V6473", "y", h), ("y:I-V6473-新名", "alias"))
+
+    def test_node_present_in_the_tree(self):
+        self.assertEqual(lh.canonicalize("N-CTS4714", "y", {}, known_nodes={"y:N-CTS4714"}),
+                         ("y:N-CTS4714", "none"))
+
+    def test_absent_node_is_flagged_as_version_mismatch(self):
+        # 当前树里没有该节点：明确标注版本不匹配，而不是当成"无关支系"悄悄丢掉
+        self.assertEqual(lh.canonicalize("I-V6473", "y", {}, known_nodes={"y:N-CTS4714"}),
+                         ("y:I-V6473", "version_mismatch"))
+
+    def test_without_a_node_set_it_says_unverified(self):
+        self.assertEqual(lh.canonicalize("I-V6473", "y", {}), ("y:I-V6473", "unverified"))
+
+
 class TestLineageResult(unittest.TestCase):
     """05/06 的结构化结果：判定字段、不可用状态、以及 caller 与人工复核的分工。"""
 
@@ -128,6 +153,13 @@ class TestObservationsAndRoutes(unittest.TestCase):
         self.assertEqual([o["record_id"] for o in obs], ["Y.SG"])
         self.assertIsNone(obs[0]["date_range"]["mean"], "未知年代保持 null，不填 0")
         self.assertEqual(obs[0]["precision"], "region")
+
+    def test_placeholder_haplogroups_never_match_a_branch(self):
+        rows = [{"record_id": "F.AG", "master_id": "F", "y_hg_raw": "n/a (female)", "call_rate": 0.9},
+                {"record_id": "U.SG", "master_id": "U", "y_hg_raw": "n/a (sex unknown)", "call_rate": 0.9},
+                {"record_id": "R.SG", "master_id": "R", "y_hg_raw": "R", "call_rate": 0.9}]
+        obs = lh.lineage_observations(rows, "y:R", parents={}, tree_kind="y")
+        self.assertEqual([o["record_id"] for o in obs], ["R.SG"])
 
     def test_observations_carry_the_required_fields(self):
         o = lh.lineage_observations(self.ROWS, "mt:A13", parents={}, tree_kind="mt")[0]

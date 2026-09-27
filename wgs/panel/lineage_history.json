@@ -7,6 +7,14 @@
   {"id": "yfull", "url": "https://www.yfull.com/", "what": "Y tree used by 05 and by the AADR Y labels (12.03)"},
   {"id": "haplogrep3", "url": "https://github.com/gen-pop/haplogrep3", "what": "mt classification tree (phylotree-rcrs@17.2)"}
  ],
+ "tree_versions": {
+  "project_tree": "14.06.0",
+  "project_tree_file": "work/data/ref/ytree/current_version.txt (05 walks this tree)",
+  "aadr_label_tree": "12.03",
+  "aadr_label_source": "AADR .anno columns 'Y haplogroup ... based on Y-full 12.03' / 'mtDNA haplogroup'; the labels are frozen in that external release and cannot be restated",
+  "why_two_versions": "The two sides come from different places: 05 classifies the sample against the tree this project downloaded, while the ancient-DNA panel ships labels that the AADR authors computed with whatever tree existed at their release (12.03, Lazaridis et al. Science 2022). They are not inconsistent by accident, and neither can be replaced by the other.",
+  "handling": "canonicalize() maps a stored label onto a node of the current tree: alias table first, then membership in the tree. A label that is absent from the tree is reported as version_mismatch (kept, counted, and excluded from the default view) -- never silently treated as an unrelated branch. Fill 'aliases' when a node is renamed between versions."
+ },
  "reviewed_calls": {
   "y:N-CTS4714": {
    "conservative_hg": "N-M1845",

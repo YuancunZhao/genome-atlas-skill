@@ -21,6 +21,16 @@ Y and mt names are namespaced (`y:`, `mt:`) because the same label can exist in 
 import json, os, pathlib, sys
 
 
+# AADR 用这些字符串表示"这一行没有单倍群标签"（女性和性别未知的个体）。它们不是支系名，必须当缺失
+# 处理，否则 "n/a (female)" 会被当成一个群体名去和树比较。
+MISSING_HG_PLACEHOLDERS = ("", ".", "..", "nan", "n/a", "n/a (female)", "n/a (sex unknown)",
+                           "n/a (sex)", "unknown", "na")
+
+
+def is_missing_hg(value):
+    return str(value or "").strip().lower() in MISSING_HG_PLACEHOLDERS
+
+
 def _ns(node):
     s = str(node or "")
     return s.split(":", 1)[0] if ":" in s else ""
@@ -58,6 +68,45 @@ def match_lineage(query, record, parents, same_tree=True):
     if q_in and r_in:
         return "unrelated"
     return "unresolved"
+
+
+def load_tree_nodes(tree_path, kind):
+    """从 YFull 的 current_tree.json 收集规范节点 ID（带命名空间），用于判断"这个标签在当前树里吗"。"""
+    try:
+        tree = json.loads(pathlib.Path(tree_path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    out = set()
+
+    def walk(n):
+        nid = str(n.get("id") or "")
+        if nid:
+            out.add(f"{kind}:{nid}")
+        for c in n.get("children", []):
+            walk(c)
+    walk(tree)
+    return out
+
+
+def canonicalize(node, kind, history, known_nodes=None):
+    """把历史标签规范化到当前树版本的节点 ID，返回 (canonical, note)。
+
+    note 说明做了什么：missing（本来就没有标签）/ alias（按别名表改写）/ none（树里有这个节点）/
+    version_mismatch（树里没有——多半是标签来自另一个树版本，例如 AADR 的 YFull 12.03）/
+    unverified（没拿到树节点集合，无法判断）。**绝不**假设"表里没有就等于无关支系。
+    """
+    raw = str(node or "").strip()
+    if is_missing_hg(raw):
+        return "", "missing"
+    key = raw if ":" in raw else f"{kind}:{raw}"
+    aliases = (history or {}).get("aliases") or {}
+    if key in aliases:
+        return str(aliases[key]), "alias"
+    if known_nodes is None:
+        return key, "unverified"
+    if key in known_nodes:
+        return key, "none"
+    return key, "version_mismatch"
 
 
 # ---------------------------------------------------------------- 05/06 的结果规范化
@@ -121,7 +170,8 @@ def _dedupe_by_master(rows):
     return [best[k] for k in sorted(best)]
 
 
-def lineage_observations(rows, query, parents, tree_kind, same_tree=True):
+def lineage_observations(rows, query, parents, tree_kind, same_tree=True, history=None,
+                         known_nodes=None, stats=None):
     """筛出与该支系相关的历史记录（含祖先/后代/未定），并带上坐标、年代与来源。
 
     这里**不用**常染色体 call_rate 门槛：来源对 Y/mt 的可用性决定记录是否可用，覆盖率低只影响
@@ -131,9 +181,10 @@ def lineage_observations(rows, query, parents, tree_kind, same_tree=True):
     field = "y_hg_raw" if kind == "y" else "mt_hg_raw"
     field_tree = "hg_source_tree"
     out = []
-    for r in _dedupe_by_master([x for x in (rows or []) if str(x.get(field) or "").strip()]):
-        raw = str(r.get(field)).strip()
-        node = raw if ":" in raw else f"{kind}:{raw}"
+    for r in _dedupe_by_master([x for x in (rows or []) if not is_missing_hg(x.get(field))]):
+        node, note = canonicalize(r.get(field), kind, history, known_nodes)
+        if stats is not None and note != "missing":
+            stats[note] = stats.get(note, 0) + 1     # 进了比较就记账，包括版本不匹配的那些
         rel = match_lineage(query, node, parents, same_tree=bool(same_tree))
         lat, lon = r.get("latitude"), r.get("longitude")
         out.append({
@@ -257,11 +308,16 @@ def _cli(argv=None):
     ap.add_argument("--yard", default="", help="03_haplo (where y_result.json / mt_result.json live)")
     ap.add_argument("--out", required=True, help="where to write lineage_history.json")
     ap.add_argument("--sample", default="")
+    ap.add_argument("--ytree", default="", help="YFull current_tree.json, for node-membership checks")
     a = ap.parse_args(argv)
 
     hist = load_history(json.loads(pathlib.Path(a.history).read_text(encoding="utf-8"))
                         if a.history and pathlib.Path(a.history).exists() else {})
     parents = hist["parents"]
+    nodes = load_tree_nodes(a.ytree, "y") if a.ytree else None
+    stats = {}
+    if nodes:
+        print(f"tree nodes loaded: {len(nodes)}")
     out = {"y": None, "mt": None}
     for kind in ("y", "mt"):
         p = pathlib.Path(a.yard) / f"{kind}_result.json"
@@ -276,8 +332,10 @@ def _cli(argv=None):
         s = lineage_summary(raw)
         node = s.get("terminal") or s.get("reported_hg")
         key = node if (node and ":" in str(node)) else (f"{kind}:{node}" if node else "")
-        out[kind] = dict(s, history=history_view(key, hist, [], parents) if key else
-                         history_view("", hist, [], parents))
+        _hist = history_view(key, hist, [], parents)
+        if stats:
+            _hist["label_notes"] = dict(stats)
+        out[kind] = dict(s, history=_hist)
     pathlib.Path(a.out).write_text(json.dumps(out, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
     print(f"wrote {a.out} (y={out['y']['state']}, mt={out['mt']['state']})")
     return 0
