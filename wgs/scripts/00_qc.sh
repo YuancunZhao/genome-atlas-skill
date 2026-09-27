@@ -14,6 +14,8 @@ if [ -z "${VENDOR_VCF:-}" ] && [ ! -f "$SAMPLE.call.vcf.gz" ]; then
   bcftools mpileup -f "$REF" -a FORMAT/AD,FORMAT/DP -Ou "$SAMPLE.cram" | bcftools call -m -v -Oz -o "$SAMPLE.call.vcf.gz"
   tabix -f "$SAMPLE.call.vcf.gz"
 fi
-mosdepth --no-per-base -t "$THREADS" -f "$REF" -Q 20 --by 1000 --quantize 0:1:4:8:20:60: "$WGS/01_qc/depth" "$SAMPLE.cram"
+# 碱基质量阈值来自配置（min_base_quality）：写死的 20 会让"改配置生效"在深度统计上落空，
+# 而深度又喂给可调用区间与 CNV 归一化——改了配置却拿到旧阈值，偏差会一路传下去。
+mosdepth --no-per-base -t "$THREADS" -f "$REF" -Q "${MIN_BQ:?MIN_BQ not exported by env.sh}" --by 1000 --quantize 0:1:4:8:20:60: "$WGS/01_qc/depth" "$SAMPLE.cram"
 tabix -f -p bed "$WGS/01_qc/depth.regions.bed.gz" || true
 echo "QC_DONE -> $WGS/01_qc/depth.quantized.bed.gz"

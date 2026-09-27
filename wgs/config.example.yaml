@@ -22,6 +22,9 @@ build: GRCh37                # the only build the pipeline supports
 # --- callable mask. Everything outside it is reported as "no call", never as reference.
 callable_min_depth: 8
 callable_min_mapq: 20
+# 碱基质量阈值（mosdepth -Q）。与 callable_min_mapq（比对质量）是两回事：
+# 前者按读段上的碱基质量过滤，后者按读段的比对质量过滤。深度统计受前者影响。
+min_base_quality: 20
 
 # --- reference populations (1000 Genomes labels). Defaults suit an East Asian sample; change for others.
 ref_superpop: EAS            # percentiles are "among the N individuals of this super-population"
