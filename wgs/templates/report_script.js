@@ -217,6 +217,10 @@ function renderHla(){
 /* ── 05 PRS three versions ── */
 reveal('prs',(s,c)=>{
   const rows=[...D.prs].sort((a,b)=>b.pct_EAS-a.pct_EAS), x0=250, x1=850, top=16, rh=21, X=v=>x0+(x1-x0)*v/100;
+  // The panel grows with the number of scores, but the canvas was a fixed 700 tall while 47 rows
+  // need 16+47*21 = 1003: the caption landed in the middle of the data and the last rows spilled
+  // out of the canvas into the report text below. Size the canvas from the content instead.
+  const H=top+rows.length*rh+44; s.setAttribute('viewBox','0 0 900 '+H);
   el(s,'rect',{x:X(25),y:top-8,width:X(75)-X(25),height:rows.length*rh+4,fill:c.track,opacity:.6});
   [0,25,50,75,100].forEach(v=>{el(s,'line',{x1:X(v),y1:top-8,x2:X(v),y2:top+rows.length*rh-2,stroke:v===50?c.faint:c.grid,'stroke-width':v===50?.9:.5});txt(s,{x:X(v),y:top+rows.length*rh+12,'text-anchor':'middle','font-size':7.5,fill:c.faint},v)});
   rows.forEach((r,i)=>{const y=top+i*rh+6, hi=r.pct_EAS>=90||r.pct_EAS<=10;
@@ -227,7 +231,7 @@ reveal('prs',(s,c)=>{
     txt(s,{x:x1+34,y:y+3,'font-size':7.5,fill:c.faint},r.coverage_pct+'%');
   });
   txt(s,{x:x1+10,y:top-10,'font-size':7,'font-weight':600,fill:c.faint,'letter-spacing':'.08em'},zh()?'百分位 · 覆盖':'PCT · COVERAGE');
-  foot(s,c,900,696,zh()?`菱形 = 在 ${(D.pop||{}).n_super||'—'} 名东亚人中的百分位 · 空心圆 = 在 ${(D.pop||{}).n_sub||'—'} 名汉族中 · 灰带 = 中间一半的人`:`diamond = percentile among ${(D.pop||{}).n_super||'—'} East Asians · hollow = among ${(D.pop||{}).n_sub||'—'} Han · band = middle half`);
+  foot(s,c,900,H-8,zh()?`菱形 = 在 ${(D.pop||{}).n_super||'—'} 名东亚人中的百分位 · 空心圆 = 在 ${(D.pop||{}).n_sub||'—'} 名汉族中 · 灰带 = 中间一半的人`:`diamond = percentile among ${(D.pop||{}).n_super||'—'} East Asians · hollow = among ${(D.pop||{}).n_sub||'—'} Han · band = middle half`);
 });
 
 /* ── 06 CNV depth panel ── */
@@ -662,6 +666,7 @@ reveal('afam',(s,c)=>{
 reveal('behaviour',(s,c)=>{
   const a=AC(), rows=[...D.behaviour].sort((p,q)=>q.pct_EAS-p.pct_EAS), x0=230,x1=800,top=24,rh=23;
   const X=v=>x0+(x1-x0)*v/100;
+  const H=top+rows.length*rh+44; s.setAttribute('viewBox','0 0 900 '+H);
   el(s,'rect',{x:X(25),y:top-10,width:X(75)-X(25),height:rows.length*rh+2,fill:c.track,opacity:.6});
   [0,25,50,75,100].forEach(v=>{el(s,'line',{x1:X(v),y1:top-10,x2:X(v),y2:top+rows.length*rh-4,stroke:v===50?c.faint:c.grid,'stroke-width':v===50?.9:.5});
     txt(s,{x:X(v),y:top+rows.length*rh+10,'text-anchor':'middle','font-size':8,fill:c.faint},v)});
@@ -676,7 +681,7 @@ reveal('behaviour',(s,c)=>{
     txt(s,{x:x1+12,y:y+3,'font-size':9.5,'font-weight':800,fill:eas?c.ink:c.muted},r.pct_EAS.toFixed(0));
     txt(s,{x:x1+36,y:y+3,'font-size':8,fill:c.faint},r.coverage+'%')});
   txt(s,{x:x1+12,y:top-10,'font-size':7.5,'font-weight':600,fill:c.faint,'letter-spacing':'.06em'},zh()?'百分位 · 覆盖':'PCT · COV');
-  foot(s,c,900,426,zh()?'菱形 = 东亚人群训练 · 空心圆 = 欧洲人群训练 · 灰带 = 中间一半的人':'diamond = trained in East Asians · hollow circle = trained in Europeans · band = middle half');
+  foot(s,c,900,H-8,zh()?'菱形 = 东亚人群训练 · 空心圆 = 欧洲人群训练 · 灰带 = 中间一半的人':'diamond = trained in East Asians · hollow circle = trained in Europeans · band = middle half');
 });
 
 renderAll();
