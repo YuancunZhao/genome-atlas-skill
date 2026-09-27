@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Filter Delly SVs (PASS, non-ref, 50bp-5Mb, PRECISE or strong PE support), validate DEL/DUP >=2kb by read depth,
+"""Filter Delly SVs (PASS, non-ref, 50bp-5Mb, PRECISE or strong PE support), depth-filter DEL/DUP >=2kb by read depth,
 annotate overlapping genes/exons (Ensembl 87 GFF3)."""
 import sys, pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
@@ -21,7 +21,7 @@ if MEAN_DP is None:
 import os as _os
 if not _os.path.exists(f"{W}/delly/target.sv.bcf"):
     _os.makedirs(W, exist_ok=True)
-    _cols = "chrom pos end svtype svlen precise pe sr mapq chr2 pos2 geno gq rc rcl rcr dr dv rr rv dp_ratio rd_ok genes".split()
+    _cols = "chrom pos end svtype svlen precise pe sr mapq chr2 pos2 geno gq rc rcl rcr dr dv rr rv size dp_ratio depth_check geno_dp genes cds_overlap whole_gene_del".split()
     pd.DataFrame(columns=_cols).to_csv(f"{W}/sv_filtered.tsv", sep="\t", index=False)
     print("WARNING: 08_sv/delly/target.sv.bcf not found (no step runs Delly) -- empty sv_filtered.tsv written", file=sys.stderr)
     sys.exit(0)
@@ -40,7 +40,10 @@ def region_depth(c, s, e):
         return np.nan
     out = subprocess.run(["tabix", f"{PROJ}/wgs/01_qc/depth.regions.bed.gz", f"{c}:{max(1,s)}-{e}"], capture_output=True, text=True).stdout
     v = [float(l.split("\t")[3]) for l in out.splitlines()]
-    base = MEAN_DP * (0.5 if c in ("X", "Y") else 1.0)
+    # X depth baseline follows the sample's sex (b37 non-PAR X is hemizygous in males); a
+    # fixed 0.5 factor would double every female X ratio and call normal coverage a DUP.
+    ploidy = 0.5 if (c == "Y" or (c == "X" and SEX.startswith("m"))) else 1.0
+    base = MEAN_DP * ploidy
     return np.median(v) / base if v else np.nan
 big = nonbnd[(nonbnd.svtype.isin(["DEL", "DUP"])) & (nonbnd["size"] >= 2000)]
 nonbnd["dp_ratio"] = np.nan
@@ -54,9 +57,19 @@ def geno_dp(r):
     if r.svtype == "DEL": return "1/1" if r.dp_ratio < 0.2 else "0/1"
     return "1/1" if r.dp_ratio > 1.8 else "0/1"
 nonbnd["depth_check"] = nonbnd.apply(rd_ok, axis=1)
-nonbnd["geno"] = nonbnd.apply(geno_dp, axis=1)
-# drop depth-inconsistent large CNVs and large imprecise inversions
-nonbnd = nonbnd[(nonbnd.depth_check != "mismatch") & ~((nonbnd.svtype == "INV") & (nonbnd["size"] > 100000) & ~((nonbnd.precise == 1) & (nonbnd.sr >= 5)))]
+# Keep the caller's GT in `geno`; the read-depth estimate is a separate column so the
+# crude depth threshold never silently replaces the original Delly call.
+nonbnd["geno_dp"] = nonbnd.apply(geno_dp, axis=1)
+# Depth consistency is a filter, not validation: count and export what it removes before
+# dropping depth-inconsistent large CNVs (and large imprecise inversions), so pre-filter,
+# dropped and not-assessable numbers stay auditable instead of vanishing before the stats.
+n_pre = len(nonbnd)
+n_mm = int((nonbnd.depth_check == "mismatch").sum())
+n_na = int((nonbnd.depth_check == "n/a").sum())
+_inv_drop = (nonbnd.svtype == "INV") & (nonbnd["size"] > 100000) & ~((nonbnd.precise == 1) & (nonbnd.sr >= 5))
+n_inv = int(_inv_drop.sum())
+nonbnd[nonbnd.depth_check == "mismatch"].to_csv(f"{W}/sv_depth_mismatch.tsv", sep="\t", index=False)
+nonbnd = nonbnd[(nonbnd.depth_check != "mismatch") & ~_inv_drop]
 # gene annotation
 genes = collections.defaultdict(list); exons = collections.defaultdict(list)
 with gzip.open(f"{PROJ}/data/ref/annot/Homo_sapiens.GRCh37.87.gff3.gz", "rt") as f:
@@ -82,13 +95,13 @@ nonbnd = nonbnd.sort_values(["chrom", "pos"], key=lambda s: s.map(lambda x: main
 nonbnd.to_csv(f"{W}/sv_filtered.tsv", sep="\t", index=False)
 print("filtered non-BND SVs:", len(nonbnd)); print(nonbnd.svtype.value_counts().to_dict())
 print("size classes:", pd.cut(nonbnd["size"], [0, 100, 1000, 10000, 100000, 5e6]).value_counts().sort_index().to_dict())
-print("depth check for DEL/DUP>=2kb:", nonbnd.depth_check.value_counts().to_dict())
+print(f"depth check DEL/DUP>=2kb: {n_pre} pre-filter events -> kept {len(nonbnd)} (mismatch dropped {n_mm}, imprecise INV dropped {n_inv}, depth not assessable {n_na}); survivors:", nonbnd.depth_check.value_counts().to_dict())
 pd.set_option("display.width", 250); pd.set_option("display.max_colwidth", 60)
 cds = nonbnd[nonbnd.cds_overlap & (nonbnd.depth_check != "mismatch")]
-print(f"\nSVs overlapping CDS (depth-consistent): {len(cds)}; hom: {(cds.geno=='1/1').sum()}")
-print(cds[cds.geno == "1/1"][["chrom", "pos", "end", "svtype", "size", "geno", "dp_ratio", "genes", "whole_gene_del"]].to_string(index=False))
-print("\nhet SVs deleting/duplicating whole genes or >=10kb with CDS:")
-print(cds[(cds.geno != "1/1") & ((cds.whole_gene_del != "") | (cds["size"] >= 10000))][["chrom", "pos", "end", "svtype", "size", "geno", "dp_ratio", "genes", "whole_gene_del"]].to_string(index=False))
-print("\ndp_ratio distribution by type/genotype (DEL/DUP >= 2kb):")
+print(f"\nSVs overlapping CDS (depth-consistent): {len(cds)}; hom by depth estimate: {(cds.geno_dp=='1/1').sum()}")
+print(cds[cds.geno_dp == "1/1"][["chrom", "pos", "end", "svtype", "size", "geno", "geno_dp", "dp_ratio", "genes", "whole_gene_del"]].to_string(index=False))
+print("\nSVs deleting/duplicating whole genes or >=10kb with CDS:")
+print(cds[(cds.geno_dp != "1/1") & ((cds.whole_gene_del != "") | (cds["size"] >= 10000))][["chrom", "pos", "end", "svtype", "size", "geno", "geno_dp", "dp_ratio", "genes", "whole_gene_del"]].to_string(index=False))
+print("\ndp_ratio distribution by type/depth-estimated genotype (DEL/DUP >= 2kb):")
 b = nonbnd[nonbnd.dp_ratio.notna()]
-print(b.groupby(["svtype", "geno"]).dp_ratio.describe()[["count", "25%", "50%", "75%"]].round(2))
+print(b.groupby(["svtype", "geno_dp"]).dp_ratio.describe()[["count", "25%", "50%", "75%"]].round(2))

@@ -98,8 +98,16 @@ _sv_f = W/"08_sv/sv_filtered.tsv"
 sv = pd.read_csv(_sv_f, sep="\t", dtype={"chrom": str}) if _sv_f.exists() else pd.DataFrame(columns=["svtype", "dp_ratio", "genes"])
 D["sv_counts"] = sv.svtype.value_counts().to_dict()
 D["sv_total"] = len(sv)
-_gd = sv[(sv.svtype == "DEL") & (sv.dp_ratio.notna()) & (sv.dp_ratio < 0.2) & sv.genes.fillna("").astype(str).str.len().gt(0)] if len(sv) else sv
-D["sv_gene_dels"] = [{"chrom": str(r.chrom), "pos": int(r.pos), "gene": str(r.genes).split(",")[0], "frac": round(float(r.dp_ratio), 2)} for r in _gd.itertuples()]
+# Whole-gene deletions only: 13's `whole_gene_del` lists protein-coding genes fully spanned
+# by a DEL, unlike `genes` which is every gene the event merely overlaps. One entry per
+# deleted gene (frac falls back to 0.5 when depth was not assessable), plus event and
+# unique-gene counts so the report can distinguish events from deduplicated genes.
+_wgd_col = sv.get("whole_gene_del", pd.Series(dtype=str))
+_wgd = sv[_wgd_col.fillna("").astype(str).str.len().gt(0)] if len(sv) else sv
+D["sv_gene_dels"] = [{"chrom": str(r.chrom), "pos": int(r.pos), "gene": g,
+                      "frac": round(float(r.dp_ratio), 2) if pd.notna(r.dp_ratio) else 0.5}
+                     for r in _wgd.itertuples() for g in str(r.whole_gene_del).split(",") if g]
+D["sv_gene_dels_stats"] = {"events": int(len(_wgd)), "genes": len({e["gene"] for e in D["sv_gene_dels"]})}
 # SMN copies come from SMNCopyNumberCaller and STR lengths from ExpansionHunter; no step of
 # this repository runs either tool, so both sections degrade to "not assessed" when absent.
 _smn_f = W/"08_sv/smn/target.tsv"

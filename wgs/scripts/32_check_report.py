@@ -125,6 +125,22 @@ def check_shapes(D):
             break
         if r.get("class") == "no_local_rule" and r.get("thr") is not None:
             fail(f"str row {r.get('locus')}: no_local_rule but thr is set")
+    # M4: sv_gene_dels are whole-gene deletions (13's whole_gene_del column), one entry
+    # per deleted gene; the event/gene counts must match the list they summarise.
+    gd = D.get("sv_gene_dels") or []
+    st = D.get("sv_gene_dels_stats") or {}
+    if gd:
+        if not st:
+            fail("sv_gene_dels present without sv_gene_dels_stats (events/genes counts)")
+        else:
+            if st.get("genes") != len({e["gene"] for e in gd}):
+                fail("sv_gene_dels_stats.genes does not match the unique genes in sv_gene_dels")
+            if not (0 < st.get("events", 0) <= len(gd)):
+                fail("sv_gene_dels_stats.events inconsistent with sv_gene_dels length")
+        for e in gd[:20]:
+            if not e.get("gene") or "," in e["gene"]:
+                fail(f"sv_gene_dels entries must carry one gene name each, got {e.get('gene')!r}")
+                break
 
 
 def check_sections(D):
@@ -150,6 +166,24 @@ def check_sections(D):
             fail(f"section {s.get('id')}: unknown reason code {s['code']!r}")
         if not (s.get("name_zh") and s.get("name_en")):
             fail(f"section {s.get('id')}: missing bilingual display name (renderSections reads it)")
+
+
+def check_sv_source(root, D):
+    """M4: every sv_gene_dels gene must come from 13's whole_gene_del column -- a gene the
+    event merely overlaps is not a whole-gene deletion, however low the read depth is."""
+    tsv = root / "work/wgs/08_sv/sv_filtered.tsv"
+    if not tsv.exists() or not (D.get("sv_gene_dels") or []):
+        return
+    import csv
+    wgd = set()
+    with open(tsv) as f:
+        for row in csv.DictReader(f, delimiter="\t"):
+            for g in (row.get("whole_gene_del") or "").split(","):
+                if g:
+                    wgd.add(g)
+    stray = {e["gene"] for e in D["sv_gene_dels"]} - wgd
+    if stray:
+        fail(f"sv_gene_dels names genes absent from sv_filtered whole_gene_del (overlap-only?): {sorted(stray)[:5]}")
 
 
 def check_naming(root):
@@ -234,6 +268,7 @@ def main():
         check_keys(root, D)
         check_shapes(D)
         check_sections(D)
+        check_sv_source(root, D)
     else:
         fail(f"{json_path} not found")
     check_html(html_path)
