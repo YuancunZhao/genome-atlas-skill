@@ -106,6 +106,26 @@ def check_keys(root, D):
             fail(f"template reads D.{k} but report_data.json has no such key")
 
 
+def check_payload_escaping(html_path):
+    """载荷块里不能出现裸的闭合序列。
+
+    31 把数据写成 JS 字符串字面量；如果数据里含 "</script"（例如某人的显示名），浏览器的解析器
+    会在那里结束脚本块，剩下的载荷变成页面文本，图表全空 —— 而所有静态检查仍然通过。转义后
+    文本里只有反斜杠 + 斜杠，数据本身不变。
+    """
+    if not html_path or not html_path.exists():
+        return
+    html = html_path.read_text(encoding="utf-8")
+    blocks = re.findall(r"<script>window\.__c_\w+_\d+=(.*?)</script>", html, re.S)
+    if not blocks:
+        return          # 没有分块载荷的构建（例如只渲染片段）不适用
+    bad = [b[:60] for b in blocks if "</" in b]
+    if bad:
+        fail(f"{len(bad)} payload chunk(s) contain a raw closing tag sequence, e.g. {bad[0]!r}")
+    if "NaN" in "".join(blocks) or "Infinity" in "".join(blocks):
+        fail("payload contains NaN/Infinity; it must be valid JSON (null for missing values)")
+
+
 def check_html(html_path):
     if not html_path or not html_path.exists():
         return
@@ -192,9 +212,10 @@ def check_shapes(D):
             break
 
 
-    # W-T1: the affinity figure draws D.ho_affinity (modern + ancient on one distance axis) and the
-    # three closest ancient groups with their members. region is a hand-checked judgement layer, so
-    # the checks are about it staying honest: only China_ labels may carry one, and only n/s.
+    # W-T1/AN5: the affinity figure draws D.ho_affinity (modern + ancient on one distance axis) and the
+    # three closest ancient groups with their members. These checks stay independent of any particular
+    # reference panel: an earlier version demanded China_-prefixed labels, a north/south vocabulary and
+    # a Han name_zh, which would fail for every non-Chinese panel and for the English rendering.
     aff = D.get("ho_affinity") or []
     if not aff:
         fail("ho_affinity missing or empty (the ancestry figure has nothing to draw)")
@@ -208,15 +229,19 @@ def check_shapes(D):
             if r.get("kind") == "ancient" and int(r.get("n") or 0) < 2:
                 fail(f"ho_affinity ancient row {r.get('label')} has n<2")
                 break
-            if r.get("region") not in ("", None, "north", "south"):
-                fail(f"ho_affinity {r.get('label')} has region {r.get('region')!r}")
+            # region is a free-form grouping label from the location table (a colour key): it only has
+            # to be a string. The vocabulary belongs to the reference panel, not to this checker.
+            if r.get("region") is not None and not isinstance(r.get("region"), str):
+                fail(f"ho_affinity {r.get('label')} has a non-string region {r.get('region')!r}")
                 break
-            nz = str(r.get("name_zh") or "")
-            if nz and not ("\u4e00" <= nz[0] <= "\u9fff"):
-                fail(f"ho_affinity {r.get('label')} has a non-Han name_zh {nz!r} (column slip?)")
+            # name_zh, when present, is whatever the location table holds. No script requirement: 7.1
+            # says a record is not required to have a Han name, and an English report shows raw labels.
+            nz = r.get("name_zh")
+            if nz is not None and not isinstance(nz, str):
+                fail(f"ho_affinity {r.get('label')} has a non-string name_zh {nz!r}")
                 break
-            if r.get("region") and not str(r.get("label", "")).startswith("China_"):
-                fail(f"ho_affinity {r.get('label')} is not a China_ label but carries a region")
+            if r.get("d") is not None and float(r.get("d") or 0) < 0:
+                fail(f"ho_affinity {r.get('label')} has a negative distance")
                 break
         strip = D.get("ho_affinity_strip") or []
         top3 = [x.get("label") for x in sorted([r for r in aff if r.get("kind") == "ancient"],
@@ -373,6 +398,7 @@ def main():
     else:
         fail(f"{json_path} not found")
     check_html(html_path)
+    check_payload_escaping(html_path)
     check_naming(root)
     check_runtime(html_path)
 

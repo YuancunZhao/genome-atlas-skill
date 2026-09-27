@@ -110,6 +110,38 @@ js = open(S/"report_script.js", encoding="utf-8").read()
 # ~100 KB string chunks in small <script> blocks and rebuilt with JSON.parse, and every step
 # records a progress marker, so a failure names the object it died on.
 _CHUNK = 100_000
+def _json_clean(obj):
+    """递归把 NaN/Infinity 变成 null。
+
+    json.dumps 默认把它们写成裸 NaN / Infinity —— 严格 JSON 解析器会直接拒绝，而浏览器的
+    JSON.parse 也要求合法 JSON。这些值本来来自 pandas 的缺失，语义就是 null。
+    """
+    if isinstance(obj, float):
+        return obj if obj == obj and obj not in (float("inf"), float("-inf")) else None
+    if isinstance(obj, dict):
+        return {k: _json_clean(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_json_clean(v) for v in obj]
+    try:                                   # numpy 标量：转成 Python 原生类型
+        import numpy as _np
+        if isinstance(obj, _np.generic):
+            return _json_clean(obj.item())
+    except Exception:
+        pass
+    return obj
+
+
+def _json_text(obj):
+    """合法 JSON 文本，且不含会提前闭合 <script> 的序列。"""
+    return json.dumps(_json_clean(obj), ensure_ascii=False, allow_nan=False)
+
+
+def _js_string_literal(text):
+    """把一段文本写成 JS 字符串字面量，并在斜杠前加反斜杠以断开闭合标签序列（JSON 与 JS 都
+    把转义的斜杠当普通斜杠，所以数据不变，浏览器也不会提前结束脚本块）。"""
+    return json.dumps(text, ensure_ascii=False).replace("</", "<\\/")
+
+
 _DATA_OBJS = [("D", D), ("BLOODV3", BLOOD), ("UI", UI), ("FIND", FIND), ("PGX", PGX), ("PRS_EN", PRS_ZH)]
 _PH = ("__DATA__", "__UI__", "__FIND__", "__PGX__", "__BLOOD__", "__PRS_EN__")
 _lines = js.split("\n")
@@ -136,12 +168,12 @@ def _code_blocks():
 def _payload_blocks():
     out = []
     for name, obj in _DATA_OBJS:
-        s = json.dumps(obj, ensure_ascii=False)
+        s = _json_text(obj)
         chunks = [s[i:i + _CHUNK] for i in range(0, len(s), _CHUNK)] or [""]
         out.append(_MARK(name + ":chunks"))
         for ci, ch in enumerate(chunks):
             out.append('<script>window.__c_%s_%d=%s;</script>\n'
-                       % (name, ci, json.dumps(ch, ensure_ascii=False)))
+                       % (name, ci, _js_string_literal(ch)))
         out.append('<script>window.__boot=%s;var %s=JSON.parse([%s].join(""));</script>\n'
                    % (json.dumps(name + ":parsed"), name,
                       ",".join("window.__c_%s_%d" % (name, i) for i in range(len(chunks)))))
