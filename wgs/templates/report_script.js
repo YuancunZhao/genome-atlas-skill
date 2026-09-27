@@ -166,7 +166,7 @@ function scatter(s,c,pts,me,opts){
     Object.entries(groups).forEach(([g,arr])=>{const mx=arr.reduce((a,p)=>a+p.x,0)/arr.length,my=arr.reduce((a,p)=>a+p.y,0)/arr.length;
       txt(s,{x:X(mx),y:Y(my)-6,'text-anchor':'middle','font-size':7.5,'font-weight':700,fill:c.ink,stroke:c.bg,'stroke-width':2.5,'paint-order':'stroke','letter-spacing':'.06em'},g.toUpperCase())})}
   const mx=X(me.x),my=Y(me.y);
-  el(s,'rect',{x:mx-5.5,y:my-5.5,width:11,height:11,fill:c.hero,stroke:c.bg,'stroke-width':1.5,transform:`rotate(45 ${mx} ${my})`,class:'pop'});
+  el(s,'polygon',{points:`${mx},${my-7.8} ${mx+7.8},${my} ${mx},${my+7.8} ${mx-7.8},${my}`,fill:c.hero,stroke:c.bg,'stroke-width':1.5,class:'pop'});
   txt(s,{x:mx+9,y:my+3,'font-size':9,'font-weight':800,fill:c.ink,stroke:c.bg,'stroke-width':3,'paint-order':'stroke'},NAME());
   if(opts.foot) foot(s,c,420,336,opts.foot);
 }
@@ -210,7 +210,7 @@ reveal('prs',(s,c)=>{
   rows.forEach((r,i)=>{const y=top+i*rh+6, hi=r.pct_EAS>=90||r.pct_EAS<=10;
     txt(s,{x:x0-12,y:y+3,'text-anchor':'end','font-size':9,'font-weight':hi?800:600,fill:hi?c.ink:c.lab},prsName(r.trait));
     el(s,'line',{x1:X(r.pct_Han),y1:y,x2:X(r.pct_EAS),y2:y,stroke:c.data,'stroke-width':1,opacity:.5}); const q=el(s,'circle',{cx:X(r.pct_Han),cy:y,r:3.6,fill:c.bg,stroke:c.data,'stroke-width':1.3});tip(q,(zh()?'汉族 208 人中 ':'among 208 Han ')+r.pct_Han)
-    const mx=X(r.pct_EAS); const d=el(s,'rect',{x:mx-4.5,y:y-4.5,width:9,height:9,fill:c.hero,stroke:c.bg,'stroke-width':1.2,transform:`rotate(45 ${mx} ${y})`,class:'pop'}); d.style.animationDelay=(i*25)+'ms'; tip(d,`${r.trait}: WGS ${r.pct_EAS} (Han ${r.pct_Han}) · coverage ${r.coverage_pct}% · z ${r.z_vs_EAS}`);
+    const mx=X(r.pct_EAS); const d=el(s,'polygon',{points:`${mx},${y-6.4} ${mx+6.4},${y} ${mx},${y+6.4} ${mx-6.4},${y}`,fill:c.hero,stroke:c.bg,'stroke-width':1.2,class:'pop'}); d.style.animationDelay=(i*25)+'ms'; tip(d,`${r.trait}: WGS ${r.pct_EAS} (Han ${r.pct_Han}) · coverage ${r.coverage_pct}% · z ${r.z_vs_EAS}`);
     txt(s,{x:x1+10,y:y+3,'font-size':8.5,'font-weight':800,fill:c.ink},r.pct_EAS.toFixed(0));
     txt(s,{x:x1+34,y:y+3,'font-size':7.5,fill:c.faint},r.coverage_pct+'%');
   });
@@ -379,7 +379,10 @@ reveal('hopca',(s,c)=>{
   pts.forEach(p=>{el(s,'circle',{cx:X(p[1]).toFixed(1),cy:Y(p[2]).toFixed(1),r:2,fill:COL[p[0]]||c.fd,opacity:COL[p[0]]?.6:.34})});
   anc.forEach(p=>{const d=el(s,'rect',{x:X(p.pc1)-2.4,y:Y(p.pc2)-2.4,width:4.8,height:4.8,fill:'none',stroke:c.ink,'stroke-width':1,opacity:.75});
     tip(d,`${p.label} · ${fmt(p.date)} BP`)});
-  const SHOW=Object.fromEntries((D.ho_prov||[]).map(p=>[p.label,[0,-26]]));
+  // Spread the province labels around their points -- they used to share one offset and piled up on
+  // top of each other -- and keep the leader line that already ties each label to its sample.
+  const _LOFF=[[-52,-32],[52,-28],[-62,-4],[62,6],[-48,28],[48,32]];
+  const SHOW=Object.fromEntries((D.ho_prov||[]).map((p,i)=>[p.label,_LOFF[i%_LOFF.length]]));
   D.ho_prov.forEach(p=>{const off=SHOW[p.label]; if(!off) return;
     const lab=zh()?({Shandong:'山东',Henan:'河南',Fujian:'福建',Guangdong:'广东',Sichuan:'四川'}[p.label]):p.label;
     const px=X(p.pc1),py=Y(p.pc2);
@@ -387,7 +390,7 @@ reveal('hopca',(s,c)=>{
     el(s,'line',{x1:px,y1:py,x2:px+off[0],y2:py+off[1],stroke:c.faint,'stroke-width':.7});
     txt(s,{x:px+off[0]+(off[0]>=0?3:-3),y:py+off[1]+3,'text-anchor':off[0]>=0?'start':'end','font-size':9,'font-weight':700,fill:c.ink,stroke:c.bg,'stroke-width':2.6,'paint-order':'stroke'},lab)});
   const mx=X(me[0]),my=Y(me[1]);
-  el(s,'rect',{x:mx-5.5,y:my-5.5,width:11,height:11,fill:c.hero,stroke:c.bg,'stroke-width':1.5,transform:`rotate(45 ${mx} ${my})`,class:'pop'});
+  el(s,'polygon',{points:`${mx},${my-7.8} ${mx+7.8},${my} ${mx},${my+7.8} ${mx-7.8},${my}`,fill:c.hero,stroke:c.bg,'stroke-width':1.5,class:'pop'});
   txt(s,{x:mx+11,y:my+4,'font-size':10,'font-weight':800,fill:c.ink,stroke:c.bg,'stroke-width':3,'paint-order':'stroke'},NAME());
   txt(s,{x:x0+W/2,y:y0+H+22,'text-anchor':'middle','font-size':8,'font-weight':700,fill:c.muted,'letter-spacing':'.1em'},'PC1');
   txt(s,{x:x0-30,y:y0+H/2,'text-anchor':'middle','font-size':8,'font-weight':700,fill:c.muted,'letter-spacing':'.1em',transform:`rotate(-90 ${x0-30} ${y0+H/2})`},'PC2');
@@ -412,10 +415,22 @@ reveal('timedist',(s,c)=>{
   rows.forEach(r=>{const d=el(s,'circle',{cx:X(r.date),cy:Y(r.d),r:3.6+Math.sqrt(r.n),fill:a.n,opacity:.78,stroke:c.bg,'stroke-width':1.2,class:'pop'});
     tip(d,`${r.label} · n=${r.n} · ${fmt(Math.round(r.date))} BP · d=${r.d.toFixed(4)}`)});
   const near=rows[0];
-  txt(s,{x:X(near.date)+10,y:Y(near.d)+3,'font-size':9,'font-weight':700,fill:c.ink,stroke:c.bg,'stroke-width':2.6,'paint-order':'stroke'},zh()?'河南 焦作':'Henan Jiaozuo');
+  // Say what the scatter actually shows: the correlation with age, the spread around the trend, and
+  // the nearest group with its distance. Without these the panel was just dots.
+  const _n=rows.length, _sx=xs.reduce((a,x)=>a+x,0), _sy=ys.reduce((a,y)=>a+y,0),
+        _sxx=xs.reduce((a,x)=>a+x*x,0), _syy=ys.reduce((a,y)=>a+y*y,0), _sxy=xs.reduce((a,x,i)=>a+x*ys[i],0);
+  const _rr=(_n*_sxy-_sx*_sy)/Math.sqrt((_n*_sxx-_sx*_sx)*(_n*_syy-_sy*_sy));
+  const _dmed=[...ys].sort((a,b)=>a-b)[Math.floor(_n/2)];
+  el(s,'line',{x1:x0,y1:Y(_dmed),x2:x0+W,y2:Y(_dmed),stroke:c.grid,'stroke-width':.9,'stroke-dasharray':'2 3'});
+  txt(s,{x:x0+W-2,y:Y(_dmed)-4,'text-anchor':'end','font-size':7.5,'font-weight':600,fill:c.faint},(zh()?'距离中位 ':'median ')+_dmed.toFixed(3));
+  txt(s,{x:x0+2,y:y0+11,'font-size':8.5,'font-weight':700,fill:c.ink,stroke:c.bg,'stroke-width':2.6,'paint-order':'stroke'},
+      zh()?`${_n} 个古代人群 · 与年代相关 r=${_rr.toFixed(2)}（${Math.abs(_rr)<0.3?'几乎无趋势':'趋势明显'}）`
+         :`${_n} ancient groups · r=${_rr.toFixed(2)} vs date (${Math.abs(_rr)<0.3?'no real trend':'clear trend'})`);
+  txt(s,{x:X(near.date)+10,y:Y(near.d)+3,'font-size':9,'font-weight':700,fill:c.ink,stroke:c.bg,'stroke-width':2.6,'paint-order':'stroke'},
+      (zh()?'河南 焦作 · 最近 d=':'Henan Jiaozuo · nearest d=')+near.d.toFixed(4));
   txt(s,{x:x0+W/2,y:y0+H+34,'text-anchor':'middle','font-size':8,'font-weight':700,fill:c.muted,'letter-spacing':'.08em'},zh()?'年代（距今年数）':'YEARS BEFORE PRESENT');
   txt(s,{x:x0-38,y:y0+H/2,'text-anchor':'middle','font-size':8,'font-weight':700,fill:c.muted,'letter-spacing':'.08em',transform:`rotate(-90 ${x0-38} ${y0+H/2})`},zh()?'到样本的距离':'DISTANCE TO SAMPLE');
-  foot(s,c,420,462,zh()?'圆越大样本越多 · 虚线为线性趋势':'bigger circle = more individuals · dashed line = linear trend');
+  foot(s,c,420,462,zh()?'圆越大样本越多 · 虚线为线性趋势 · 点线 = 距离中位数 · r = 与年代的相关 · 越靠左越古老':'bigger circle = more individuals · dashed = linear trend · dotted = median distance · r = correlation with date · older to the left');
 });
 
 /* ── archaic ideogram ── */
@@ -628,7 +643,7 @@ reveal('behaviour',(s,c)=>{
   rows.forEach((r,i)=>{const y=top+i*rh+6, eas=r.panel==='EAS';
     txt(s,{x:x0-12,y:y+3,'text-anchor':'end','font-size':10,'font-weight':eas?700:500,fill:eas?c.ink:c.muted},zh()?r.zh:r.en);
     const mx=X(r.pct_EAS);
-    if(eas){const d=el(s,'rect',{x:mx-4.5,y:y-4.5,width:9,height:9,fill:a.n,stroke:c.bg,'stroke-width':1.2,transform:`rotate(45 ${mx} ${y})`,class:'pop'});
+    if(eas){const d=el(s,'polygon',{points:`${mx},${y-6.4} ${mx+6.4},${y} ${mx},${y+6.4} ${mx-6.4},${y}`,fill:a.n,stroke:c.bg,'stroke-width':1.2,class:'pop'});
       d.style.animationDelay=(i*25)+'ms'; tip(d,`${r.en}: ${r.pct_EAS} pct · z ${r.z} · coverage ${r.coverage}%`)}
     else {const d=el(s,'circle',{cx:mx,cy:y,r:4.5,fill:c.bg,stroke:a.s,'stroke-width':1.8,class:'pop'});
       d.style.animationDelay=(i*25)+'ms'; tip(d,`${r.en}: ${r.pct_EAS} pct · z ${r.z} · coverage ${r.coverage}% · European-derived`)}
