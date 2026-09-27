@@ -393,10 +393,16 @@ const calLen=CALCH.reduce((a,c)=>a+(D.chrlen[c]||0),0)||1;
 const _perChrom=(_LOC.per_chrom||[]).length?(_LOC.per_chrom||[]):(D.la_per_chrom||[]);
 const dayuCal=CALCH.reduce((a,c)=>{const r=_perChrom.find(x=>String(x.chrom)===String(c)&&(!_SRCLAB||String(x.panel_id||x.anc||'')===_SRCLAB||x.panel_id===undefined));
   const v=r?(r.value!=null?r.value:r[_SRCLAB]):null;return a+((v!=null?v:0)*(D.chrlen[c]||0))},0)/calLen;
+/* AN6（§7）：局部祖源的面板名、对照面板与"哪一列是来源"都来自结构化结果，不再写死
+   NorthEA/SouthEA/European/SouthAsian。拿不到就留 '—'——不编一个看起来合理的百分比。 */
 const _lg=D.la_global||{};
-F.north=_lg.NorthEA!=null?(_lg.NorthEA*100).toFixed(1):'—';
-F.south=_lg.SouthEA!=null?(_lg.SouthEA*100).toFixed(1):'—';
-F.noise=(_lg.European!=null&&_lg.SouthAsian!=null)?((_lg.European+_lg.SouthAsian)*100).toFixed(1):'—';
+const _PANELS=(_LOC.calibration_panels||[]);
+const _P0=_PANELS[0]||'', _P1=_PANELS[1]||'';
+const _CTRL=((_LOC.panels||[]).filter(p=>p.role==='control').map(p=>p.id||p.label)).filter(Boolean);
+F.north=(_P0&&_lg[_P0]!=null)?(_lg[_P0]*100).toFixed(1):'—';
+F.south=(_P1&&_lg[_P1]!=null)?(_lg[_P1]*100).toFixed(1):'—';
+F.la_a=_P0||'—'; F.la_b=_P1||'—';
+F.noise=(_CTRL.length&&_CTRL.every(k=>_lg[k]!=null))?(_CTRL.reduce((a,k)=>a+_lg[k],0)*100).toFixed(1):'—';
 F.chb=_CAL[0]&&_CAL[0].north_mean!=null?(_CAL[0].north_mean*100).toFixed(0):'—';
 F.chs=_CAL[1]&&_CAL[1].north_mean!=null?(_CAL[1].north_mean*100).toFixed(0):'—';
 F.dayucal=isFinite(dayuCal)?(dayuCal*100).toFixed(1):'—';
@@ -408,7 +414,7 @@ F.n50=(D.phase.n50_kb/1000).toFixed(1); F.blocks=fmt(D.phase.blocks);
 F.mtcn=D.somatic.mtDNA_copies_per_cell; F.ydr=D.somatic.Y_depth_ratio; F.telk7=fmt(D.telomere.k7);
 F.teltot=fmt((D.telomere&&D.telomere.total_reads)||0); F.archhom=((D.archaic_summary||{}).homozygous)||0;
 F.phmax=(((D.phase||{}).max_mb)||0).toFixed(1); F.chipalt=fmt(((D.chip_hotspots||{}).alt_reads)||0);
-F.segmax=Math.max(0,...((D.la_segments||[]).filter(g=>g.anc==='SouthEA').map(g=>g.mb))).toFixed(1);
+F.segmax=Math.max(0,...((D.la_segments||[]).filter(g=>_P1&&g.anc===_P1).map(g=>g.mb))).toFixed(1);
 F.snvn=fmt(D.spectrum.reduce((a,b)=>a+b.n,0));
 F.cpg=(D.spectrum.filter(x=>/\[C>T\]G/.test(x.ctx)).reduce((a,b)=>a+b.frac,0)*100).toFixed(1);
 
@@ -439,7 +445,9 @@ reveal('painting',(s,c)=>{
       el(s,'rect',{x:bx,y:yy,width:w,height:9,rx:1.5,fill:a.n,opacity:.5});
       (seg[ch]||[]).filter(g=>g.hap===h+1).forEach(g=>{
         const gx=bx+w*g.start/D.chrlen[ch], gw=Math.max(1.2,w*(g.end-g.start)/D.chrlen[ch]);
-        const r=el(s,'rect',{x:gx,y:yy,width:gw,height:9,rx:1,fill:g.anc==='SouthEA'?a.s:c.fd});
+        // 来源面板 A 是底色；来源面板 B 的片段用强调色；对照面板的片段用中性色（它们只是对照）
+        const r=el(s,'rect',{x:gx,y:yy,width:gw,height:9,rx:1,
+                             fill:(_P1&&g.anc===_P1)?a.s:(g.anc===_P0?c.bg:c.fd)});
         tip(r,`chr${ch}:${fmt(g.start)}-${fmt(g.end)} · ${g.anc}`)})});
     const cen=D.cen[ch]; if(cen) el(s,'line',{x1:bx+w*cen*1e6/D.chrlen[ch],y1:y-2,x2:bx+w*cen*1e6/D.chrlen[ch],y2:y+22,stroke:c.bg,'stroke-width':1.6});
     // A chromosome with no segments has no inference at all (FLARE left a 0-byte file and step 17
@@ -450,7 +458,7 @@ reveal('painting',(s,c)=>{
       txt(s,{x:bx+w/2,y:y+13,'text-anchor':'middle','font-size':8,'font-weight':700,fill:c.muted},zh()?'无推断：该染色体未产出（数据缺失）':'no inference: nothing produced for this chromosome');
     } else {
       const so=D.la_per_chrom.find(r=>String(r.chrom)===ch);
-      if(so) txt(s,{x:bx+w+7,y:y+13,'font-size':9,'font-weight':700,fill:c.muted},(so.SouthEA*100).toFixed(0)+'%');
+      if(so&&_P1) txt(s,{x:bx+w+7,y:y+13,'font-size':9,'font-weight':700,fill:c.muted},(so[_P1]*100).toFixed(0)+'%');
     }
   });
   foot(s,c,900,496,zh()?'每条染色体两行 = 父母各给的一条单倍型 · 只画 ≥0.5 Mb 的非北方片段 · 右侧 = 该染色体的南方比例 · 灰条 = 无推断（数据缺失，不是 0）· 短臂留白 = 参考面板在该区无标记':'two rows per chromosome = the two parental haplotypes · only non-northern segments ≥0.5 Mb · right = southern share · grey = no inference (missing data, not zero) · blank short arms = no panel markers there');
@@ -489,7 +497,8 @@ reveal('hopca',(s,c)=>{
   const dx=(xmax-xmin)*.05,dy=(ymax-ymin)*.05; xmin-=dx;xmax+=dx;ymin-=dy;ymax+=dy;
   const X=v=>x0+W*(v-xmin)/(xmax-xmin), Y=v=>y0+H*(1-(v-ymin)/(ymax-ymin));
   el(s,'rect',{x:x0,y:y0,width:W,height:H,fill:'none',stroke:c.grid,'stroke-width':.6});
-  const COL={Han:a.n,SouthEA:a.s,NorthAsia:c.data2};
+  // AN6：环上的颜色按"来源面板 A / 来源面板 B / 其它"分配，名字来自结果而不是固定成分含义
+  const COL={}; COL[_P0||'A']=a.n; COL[_P1||'B']=a.s; COL.none=c.fd;
   pts.forEach(p=>{el(s,'circle',{cx:X(p[1]).toFixed(1),cy:Y(p[2]).toFixed(1),r:2,fill:COL[p[0]]||c.fd,opacity:COL[p[0]]?.6:.34})});
   anc.forEach(p=>{const d=el(s,'rect',{x:X(p.pc1)-2.4,y:Y(p.pc2)-2.4,width:4.8,height:4.8,fill:'none',stroke:c.ink,'stroke-width':1,opacity:.75});
     tip(d,`${p.label} · ${fmt(p.date)} BP`)});
@@ -843,10 +852,10 @@ function deepRender(){
     return `<tr><td class="gene">${cond}</td><td class="rs">${req}</td><td class="g" style="color:${col}">${cell}</td><td>${nt}</td></tr>`}).join('');
   const cd=document.getElementById('tb_cand');
   if(cd) cd.innerHTML=D.candidate.map(r=>`<tr><td class="gene">${gI(r.gene)}</td><td class="rs">${r.rsid} · ${zh()?r.variant:(r.variant_en||r.variant)}</td><td class="g">${r.genotype}</td><td class="rs">${zh()?r.popular_claim:(r.popular_claim_en||'')}</td><td>${zh()?r.what_evidence_supports:(r.evidence_en||'')}</td></tr>`).join('');
-  statGrid('k_la',[[`${F.north}<small>%</small>`,zh()?`北方东亚成分，比北京汉平均高 ${F.sdchb} 个标准差`:`northern East Asian; ${F.sdchb} sd above the Beijing Han mean`,'northern east asian'],
-                   [`${F.south}<small>%</small>`,zh()?`南方东亚成分（北京汉 ${100-F.chb}%、南方汉 ${100-F.chs}%）`:`southern (Beijing Han ${100-F.chb}%, southern Han ${100-F.chs}%)`,'southern east asian'],
+  statGrid('k_la',[[`${F.north}<small>%</small>`,zh()?`「${F.la_a}」成分，比第一个校准组平均高 ${F.sdchb} 个标准差`:`share of "${F.la_a}"; ${F.sdchb} sd above the first calibration groupean`,'northern east asian'],
+                   [`${F.south}<small>%</small>`,zh()?`「${F.la_b}」成分（校准组 ${100-F.chb}% / ${100-F.chs}%）`:`share of "${F.la_b}" (calibration groups ${100-F.chb}% / ${100-F.chs}% Han ${100-F.chs}%)`,'southern east asian'],
                    [`${F.noise}<small>%</small>`,zh()?'欧洲 + 南亚，方法的噪声底':'European + South Asian, the noise floor','noise floor'],
-                   [`${D.la_segments.filter(g=>g.anc==='SouthEA').length}`,zh()?`≥0.5 Mb 的南方片段，最长 ${F.segmax} Mb`:`southern segments ≥0.5 Mb, longest ${F.segmax} Mb`,'segments']]);
+                   [`${D.la_segments.filter(g=>_P1&&g.anc===_P1).length}`,zh()?`≥0.5 Mb 的「${F.la_b}」片段，最长 ${F.segmax} Mb`:`segments ≥0.5 Mb of "${F.la_b}", longest ${F.segmax} Mb`,'segments']]);
   statGrid('k_arch',[[`${F.archmb}<small>Mb</small>`,zh()?`古老人类片段总长，占常染色体 ${F.archpct}%`:`archaic span, ${F.archpct}% of the autosomes`,'archaic span'],
                      [`${F.archn}`,zh()?`片段数，其中 ${F.archhom} 段为纯合`:`segments, ${F.archhom} of them homozygous`,'segments'],
                      [`${F.neamb}<small>Mb</small>`,zh()?'尼安德特来源':'from Neanderthals','neanderthal'],
@@ -910,7 +919,7 @@ reveal('circos',(s,c)=>{
   });
   CHR22.forEach(ch=>{const [a0,a1]=arcs[ch]; arc(R.la[0],R.la[1],a0,a1,a.n,.5)});
   D.la_segments.forEach(g=>{
-    const col=g.anc==='SouthEA'?a.s:c.fd;
+    const col=(_P1&&g.anc===_P1)?a.s:(g.anc===_P0?(a.n||c.bg):c.fd);
     const a0=at(g.chrom,g.start),a1=at(g.chrom,g.end);
     const h=(R.la[1]-R.la[0])/2, r0=g.hap===1?R.la[0]+h:R.la[0];
     const p=arc(r0,r0+h,a0,Math.max(a1,a0+0.0016),col,.95);
