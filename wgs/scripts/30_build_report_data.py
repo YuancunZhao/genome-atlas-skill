@@ -317,6 +317,12 @@ if _pa is not None and len(_pa):
     anc = _pa[_pa.kind == "ancient"]
     mod = _pa[_pa.kind != "ancient"]
     D["ho_ancient_pts"] = [{"label": r.label, "pc1": r.PC1_AVG, "pc2": r.PC2_AVG, "date": r.date} for r in anc.itertuples()]
+    # The nearest *individual* is a different fact from the nearest *group*: the group table averages
+    # its members, so the closest single ancient genome can sit inside a group that ranks far lower.
+    # Here the nearest genome is BaiyangcunM13.SG (d=0.0032, rank 1 of 405) while its group China_MLBA
+    # averages 0.0495 -- the caption quotes the individual, so emit the individual list as well.
+    D["ho_near_individual"] = [{"iid": str(r.iid), "group": str(r.label), "d": float(r.d), "date": float(r.date)}
+                               for r in anc.nsmallest(12, "d").itertuples()]
     # The template indexes ho_modern rows positionally (p[0]/p[1]/p[2]) -- arrays, not dicts.
     D["ho_modern"] = [[r.label, r.PC1_AVG, r.PC2_AVG] for r in mod.itertuples()]
     _me = _pa[_pa.kind == "target"] if "target" in set(_pa.kind) else _pa.tail(1)

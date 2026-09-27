@@ -456,8 +456,14 @@ reveal('timedist',(s,c)=>{
   txt(s,{x:x0+2,y:y0+11,'font-size':8.5,'font-weight':700,fill:c.ink,stroke:c.bg,'stroke-width':2.6,'paint-order':'stroke'},
       zh()?`${_n} 个古代人群 · 与年代相关 r=${_rr.toFixed(2)}（${Math.abs(_rr)<0.3?'几乎无趋势':'趋势明显'}）`
          :`${_n} ancient groups · r=${_rr.toFixed(2)} vs date (${Math.abs(_rr)<0.3?'no real trend':'clear trend'})`);
+  // The scatter plots *groups*; the report's headline quotes an *individual*. State both, or the
+  // reader cannot find the quoted genome anywhere in the figure.
+  {const _ni=(D.ho_near_individual||[])[0];
+   if(_ni) txt(s,{x:x0+2,y:y0+24,'font-size':8.5,'font-weight':800,fill:c.hero,stroke:c.bg,'stroke-width':2.6,'paint-order':'stroke'},
+     (zh()?'最近个体 ':'nearest individual ')+_ni.iid.replace(/\.(SG|AG|TW)$/,'')+' · d='+_ni.d.toFixed(4)
+       +(_ni.group&&ANC_ZH[_ni.group]?zh()?'（'+ANC_ZH[_ni.group]+'）':' ('+ANC_ZH[_ni.group]+')':''));}
   txt(s,{x:X(near.date)+10,y:Y(near.d)+3,'font-size':9,'font-weight':700,fill:c.ink,stroke:c.bg,'stroke-width':2.6,'paint-order':'stroke'},
-      (ANC_ZH[near.label]||near.label.replace(/_/g,' ')) + (zh()?' · 最近 d=':' · nearest d=') + near.d.toFixed(4));
+      (ANC_ZH[near.label]||near.label.replace(/_/g,' ')) + (zh()?' · 最近群体 d=':' · nearest group d=') + near.d.toFixed(4));
   txt(s,{x:x0+W/2,y:y0+H+34,'text-anchor':'middle','font-size':8,'font-weight':700,fill:c.muted,'letter-spacing':'.08em'},zh()?'年代（距今年数）':'YEARS BEFORE PRESENT');
   txt(s,{x:x0-38,y:y0+H/2,'text-anchor':'middle','font-size':8,'font-weight':700,fill:c.muted,'letter-spacing':'.08em',transform:`rotate(-90 ${x0-38} ${y0+H/2})`},zh()?'到样本的距离':'DISTANCE TO SAMPLE');
   foot(s,c,420,462,zh()?'圆越大样本越多 · 点线 = 距离中位数 · r = 与年代的相关 · 越靠左越古老 · |r|<0.3 时不画拟合线':'bigger circle = more individuals · dotted = median distance · r = correlation with date · older to the left · no fit drawn when |r|<0.3');
@@ -556,8 +562,11 @@ function deepRender(){
                     [`${F.chipalt}`,zh()?`${((D.chip_hotspots||{}).n_tested)||0} 个克隆性造血热点共 ${F.chipalt} 条 ALT 读段${(((D.chip_hotspots||{}).hotspots)||[]).length?`（最多：${((D.chip_hotspots.hotspots[0]||{}).hotspot)||''} ${(100*((D.chip_hotspots.hotspots[0]||{}).vaf||0)).toFixed(1)}%）`:''}；低水平读段是噪声敏感的观察，不构成 CHIP 证实，也不排除更低水平克隆`:`${F.chipalt} alt reads across ${((D.chip_hotspots||{}).n_tested)||0} CHIP hotspots${(((D.chip_hotspots||{}).hotspots)||[]).length?` (max: ${((D.chip_hotspots.hotspots[0]||{}).hotspot)||''} ${(100*((D.chip_hotspots.hotspots[0]||{}).vaf||0)).toFixed(1)}%)`:''}; low-level reads are a noise-prone observation, neither confirming CHIP nor excluding lower-level clones`,'clonal haematopoiesis'],
                     [`${F.telk7}`,zh()?`端粒重复读段（共 ${F.teltot} 条读段中），不足以估计端粒长度（k7≥100000 为工作门槛而非验证阈值；绝对长度另需 GC/读长校正）`:`telomeric reads of ${F.teltot} total, too few for a length estimate (k7>=100000 is a working gate, not a validated threshold; absolute lengths would need GC/read-length correction)`,'telomeric reads']]);
   const tb=document.getElementById('tb_anc');
-  if(tb) tb.innerHTML=D.ho_near_ancient.slice(0,10).map(r=>{const nm=zh()?(ANC_ZH[r.label]||r.label):r.label.replace(/_/g,' ');
-    return `<tr><td class="gene">${nm}</td><td class="num">${r.n}</td><td class="num">${fmt(Math.round(r.date))}</td><td class="num">${r.d.toFixed(4)}</td></tr>`}).join('');
+  // Individual level, not group level: the caption says the nearest ancient individual is M13 of
+  // Baiyangcun, and that genome sits inside China_MLBA, whose *group average* ranks far lower. The
+  // table used to list group averages only, so the quoted individual appeared nowhere in the report.
+  if(tb) tb.innerHTML=(D.ho_near_individual||[]).slice(0,10).map(r=>{const nm=zh()?(ANC_ZH[r.iid]||r.iid):r.iid;
+    return `<tr><td class="gene">${nm}</td><td class="rs">${zh()?(ANC_ZH[r.group]||r.group):r.group.replace(/_/g,' ')}</td><td class="num">${fmt(Math.round(r.date))}</td><td class="num">${r.d.toFixed(4)}</td></tr>`}).join('');
   const bb=document.getElementById('tb_blood');
   if(bb) bb.innerHTML=BLOODV3.map(r=>`<tr><td class="gene">${zh()?r.sys_zh:r.sys_en}</td><td class="g">${zh()?r.geno_zh:r.geno_en}</td><td class="gene">${zh()?r.ph_zh:r.ph_en}</td><td>${zh()?r.ev_zh:r.ev_en}</td></tr>`).join('');
 }
