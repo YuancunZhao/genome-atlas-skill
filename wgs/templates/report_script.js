@@ -1003,7 +1003,10 @@ reveal('behaviour',(s,c)=>{
     txt(s,{x:x1+12,y:y+3,'font-size':9.5,'font-weight':800,fill:eas?c.ink:c.muted},r.pct_EAS.toFixed(0));
     txt(s,{x:x1+36,y:y+3,'font-size':8,fill:c.faint},r.coverage+'%')});
   txt(s,{x:x1+12,y:top-10,'font-size':7.5,'font-weight':600,fill:c.faint,'letter-spacing':'.06em'},zh()?'百分位 · 覆盖':'PCT · COV');
-  foot(s,c,900,H-8,zh()?'菱形 = 东亚人群训练 · 空心圆 = 欧洲人群训练 · 灰带 = 中间一半的人':'diamond = trained in East Asians · hollow circle = trained in Europeans · band = middle half');
+  // 两种来源的分数**都用东亚参考分布**定位（26 的输出字段就叫 pct_EAS）。欧洲训练的评分在这里只是
+  // 迁移性对照：它的百分位不代表该个体在欧洲人群内的位置，图注必须说出来，否则读者会那样理解。
+  foot(s,c,900,H-8,zh()?`菱形 = 东亚人群训练 · 空心圆 = 欧洲人群训练（其百分位同样在东亚参考分布下计算，不代表在欧洲人群内的位置；跨人群迁移性差，只作对照）· 灰带 = 中间一半的东亚参考个体`
+                        :`diamond = trained in East Asians · hollow circle = trained in Europeans (its percentile is also computed against the East Asian reference, not a position within Europeans; cross-population transfer is poor, shown for contrast only) · band = middle half of the East Asian reference`);
 });
 
 renderAll();
