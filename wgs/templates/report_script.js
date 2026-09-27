@@ -52,6 +52,47 @@ F.cvn=fmt(D.clinvar_total); F.cvd=D.clinvar_date; F.lof=D.lof.all; F.lofr=D.lof.
 F.rho_i=D.prs_rho.imputed; F.rho_s=D.prs_rho.subset; F.sv=fmt(D.sv_total); F.rohn=D.roh_stats.n; F.rohmb=D.roh_stats.total_mb; F.rohmax=D.roh_stats.max_mb;
 F.yterm=((D.lineages||{}).y||{}).reported_hg||D.y_terminal||"—"; F.yformed=(()=>{const p=_sp((D.lineages||{}).y||{})||[];return p.length?fmt(p[p.length-1].formed):"—";})(); F.mthg=((D.lineages||{}).mt||{}).reported_hg||((D.mt||{}).hg)||"—"; F.mtq=((D.lineages||{}).mt||{}).call_quality||((D.mt||{}).quality)||"—"; F.mtn=((D.mt||{}).found||[]).length; F.mtp=((D.mt||{}).private||[]).length;
 
+/* ── AN6 父母系卡片：判定、分支时间线、折叠的背景层、发现记录与路线状态 ─────────────
+   树的分叉不是地理迁移，formed/TMRCA 也不是迁移日期（§7）：时间线只画树上的时间，发现记录与
+   路线分开列；没有来源路线时明确说"只有分布"，不为任何支系编故事。背景（祖先大支系）默认折叠。 */
+const _esc=t=>String(t==null?'':t).replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));
+const renderLineageCards=()=>{
+  const box=document.getElementById('linecard'); if(!box) return;
+  const L=D.lineages||{}, Z=zh();
+  const timeline=(path,width)=>{
+    const pts=path.map(p=>({n:p.node,f:Number(p.formed),t:Number(p.tmrca)})).filter(p=>Number.isFinite(p.f));
+    if(!pts.length) return '';
+    const hi=Math.max(...pts.map(p=>p.f)), lo=0, X=v=>18+(width-36)*(1-Math.min(v,hi)/hi);
+    const marks=pts.slice(-8).map(p=>`<line x1="${X(p.f).toFixed(1)}" y1="12" x2="${X(p.f).toFixed(1)}" y2="30" stroke="currentColor" stroke-width=".7" opacity=".5"/>`).join('');
+    const ticks=[0,Math.round(hi/2),hi].map(v=>`<text x="${X(v).toFixed(1)}" y="44" font-size="7" text-anchor="middle" fill="currentColor" opacity=".6">${fmt(v)}</text>`).join('');
+    return `<svg viewBox="0 0 ${width} 52" width="100%" height="52" role="img">
+      <line x1="18" y1="30" x2="${width-18}" y2="30" stroke="currentColor" stroke-width="1" opacity=".45"/>${marks}${ticks}
+      <text x="18" y="9" font-size="7" fill="currentColor" opacity=".6">${Z?'越靠左越古老（年）':'older (years) to the left'}</text></svg>`;
+  };
+  const card=(kind,lin,label_zh,label_en)=>{
+    if(!lin) return '';
+    const hg=_esc(lin.reported_hg||'—'), cons=lin.conservative_hg?_esc(lin.conservative_hg):'';
+    const path=lin.supported_path||[], unc=(lin.uncertain_nodes||[]).map(u=>_esc(u.node||u));
+    const hist=lin.history||{}, obs=hist.observations||[], routes=hist.routes||[];
+    const state=_esc(lin.state||'ok'), why=_esc(lin.reason_code||'');
+    const anc=path.filter(p=>!p.rank||true).slice(0,-4).map(p=>_esc(p.node)).filter(Boolean);
+    const tail=path.slice(-4).map(p=>_esc(p.node));
+    return `<div style="margin:10px 0 16px">
+      <div style="font-family:var(--num);font-weight:700;font-size:13px">${Z?label_zh:label_en}: ${hg}${cons?` <span style="opacity:.75">（${Z?'保守回退':'conservative'} ${cons}）</span>`:''}</div>
+      <div style="font-size:11px;opacity:.75;margin:2px 0 6px">${Z?'状态':'status'}: ${state}${why?' · '+why:''} ·
+        ${Z?'树':'tree'} ${_esc(lin.tree_source||'')} ${_esc(lin.tree_version||'')} ·
+        ${Z?'调用方式':'call'}: ${_esc(lin.call_quality||'')}</div>
+      ${timeline(path, 420)}
+      <div style="font-size:11px;margin-top:4px">${Z?'末端四级':'last four levels'}: ${tail.join(' → ')}${unc.length?` · ${Z?'支持位点不足':'weakly supported'}: ${unc.join('、')}`:''}</div>
+      <details style="margin-top:6px"><summary style="cursor:pointer;font-size:11px;opacity:.8">${Z?'背景（更早的大支系）':'background (earlier major branches)'}</summary>
+        <div style="font-size:11px;margin-top:4px;opacity:.8">${anc.join(' → ')||'—'}</div></details>
+      <div style="font-size:11px;margin-top:6px">${Z?'已发表发现记录':'published records'}: ${obs.length}${obs.length?'':'（'+_esc(hist.history_reason_code||'')+'）'} ·
+        ${Z?'迁移路线':'migration routes'}: ${routes.length}${routes.length?'':(Z?'（无有来源的路线，本卡只呈现分布）':' (no sourced route; distribution only)')}</div>
+    </div>`;
+  };
+  box.innerHTML = card('y', L.y, '父系', "father's line") + card('mt', L.mt, '母系', "mother's line");
+};
+
 const renderAll=()=>{try{document.documentElement.setAttribute('lang',LANG==='zh'?'zh-Hans':'en');
   {const _bs=document.getElementById('bootstate');if(_bs)_bs.textContent='rendering…';}
   document.querySelectorAll('[data-i18n]').forEach(e=>{e.innerHTML=gEm(t(e.getAttribute('data-i18n')))});
@@ -68,7 +109,7 @@ const renderAll=()=>{try{document.documentElement.setAttribute('lang',LANG==='zh
       err.setAttribute('x',8);err.setAttribute('y',16);err.setAttribute('font-size',10);err.setAttribute('fill','#b3261e');
       err.textContent=id+': '+(e&&e.message?e.message:e);n.appendChild(err)}}
   if(window.__renderErrors.length)console.warn('[render] failed figures:',window.__renderErrors.join(', '));
-  renderKpi(); renderFindings(); renderPgx(); renderHla(); renderMisc(); renderSections(); if(typeof deepRender==='function') deepRender();{const _bd=document.getElementById('bootstate');if(_bd){const _nf=(window.__renderErrors||[]).length,_nt=Object.keys(CH).length;_bd.textContent='rendered · figures '+(_nt-_nf)+'/'+_nt+(_nf?' (failed: '+window.__renderErrors.join(', ')+')':'');_bd.style.color=_nf?'#ffb4a2':'#9ae6b4';}}}catch(e){console.error('[renderAll]',e);{const _be=document.getElementById('bootstate');if(_be){_be.textContent='RENDER FAILED: '+(e&&e.message?e.message:e);_be.style.color='#ffb4a2';}}try{document.body.insertAdjacentHTML('afterbegin','<div style="margin:14px auto;max-width:900px;padding:10px 14px;border:1px solid #b3261e;border-radius:8px;color:#b3261e;font:13px/1.5 system-ui">render error: '+(e&&e.message?e.message:e)+'</div>')}catch(_){}}};
+  renderKpi(); renderFindings(); renderPgx(); renderHla(); renderMisc(); renderSections(); renderLineageCards(); if(typeof deepRender==='function') deepRender();{const _bd=document.getElementById('bootstate');if(_bd){const _nf=(window.__renderErrors||[]).length,_nt=Object.keys(CH).length;_bd.textContent='rendered · figures '+(_nt-_nf)+'/'+_nt+(_nf?' (failed: '+window.__renderErrors.join(', ')+')':'');_bd.style.color=_nf?'#ffb4a2':'#9ae6b4';}}}catch(e){console.error('[renderAll]',e);{const _be=document.getElementById('bootstate');if(_be){_be.textContent='RENDER FAILED: '+(e&&e.message?e.message:e);_be.style.color='#ffb4a2';}}try{document.body.insertAdjacentHTML('afterbegin','<div style="margin:14px auto;max-width:900px;padding:10px 14px;border:1px solid #b3261e;border-radius:8px;color:#b3261e;font:13px/1.5 system-ui">render error: '+(e&&e.message?e.message:e)+'</div>')}catch(_){}}};
 document.getElementById('langbtn').addEventListener('click',()=>{LANG=zh()?'en':'zh';try{localStorage.setItem('dayu-lang',LANG)}catch(e){};renderAll()});
 if(window.matchMedia){window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change',renderAll)}
 const prsName=n=>zh()?(PRS_EN[n]||n):n;
