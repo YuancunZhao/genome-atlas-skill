@@ -115,6 +115,16 @@ def check_shapes(D):
                 break
     if D.get("roh_stats", {}).get("n_gt5") not in (None, 0) and not D.get("roh"):
         fail("roh_stats.n_gt5 > 0 without any roh rows")
+    # M2: every assayed STR locus carries a class; one panel number is not a per-locus
+    # "pathogenic" verdict, and loci without a rule must say so rather than pass as normal.
+    str_classes = {"normal", "intermediate", "premutation", "full_mutation",
+                   "below_threshold", "at_or_above_threshold", "no_local_rule"}
+    for r in (D.get("str") or [])[:60]:
+        if not isinstance(r, dict) or r.get("class") not in str_classes:
+            fail(f"str row {r.get('locus') if isinstance(r, dict) else r!r}: missing/unknown class (got {r.get('class') if isinstance(r, dict) else None!r})")
+            break
+        if r.get("class") == "no_local_rule" and r.get("thr") is not None:
+            fail(f"str row {r.get('locus')}: no_local_rule but thr is set")
 
 
 def check_sections(D):

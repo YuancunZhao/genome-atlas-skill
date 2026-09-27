@@ -113,8 +113,37 @@ _eh_f = W/"08_sv/eh/eh_summary.tsv"
 if _eh_f.exists():
     eh = pd.read_csv(_eh_f, sep="\t")
     thr = dict(pd.read_csv(pathlib.Path(__file__).resolve().parents[1] / "panel" / "str_thresholds.tsv", sep="\t").values)
-    eh = eh.drop_duplicates("locus", keep="first"); eh["thr"] = eh.locus.map(thr)
-    D["str"] = [{"locus": r.locus, "unit": r.unit, "gt": str(r.genotype), "max": int(r.max_allele), "thr": int(r.thr) if pd.notna(r.thr) else None} for r in eh.itertuples()]
+    # ExpansionHunter keeps its per-locus QC (genotype confidence interval, locus coverage) only in
+    # the JSON; carry both through so a marginal call can be seen as marginal, not "normal".
+    _ci, _cov = {}, {}
+    _eh_j = W/"08_sv/eh/target.json"
+    if _eh_j.exists():
+        for _r in json.loads(open(_eh_j).read()).get("LocusResults", {}).values():
+            _v = _r.get("Variants", {}).get(_r.get("LocusId"), {})
+            _ci[_r.get("LocusId")] = _v.get("GenotypeConfidenceInterval")
+            _cov[_r.get("LocusId")] = _r.get("Coverage")
+    # One panel number per locus is the repeat count at which the result leaves the normal range.
+    # For FMR1 that value (55) is the premutation onset, not the full-mutation boundary -- the
+    # GeneReviews ranges (NBK1384: <45 normal, 45-54 intermediate, 55-200 premutation, >200 full)
+    # are encoded separately instead of relabelling 55 as "pathogenic".
+    _RANGES = {"FMR1": {"normal_max": 44, "inter_min": 45, "premut_min": 55, "full_min": 200}}
+    eh = eh.drop_duplicates("locus", keep="first")
+    eh["thr"] = eh.locus.map(thr)
+    D["str"] = []
+    for r in eh.itertuples():
+        t = int(r.thr) if pd.notna(r.thr) else None
+        rng = _RANGES.get(r.locus)
+        if rng:
+            cls = ("full_mutation" if r.max_allele >= rng["full_min"] else
+                   "premutation" if r.max_allele >= rng["premut_min"] else
+                   "intermediate" if r.max_allele >= rng["inter_min"] else "normal")
+        elif t is not None:
+            cls = "at_or_above_threshold" if r.max_allele >= t else "below_threshold"
+        else:
+            cls = "no_local_rule"  # assayed but no panel rule: unassessed, never "normal"
+        D["str"].append({"locus": r.locus, "unit": r.unit, "gt": str(r.genotype), "max": int(r.max_allele),
+                         "thr": t, "ci": _ci.get(r.locus), "cov": round(_cov[r.locus], 1) if r.locus in _cov else None,
+                         "class": cls})
 else:
     D["str"] = []
 # --- ROH (bcftools roh output; no step of this repository produces it)
