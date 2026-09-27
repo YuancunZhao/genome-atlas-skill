@@ -5,7 +5,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import pathlib
 from wgsconfig import *  # noqa: F401,F403 -- P, W, REF, TOOLS, SAMPLE, THREADS ...
 
-import subprocess, pandas as pd, os
+import subprocess, pandas as pd, os, collections, bisect
 P=str(P); V=f"{P}/wgs/00_input/{SAMPLE}.norm.vcf.gz"; PV=KG_PFILE+".pvar"; W=f"{P}/wgs/20_behaviour"
 os.makedirs(W,exist_ok=True)
 PANEL = pathlib.Path(__file__).resolve().parents[1] / "panel" / "candidate_genes.tsv"
@@ -20,16 +20,34 @@ with open(PV) as f:
         c,p,i,r,a=line.rstrip("\n").split("\t")[:5]
         for tok in i.split(";"):
             if tok in want and tok not in pos: pos[tok]=(c,int(p),r,a)
+# Callable mask, same convention as 23_bloodgroups.py: a site with no VCF record is a reference
+# homozygote only when it lies inside the callable bed. Outside the mask, or when the query
+# itself fails, the record must stay a no-call instead of silently becoming a hom-ref.
+_call = collections.defaultdict(list)
+_call_bed = pathlib.Path(P)/"wgs/00_input/callable.bed"
+if _call_bed.exists():
+    for l in open(_call_bed):
+        f_ = l.split()[:3]
+        if len(f_) == 3: _call[f_[0]].append((int(f_[1]), int(f_[2])))
+def callable_(c, p):
+    v = _call.get(c, []); i = bisect.bisect_right([x[0] for x in v], p-1)-1
+    return i >= 0 and v[i][0] <= p-1 < v[i][1]
+
 rows=[]
 for gene,rs,var,claim,truth in M:
     if rs not in pos: rows.append((gene,rs,var,"-","未在 1000G 面板中",claim,truth)); continue
     c,p,r,a=pos[rs]
-    t=subprocess.run(["bcftools","query","-r",f"{c}:{p}-{p}","-f","%REF\t%ALT\t%FILTER\t[%GT\t%DP]\n",V],capture_output=True,text=True).stdout.strip().splitlines()
+    q=subprocess.run(["bcftools","query","-r",f"{c}:{p}-{p}","-f","%REF\t%ALT\t%FILTER\t[%GT\t%DP]\n",V],capture_output=True,text=True)
+    if q.returncode != 0:
+        rows.append((gene,rs,var,f"{c}:{p}",f"query failed (rc={q.returncode})",claim,truth)); continue
+    t=q.stdout.strip().splitlines()
     if t:
         rec=[x.split("\t") for x in t]; hit=[x for x in rec if x[0]==r and x[1]==a] or rec
         ref,alt,flt,gt,dp=hit[0]; n=gt.replace("|","/").count("1")
         g=(alt if n else ref) if c=="X" else {0:f"{ref}/{ref}",1:f"{ref}/{alt}",2:f"{alt}/{alt}"}.get(n,gt)
         rows.append((gene,rs,var,f"{c}:{p}",g,claim,truth))
+    elif not callable_(c,p):
+        rows.append((gene,rs,var,f"{c}:{p}","no call (outside the callable mask)",claim,truth))
     else:
         rows.append((gene,rs,var,f"{c}:{p}",r if c=="X" else f"{r}/{r}",claim,truth))
 df=pd.DataFrame(rows,columns=["gene","rsid","variant","locus","genotype","popular_claim","what_evidence_supports"])
