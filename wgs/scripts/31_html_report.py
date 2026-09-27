@@ -63,9 +63,33 @@ document.addEventListener('DOMContentLoaded', function () {
 # Progress markers: each one records how far the parser got, so a parse failure can be localised
 # without a developer console.
 _MARK = lambda s: '<script>window.__boot=' + json.dumps(s) + ';</script>\n'
+
+# Last block: read every diagnostic back and show it in a fixed, unmissable banner whenever the
+# report did not finish. The report can fail in ways that never reach the boot strip (a missing
+# element, a failing innerHTML write), so this reports state instead of assuming it.
+_SUMMARY = """<script>
+(function () {
+  var b = document.getElementById('bootstate');
+  if (b && b.textContent.indexOf('rendered') >= 0) return;      // it worked -- stay out of the way
+  var parts = [];
+  parts.push('progress marker: ' + (window.__boot || 'none'));
+  parts.push('boot strip element: ' + (b ? 'found' : 'MISSING'));
+  parts.push('document.title: ' + document.title);
+  parts.push('early errors: ' + JSON.stringify(window.__earlyErrors || []));
+  parts.push('render errors: ' + JSON.stringify(window.__renderErrors || []));
+  parts.push('document.body: ' + (document.body ? 'found' : 'MISSING')
+             + ' | svg count: ' + document.getElementsByTagName('svg').length);
+  var e = document.getElementById('errorbox');
+  if (e) { e.textContent = parts.join('\\n'); e.style.display = 'block'; }
+})();
+</script>
+"""
 _BOOT = ('<div id="boot" style="position:fixed;top:0;left:0;right:0;z-index:99999;background:#111;color:#eee;'
          'font:12px/1.7 ui-monospace,Menlo,monospace;padding:5px 10px;text-align:center">build ' + _BUILD +
          ' &middot; <span id="bootstate">HTML parsed; waiting for the report script&hellip;</span></div>'
+         '<div id="errorbox" style="display:none;position:fixed;top:32px;left:0;right:0;z-index:99999;'
+         'background:#7f1d1d;color:#fff;font:13px/1.7 ui-monospace,Menlo,monospace;padding:10px 14px;'
+         'white-space:pre-wrap;word-break:break-all"></div>'
          '<div style="height:30px"></div>')
 head = _EARLY + head
 body = body + _BOOT
@@ -109,5 +133,6 @@ OUT.write_text(head + body
                  "if(_bf){_bf.textContent='MAIN SCRIPT FAILED: '+(e&&e.message?e.message:e);_bf.style.color='#ffd0c8';}"
                  "try{document.title='REPORT ERROR: '+(e&&e.message?e.message:e);}catch(_){}"
                  "console.error('[main script]',e);throw e;}\n</script>\n"
-               + _MARK("code-done"), encoding="utf-8")
+               + _MARK("code-done")
+               + _SUMMARY, encoding="utf-8")
 print("wrote", OUT, OUT.stat().st_size // 1024, "KB")

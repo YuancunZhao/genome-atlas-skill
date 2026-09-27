@@ -44,6 +44,7 @@ global.document = {
   createElementNS: () => fakeEl(),
   createElement: () => fakeEl(),
   addEventListener(){},
+  getElementsByTagName: () => [],
   title: '',
 };
 global.getComputedStyle = () => ({ getPropertyValue: () => '#123456' });
