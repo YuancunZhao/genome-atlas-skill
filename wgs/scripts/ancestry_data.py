@@ -94,6 +94,43 @@ def _str(cfg, key, default=""):
     return "" if v is None else str(v)
 
 
+def chromosome_lengths(fai_candidates, fallback=None, log=print):
+    """从 FASTA 索引（`.fai`）读染色体长度；读不到才用内置表，并**明确告警**。
+
+    内置长度表只对 hg19/GRCh37 正确。换参考版本（例如 GRCh38）后，用 hg19 的长度去算百分比会
+    静默给出偏大的数字——图上看着合理，含义全错。所以优先读索引，回退时开口说话。
+    `.fai` 的键可能是 `1` 或 `chr1`，统一去掉 `chr` 前缀；副contig（含 `_`、随机/未定位序列）不收。
+    """
+    for cand in fai_candidates:
+        if not cand:
+            continue          # 配置未给出路径时这里是空串；Path('') 会变成 '.' 并触发假的"读不了"告警
+        try:
+            import pathlib as _pl
+            path = _pl.Path(cand)
+            if not path.exists():
+                continue
+            out = {}
+            with open(path, encoding="utf-8") as fh:
+                for line in fh:
+                    f = line.rstrip("\n").split("\t")
+                    if len(f) < 2 or not f[1].isdigit():
+                        continue
+                    name = f[0][3:] if f[0].startswith("chr") else f[0]
+                    if any(ch in name for ch in "_.") or not name[:2].rstrip("XMY").isdigit() and name not in ("X", "Y", "M", "MT"):
+                        continue
+                    out[name] = int(f[1])
+            if out:
+                log(f"chromosome lengths read from {path} ({len(out)} sequences)")
+                return out
+        except OSError as e:
+            log(f"warning: could not read {cand} ({e})")
+    if fallback:
+        log("warning: no FASTA index found; falling back to the built-in hg19/GRCh37 length table, "
+            "which is WRONG for any other reference build")
+        return dict(fallback)
+    return {}
+
+
 def target_key(sample_id):
     """目标的内部唯一键。显示名（可重名、含空格与中文）不参与匹配，只有 sample_id 参与。"""
     return f"target:{sample_id}"

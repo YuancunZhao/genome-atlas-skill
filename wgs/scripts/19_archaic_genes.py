@@ -4,6 +4,7 @@ import sys, pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import pathlib
 from wgsconfig import *  # noqa: F401,F403 -- P, W, REF, TOOLS, SAMPLE, THREADS ...
+import ancestry_data as _ad  # chromosome_lengths: 优先读 .fai，回退内置表并告警
 
 import subprocess, io, os, random, collections
 import pandas as pd, numpy as np
@@ -43,7 +44,11 @@ pd.set_option("display.width",250); pd.set_option("display.max_colwidth",70)
 print("\n== 基因家族的覆盖比例（该家族有多少比例的基因落在渗入片段里）")
 print(fdf.to_string(index=False))
 # background expectation: shuffle segments within chromosomes 200x, count genes hit
-CHRL={str(i):l for i,l in zip(range(1,23),[249250621,243199373,198022430,191154276,180915260,171115067,159138663,146364022,141213431,135534747,135006516,133851895,115169878,107349540,102531392,90354753,81195210,78077248,59128983,63025520,48129895,51304566])}
+# 仅在读不到任何 .fai 时使用；它只对 hg19/GRCh37 正确
+_HG19=[249250621, 243199373, 198022430, 191154276, 180915260, 171115067, 159138663, 146364022, 141213431, 135534747, 135006516, 133851895, 115169878, 107349540, 102531392, 90354753, 81195210, 78077248, 59128983, 63025520, 48129895, 51304566]
+CHRL=_ad.chromosome_lengths([(CFG.get('reference_fai') or ''), REF/'b37/human_g1k_v37.fasta.fai',
+                       REF/'hg38/Homo_sapiens_assembly38.fasta.fai'],
+                      fallback={str(i): l for i, l in zip(range(1, 23), _HG19)})
 random.seed(7)
 byc={c:sub.sort_values("start")[["start","end","gene"]].values for c,sub in g.groupby("chrom")}
 def count_hits(segments):

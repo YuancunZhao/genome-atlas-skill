@@ -4,10 +4,15 @@ scored with the same panels (FLARE posterior global ancestry, weighted by chromo
 import sys, pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from wgsconfig import *  # noqa: F401,F403 -- P, W, REF, TOOLS, SAMPLE, THREADS ...
+import ancestry_data as _ad  # chromosome_lengths: 优先读 .fai，回退内置表并告警
 
 import glob, gzip, pandas as pd, numpy as np, os
 P=str(P); W=f"{P}/wgs/12_localanc"
-LEN={str(i):l for i,l in zip(range(1,23),[249250621,243199373,198022430,191154276,180915260,171115067,159138663,146364022,141213431,135534747,135006516,133851895,115169878,107349540,102531392,90354753,81195210,78077248,59128983,63025520,48129895,51304566])}
+# 仅在读不到任何 .fai 时使用；它只对 hg19/GRCh37 正确
+_HG19=[249250621, 243199373, 198022430, 191154276, 180915260, 171115067, 159138663, 146364022, 141213431, 135534747, 135006516, 133851895, 115169878, 107349540, 102531392, 90354753, 81195210, 78077248, 59128983, 63025520, 48129895, 51304566]
+LEN=_ad.chromosome_lengths([(CFG.get('reference_fai') or ''), REF/'b37/human_g1k_v37.fasta.fai',
+                      REF/'hg38/Homo_sapiens_assembly38.fasta.fai'],
+                     fallback={str(i): l for i, l in zip(range(1, 23), _HG19)})
 rows=[]
 for f in glob.glob(f"{W}/la.*.global.anc.gz"):
     c=os.path.basename(f).split(".")[1]
