@@ -321,6 +321,7 @@ const ANC_ZH={"China_Henan_Jiaozuoniecunsite_LBA_IA":"河南 焦作聂村 晚商
 reveal('painting',(s,c)=>{
   const a=AC(), x0=34, rows=11, rh=44, maxL=D.chrlen['1'], COLW=390;
   const seg={}; D.la_segments.forEach(g=>{(seg[g.chrom]=seg[g.chrom]||[]).push(g)});
+  const _miss=new Set((D.la_missing||[]).map(String));
   CHR22.forEach((ch,i)=>{
     const col=i<rows?0:1, row=i%rows, bx=col===0?x0:x0+470, y=18+row*rh, w=COLW*D.chrlen[ch]/maxL;
     txt(s,{x:bx-6,y:y+11,'text-anchor':'end','font-size':10,'font-weight':700,fill:c.ink},ch);
@@ -331,10 +332,18 @@ reveal('painting',(s,c)=>{
         const r=el(s,'rect',{x:gx,y:yy,width:gw,height:9,rx:1,fill:g.anc==='SouthEA'?a.s:c.fd});
         tip(r,`chr${ch}:${fmt(g.start)}-${fmt(g.end)} · ${g.anc}`)})});
     const cen=D.cen[ch]; if(cen) el(s,'line',{x1:bx+w*cen*1e6/D.chrlen[ch],y1:y-2,x2:bx+w*cen*1e6/D.chrlen[ch],y2:y+22,stroke:c.bg,'stroke-width':1.6});
-    const so=D.la_per_chrom.find(r=>String(r.chrom)===ch);
-    if(so) txt(s,{x:bx+w+7,y:y+13,'font-size':9,'font-weight':700,fill:c.muted},(so.SouthEA*100).toFixed(0)+'%');
+    // A chromosome with no segments has no inference at all (FLARE left a 0-byte file and step 17
+    // dropped it in silence). Say so, instead of leaving a band that reads like the genuinely untyped
+    // acrocentric short arms.
+    if(_miss.has(ch)){
+      el(s,'rect',{x:bx,y:y,width:w,height:20,rx:1.5,fill:'#000',opacity:.07});
+      txt(s,{x:bx+w/2,y:y+13,'text-anchor':'middle','font-size':8,'font-weight':700,fill:c.muted},zh()?'无推断：该染色体未产出（数据缺失）':'no inference: nothing produced for this chromosome');
+    } else {
+      const so=D.la_per_chrom.find(r=>String(r.chrom)===ch);
+      if(so) txt(s,{x:bx+w+7,y:y+13,'font-size':9,'font-weight':700,fill:c.muted},(so.SouthEA*100).toFixed(0)+'%');
+    }
   });
-  foot(s,c,900,496,zh()?'每条染色体两行 = 父母各给的一条单倍型 · 只画 ≥0.5 Mb 的非北方片段 · 右侧 = 该染色体的南方比例':'two rows per chromosome = the two parental haplotypes · only non-northern segments ≥0.5 Mb · right = southern share');
+  foot(s,c,900,496,zh()?'每条染色体两行 = 父母各给的一条单倍型 · 只画 ≥0.5 Mb 的非北方片段 · 右侧 = 该染色体的南方比例 · 灰条 = 无推断（数据缺失，不是 0）· 短臂留白 = 参考面板在该区无标记':'two rows per chromosome = the two parental haplotypes · only non-northern segments ≥0.5 Mb · right = southern share · grey = no inference (missing data, not zero) · blank short arms = no panel markers there');
 });
 
 /* ── calibration ── */

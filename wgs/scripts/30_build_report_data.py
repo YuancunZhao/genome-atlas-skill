@@ -251,6 +251,12 @@ if _sg is not None and len(_sg):
     D["la_segments"] = _sg[["chrom", "start", "end", "anc", "mb", "hap"]].to_dict("records")
 else:
     D["la_segments"] = []
+# Chromosomes that contributed no segments at all. FLARE creates its output file up front, so an
+# interrupted run leaves a 0-byte VCF and the chromosome silently drops out of the figure while
+# per_chrom.tsv still reports its proportions -- on this sample, chr4. Recorded so the figure can say
+# so rather than leaving a blank band that reads like the untyped acrocentric short arms.
+_lac = {str(s["chrom"]) for s in D["la_segments"]}
+D["la_missing"] = [str(i) for i in range(1, 23) if str(i) not in _lac] if D["la_segments"] else []
 _cb = _read_tsv(W/"12_localanc/calibration.tsv")
 D["la_calib"] = _cb.to_dict("records") if _cb is not None and len(_cb) else []
 # archaic introgression (step 18)
