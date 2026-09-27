@@ -60,6 +60,7 @@ if _yr is not None:
     D["y_conservative_source"] = _yr.get("conservative_source")
     D["y_uncertain"] = [u.get("node") for u in (_yr.get("uncertain_nodes") or [])]
     D["y_state"] = _yr.get("state")
+    D["y_tree"] = f"{_yr.get('tree_source') or 'YFull'} {_yr.get('tree_version') or ''}".strip()
     D["lineage_history"] = (_yr.get("history") or {})
     ypath = D["ypath"]
 else:
@@ -466,6 +467,9 @@ if _pa is not None and len(_pa):
         # The closest ancient genome's own group is emitted separately: the caption quotes that genome
         # and its group can rank far down the list, so it would otherwise have nothing to compare with.
         _tg = D["ho_near_individual"][0]["group"] if D["ho_near_individual"] else None
+        # counts 供事实文案使用（记录数/合格数/有坐标数），来自 09b 的结构化结果
+        D["ho_accession"] = {"counts": dict(_sum.get("counts") or {}),
+                             "reference_release": _sum.get("reference_release") or ""}
         _tgg = _by_group.get(str(_tg)) if _tg else None
         D["ho_target_group"] = (dict(_aff(_tgg, "ancient"), mean_d=round(float(_tgg["distance_mean"]), 5),
                                      in_strip=any(g["group_id"] == _tgg["group_id"] for g in _strip),

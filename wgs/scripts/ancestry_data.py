@@ -745,3 +745,109 @@ def read_vcf_samples(path):
 
 if __name__ == "__main__":
     raise SystemExit(_cli())
+
+
+# ─────────────────────────────────────────── AN5: 事实文案由数据生成
+
+def _n(x):
+    try:
+        return int(x)
+    except (TypeError, ValueError):
+        return None
+
+
+def _fmt_d(v, digits=4):
+    try:
+        return f"{float(v):.{digits}f}"
+    except (TypeError, ValueError):
+        return "—"
+
+
+def ancestry_copy(D):
+    """由数据生成祖源与父母系的**事实**文案，返回 {key: [zh, en]}。
+
+    这些键的手写文案会被这里的值覆盖（构建器会打印被替代的键），因为手写的版本里往往写死了某个
+    样本的具体值——「最接近云南白羊村」「N-M1845 之下进入分辨率极限」——换成别的样本就成了错话。
+    措辞只声明数据支持的内容：距离在"所选参考面板中"的排名、明确的样本数、实际的单倍群与树版本；
+    不把"最接近"读成族群身份，也不在没有证据时给地理结论。
+    """
+    out = {}
+    aff = list(D.get("ho_affinity") or [])
+    mods = [r for r in aff if r.get("kind") == "modern"]
+    ancs = [r for r in aff if r.get("kind") == "ancient"]
+    near_i = (D.get("ho_near_individual") or [None])[0]
+    acc = D.get("ho_accession") or {}
+    n_rec = _n((acc.get("counts") or {}).get("selected")) if isinstance(acc, dict) else None
+    n_elig = _n((acc.get("counts") or {}).get("eligible")) if isinstance(acc, dict) else None
+    n_coord = _n((acc.get("counts") or {}).get("mapped")) if isinstance(acc, dict) else None
+
+    # --- 祖源标题：最近的现代群体（群体级）与最近的古代个体（个体级），两者分开说
+    if aff:
+        m = mods[0] if mods else None
+        a = ancs[0] if ancs else None
+        zh_parts, en_parts = [], []
+        if m:
+            zh_parts.append(f"最接近的现代人群是 {m['label']}（n={m['n']}，d={_fmt_d(m['d'])}）")
+            en_parts.append(f"nearest present-day group is {m['label']} (n={m['n']}, d={_fmt_d(m['d'])})")
+        if a:
+            zh_parts.append(f"最近的古代群体是 {a['label']}（n={a['n']}，d={_fmt_d(a['d'])}）")
+            en_parts.append(f"nearest ancient group is {a['label']} (n={a['n']}, d={_fmt_d(a['d'])})")
+        if near_i:
+            zh_parts.append(f"距离最近的古代基因组是 {near_i['iid']}（d={_fmt_d(near_i['d'])}）")
+            en_parts.append(f"closest ancient genome is {near_i['iid']} (d={_fmt_d(near_i['d'])})")
+        out["c_anc"] = ["在所选参考面板中，" + "；".join(zh_parts),
+                        "Within the selected reference panel: " + "; ".join(en_parts)]
+    else:
+        out["c_anc"] = ["本版没有可用的古 DNA 投影结果",
+                        "No usable ancient-DNA projection in this build"]
+
+    # --- 祖源副标题：面板规模与坐标覆盖率（明确 n，不写"130 万位点"这类只有某次运行才知道的数）
+    bits_zh, bits_en = [], []
+    if n_rec:
+        bits_zh.append(f"{n_rec} 条参考记录"); bits_en.append(f"{n_rec} reference records")
+    if n_elig:
+        bits_zh.append(f"合格 {n_elig}"); bits_en.append(f"{n_elig} eligible")
+    if n_coord is not None and n_rec:
+        bits_zh.append(f"有坐标 {n_coord}"); bits_en.append(f"{n_coord} with coordinates")
+    if mods or ancs:
+        bits_zh.append(f"群体 {len(mods)} 现代 / {len(ancs)} 古代")
+        bits_en.append(f"{len(mods)} modern / {len(ancs)} ancient groups")
+    if bits_zh:
+        out["sub_anc"] = [" · ".join(bits_zh), " · ".join(bits_en)]
+
+    # --- 祖源脚注：只描述"最接近"，并明说不由此推断身份
+    if aff and (mods or ancs):
+        out["n_anc"] = [
+            "距离是所选参考面板内、目标到各群体成员的欧氏距离均值，越小越近；"
+            "群体只按样本量达标的成员计算，样本不足的群体仍可在明细中查看。"
+            "本报告只描述在哪些参照里更接近，不据此推断族群身份或籍贯。",
+            "Distances are the mean Euclidean distance from the target to each group's members inside the "
+            "selected reference panel; smaller is closer. Groups are summarised only when enough members pass "
+            "the coverage gates, and small groups remain visible in the detail tables. This describes which "
+            "reference groups are nearer, not an ethnic or geographic identity.",
+        ]
+
+    # --- 父系正文：从实际路径生成，不写死任何支系名
+    ypath = list(D.get("ypath") or [])
+    yt, yc = D.get("y_terminal"), D.get("y_conservative")
+    unc = list(D.get("y_uncertain") or [])
+    if ypath and yt:
+        solid = [p for p in ypath if _n(p.get("der")) is not None and int(p["der"]) >= 5]
+        trunk = f"{solid[0]['snp']}→{solid[-1]['snp']}" if solid else ypath[0].get("snp")
+        zh = (f"Y 染色体只从父亲传给儿子，记录的是父系一条线。本次判定沿 {D.get('y_tree') or 'YFull'} 树逐级下行，"
+              f"共 {len(ypath)} 级；支持充分的节点从 {trunk}。")
+        en = (f"The Y chromosome passes only from father to son, so it records one paternal line. This call "
+              f"walks {len(ypath)} levels of the {D.get('y_tree') or 'YFull'} tree; the solidly supported nodes run {trunk}.")
+        if unc:
+            zh += f"末端 {len(unc)} 级的支持位点不足（{'、'.join(str(u) for u in unc)}），保守回退到 {yc}。"
+            en += (f" The last {len(unc)} level(s) rest on too few sites ({', '.join(str(u) for u in unc)}); "
+                   f"the conservative fallback is {yc}.")
+        elif yc and yc != yt:
+            zh += f"保守回退为 {yc}。"; en += f" Conservative fallback: {yc}."
+        out["n_y"] = [zh, en]
+        out["c_y"] = [f"父系：Y 染色体属于 {yt}" + (f"（保守回退 {yc}）" if yc and yc != yt else ""),
+                      f"Father's line: {yt}" + (f" (conservative fallback {yc})" if yc and yc != yt else "")]
+    elif D.get("y_state") == "unavailable":
+        out["c_y"] = ["父系：本次交付没有得到可用的 Y 判定（原因见状态表）",
+                      "Father's line: no usable Y call in this delivery (see the status table)"]
+    return out

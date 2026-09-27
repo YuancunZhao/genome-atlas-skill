@@ -40,6 +40,16 @@ def _fmt(x):
 _TXT = _fmt(_TXT)
 UI = _TXT["ui"]; FIND = _TXT["findings"]; PGX = _TXT["pgx"]; BLOOD = _TXT["blood"]; PRS_ZH = _TXT["prs_names"]
 
+# AN5（§7）：祖源与父母系的**事实**文案由数据生成，覆盖 yaml 里的手写版本。手写文案里常写死某个样本
+# 的具体值（"最接近云南白羊村"、"N-M1845 之下进入分辨率极限"），换样本就成了错话；这里用实际的分析
+# 结果重新表述，并打印被替代的键，方便对照。其余医学文案仍按原机制由 yaml 提供。
+from ancestry_data import ancestry_copy as _ancestry_copy
+_ANC_COPY = _ancestry_copy(D)
+_ANC_REPLACED = sorted(k for k in _ANC_COPY if k in UI)
+UI.update(_ANC_COPY)
+if _ANC_REPLACED:
+    print("31_html_report: ancestry copy generated from the data replaces: " + ", ".join(_ANC_REPLACED))
+
 
 
 
