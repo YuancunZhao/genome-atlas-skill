@@ -6,6 +6,11 @@ cd "$(dirname "$0")"
 source scripts/env.sh
 S=scripts
 step(){ echo -e "\n=== $* ==="; }
+# Ancestry steps follow the switches validated from config.yaml (read_options, §7 AN0). A step that is
+# off writes a disabled manifest, so step 30 can tell "not configured" from "not run" instead of
+# silently reusing an older result. A failing step still stops the run.
+skipped(){ echo -e "\n=== skip $1: $2 ==="; python3 $S/ancestry_data.py --disabled "$1" \
+  --out "$PROJ/wgs/$3/manifest.json" --sample "$SAMPLE" --reason "$2"; }
 
 step 00 prepare inputs and QC;                            bash  $S/00_qc.sh
 step 01 normalise the VCF and build the callable mask;         bash  $S/01_normalize.sh
@@ -13,16 +18,26 @@ step 02 re-call X with the right ploidy and pile up MT;        bash  $S/02_recal
 step 03 complete genotype set at the reference panel sites;    python3 $S/03_complete_set.py
 step 04 ancestry PCA and projection;                           bash  $S/04_ancestry_pca.sh
 step 04b nearest reference populations;                        python3 $S/04b_ancestry_summary.py
-step 04c per-chromosome axis index;                            python3 $S/04c_axis_index.py
+if [ "${REGIONAL_ENABLED:-0}" = "1" ] && [ -n "${AXIS:-}" ]; then
+  step 04c per-chromosome axis index;                            python3 $S/04c_axis_index.py
+else
+  skipped 04c-per-chromosome-axis regional_axis_not_configured 04c
+fi
 step 05 Y haplogroup on the YFull tree;                        python3 $S/05_y_haplogroup.py
 step 06 mtDNA haplogroup and heteroplasmy;                     python3 $S/06_mtdna.py
 step 06b mtDNA disease screen;                                 python3 $S/06b_mt_disease.py
 step 07 annotate with ClinVar, consequences, frequencies;      bash  $S/07_annotate.sh
 step 07b pathogenic and loss-of-function tables;               python3 $S/07b_clinvar_tables.py
 step 07c gnomAD frequencies for the candidates;                python3 $S/07c_gnomad_lookup.py
-step 08 extract the ancient-DNA panel;                         python3 $S/08_aadr_extract.py
-step 09 ancient-DNA PCA and projection;                        bash  $S/09_aadr_pca.sh
-step 09b nearest present-day and ancient groups;               python3 $S/09b_aadr_summary.py
+if [ "${AADR_ENABLED:-0}" = "1" ]; then
+  step 08 extract the ancient-DNA panel;                         python3 $S/08_aadr_extract.py
+  step 09 ancient-DNA PCA and projection;                        bash  $S/09_aadr_pca.sh
+  step 09b nearest present-day and ancient groups;               python3 $S/09b_aadr_summary.py
+else
+  skipped 08-aadr-extract aadr_not_configured 08
+  skipped 09-aadr-pca aadr_not_configured 09
+  skipped 09b-aadr-summary aadr_not_configured 09b
+fi
 step 10 PharmCAT star alleles, CYP2D6, HLA;                    bash  $S/10_pharmcat.sh
 step 11 extended pharmacogenomic markers;                      python3 $S/11_pgx_extra.py
 step 12 polygenic scores;                                      python3 $S/12_prs.py
@@ -30,10 +45,17 @@ step 13 structural variants and copy number;                   python3 $S/13_sv_
 step 14 read-backed phasing;                                   bash  $S/14_phase_reads.sh
 step 14b phase summary and cis/trans questions;                python3 $S/14b_phase_summary.py
 step 15 statistical phasing;                                   bash  $S/15_phase_statistical.sh
-step 16 local ancestry;                                        bash  $S/16_local_ancestry.sh
-step 16b local-ancestry calibration;                           bash  $S/16b_local_ancestry_calibration.sh
-step 17 local-ancestry summary;                                python3 $S/17_local_ancestry_summary.py
-step 17b calibrated against held-out references;               python3 $S/17b_local_ancestry_calibrated.py
+if [ "${LOCAL_ENABLED:-0}" = "1" ]; then
+  step 16 local ancestry;                                        bash  $S/16_local_ancestry.sh
+  step 16b local-ancestry calibration;                           bash  $S/16b_local_ancestry_calibration.sh
+  step 17 local-ancestry summary;                                python3 $S/17_local_ancestry_summary.py
+  step 17b calibrated against held-out references;               python3 $S/17b_local_ancestry_calibrated.py
+else
+  skipped 16-local-ancestry local_ancestry_not_configured 16
+  skipped 16b-la-calibration local_ancestry_not_configured 16b
+  skipped 17-la-summary local_ancestry_not_configured 17
+  skipped 17b-la-calibrated local_ancestry_not_configured 17b
+fi
 step 18 archaic introgressed segments;                         python3 $S/18_archaic.py
 step 19 genes covered by those segments;                       python3 $S/19_archaic_genes.py
 step 20 mutation spectrum;                                     python3 $S/20_mutation_spectrum.py

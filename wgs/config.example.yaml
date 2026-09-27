@@ -35,3 +35,22 @@ local_ancestry_labels: [NorthEA, SouthEA]
 aadr_modern: [Han, Japanese, Korean, She, Miao, Tujia, Dai, Yi, Naxi, Tu, Xibo, Oroqen, Hezhen, Daur,
               Mongola, Tibetan, Kinh_Vietnamese, Thai, Cambodian, Ami, Atayal, Zhuang, Dong, Ulchi, CHB, CHS, CDX]
 aadr_ancient_prefix: [China_, Mongolia_, Taiwan_, Vietnam_, Japan_, Korea_, Russia_DevilsCave, Laos_, Thailand_]
+# aadr_annotation: work/data/ref/aadr/v66.p1_HO.aadr.patch.PUB.anno   # default: <aadr_prefix>.anno
+
+# --- ancestry quality gates (§7.3). Recorded in each analysis manifest; changing one invalidates
+# previously built results rather than silently reusing them. Empty/absent key = previous behaviour.
+ancestry_min_call_rate_modern: 0.95     # present-day AADR reference individuals
+ancestry_min_call_rate_target: 0.95     # the target sample, on the final pruned reference sites
+aadr_min_call_rate_ancient: 0.50        # ancient individuals: one set for maps, PCA and rankings
+ancestry_min_projection_snps: 10000     # working gate, not a validated accuracy claim
+ancestry_min_group_n: 2                 # groups smaller than this stay out of default rankings
+
+# --- local-ancestry holdout calibration (§7.3). Empty pops = use the source panels above.
+local_ancestry_calibration_pops: []
+local_ancestry_calibration_chroms: [1, 2, 6, 22]
+local_ancestry_calibration_n: 20
+local_ancestry_calibration_seed: 1
+
+# --- optional local evidence file for paternal/maternal haplogroup history (versioned JSON).
+lineage_history_file: ""
+# analysis_id: ""      # free-form label recorded in every manifest; empty = derived from inputs

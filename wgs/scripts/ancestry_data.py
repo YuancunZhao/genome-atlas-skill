@@ -1,0 +1,283 @@
+"""Ancestry configuration and result bookkeeping (AN0).
+
+Two jobs, both deliberately free of side effects at import time:
+
+1. `read_options(cfg)` turns a raw configuration dict into validated switches and parameters.
+   It must be a pure function -- no file reads, no directory creation, no dependency on
+   `wgsconfig` (which creates the work tree when imported). "Explicitly configured" is decided
+   from the keys the user actually wrote, never from a shared default: defaulting
+   `ref_superpop` to EAS and then treating that default as a user choice would silently run
+   regional East-Asian panels for every sample, which is exactly the failure this module exists
+   to prevent.
+
+2. Manifest read/write/match. Every analysis directory records what produced it; step 30 only
+   consumes results whose manifest matches the current sample, configuration and references.
+   A missing or mismatching manifest means "rebuild", never "reuse".
+
+Nothing here knows a sample name, a haplogroup or a population count.
+"""
+import json, os, pathlib
+
+SCHEMA_VERSION = 1
+STATES = ("ok", "disabled", "unavailable", "failed")
+REQUIRED_MANIFEST_KEYS = ("sample_id",)
+SUPPORTED_BUILDS = ("GRCh37",)
+
+_LIST_KEYS = (
+    "ref_subpops", "axis_pops", "local_ancestry_a", "local_ancestry_b", "local_ancestry_control",
+    "local_ancestry_labels", "aadr_modern", "aadr_ancient_prefix",
+    "local_ancestry_calibration_pops", "local_ancestry_calibration_chroms",
+)
+
+
+def _as_list(cfg, key, default):
+    """配置里的列表键。字符串会被 list() 拆成字符，必须在入口挡住。"""
+    if key not in cfg:
+        return list(default)
+    v = cfg[key]
+    if v is None:
+        return list(default)
+    if isinstance(v, str):
+        raise ValueError(
+            f"{key} must be a YAML list (got the string {v!r}: it would be read as the characters "
+            f"{list(v)!r}). Write it as [{v}] or as a - item block."
+        )
+    if not isinstance(v, (list, tuple)):
+        raise ValueError(f"{key} must be a list, got {type(v).__name__}")
+    return [str(x).strip() for x in v]
+
+
+def _rate(cfg, key, default):
+    """比例型门槛：取值 (0, 1]。"""
+    v = cfg.get(key, default)
+    if isinstance(v, str):
+        try:
+            v = float(v)
+        except ValueError:
+            raise ValueError(f"{key} must be a number in (0, 1], got {v!r}") from None
+    if not isinstance(v, (int, float)) or isinstance(v, bool):
+        raise ValueError(f"{key} must be a number in (0, 1], got {type(v).__name__}")
+    if not (0 < float(v) <= 1):
+        raise ValueError(f"{key} must be in (0, 1], got {v!r}")
+    return float(v)
+
+
+def _positive_int(cfg, key, default):
+    v = cfg.get(key, default)
+    if isinstance(v, str):
+        try:
+            v = int(v)
+        except ValueError:
+            raise ValueError(f"{key} must be a positive integer, got {v!r}") from None
+    if isinstance(v, bool) or not isinstance(v, int) or v <= 0:
+        raise ValueError(f"{key} must be a positive integer, got {v!r}")
+    return int(v)
+
+
+def _int(cfg, key, default):
+    v = cfg.get(key, default)
+    if isinstance(v, str):
+        try:
+            v = int(v)
+        except ValueError:
+            raise ValueError(f"{key} must be an integer, got {v!r}") from None
+    if isinstance(v, bool) or not isinstance(v, int):
+        raise ValueError(f"{key} must be an integer, got {v!r}")
+    return int(v)
+
+
+def _str(cfg, key, default=""):
+    v = cfg.get(key, default)
+    return "" if v is None else str(v)
+
+
+def target_key(sample_id):
+    """目标的内部唯一键。显示名（可重名、含空格与中文）不参与匹配，只有 sample_id 参与。"""
+    return f"target:{sample_id}"
+
+
+def read_options(cfg):
+    """把配置翻译成开关与已校验参数；非法输入抛 ValueError。
+
+    开关只看用户**写没写**、且写的是非空值——不回退到任何共享默认：
+      regional_enabled  显式给出非空 ref_superpop
+      aadr_enabled      显式给出非空 aadr_modern 或 aadr_ancient_prefix
+      local_enabled     local_ancestry_a 与 local_ancestry_b 均非空、互不重叠、标签唯一
+    """
+    if not isinstance(cfg, dict):
+        raise ValueError(f"configuration must be a mapping, got {type(cfg).__name__}")
+
+    build = _str(cfg, "build", "GRCh37") or "GRCh37"
+    if build not in SUPPORTED_BUILDS:
+        raise ValueError(
+            f"build {build!r} is not supported (this pipeline is GRCh37 only); refusing before any work"
+        )
+
+    regional = _str(cfg, "ref_superpop", "")
+    subpops = _as_list(cfg, "ref_subpops", [])
+    axis = _as_list(cfg, "axis_pops", [])
+    if axis and len(axis) != 2:
+        raise ValueError(f"axis_pops needs exactly two populations, got {axis!r}")
+
+    la_a = _as_list(cfg, "local_ancestry_a", [])
+    la_b = _as_list(cfg, "local_ancestry_b", [])
+    la_control = _as_list(cfg, "local_ancestry_control", [])
+    if la_a and la_b:
+        overlap = sorted(set(la_a) & set(la_b))
+        if overlap:
+            raise ValueError(f"local_ancestry_a and local_ancestry_b overlap on {overlap}")
+        if len(set(la_a)) != len(la_a) or len(set(la_b)) != len(la_b):
+            raise ValueError("local_ancestry_a/b contain duplicate populations")
+        if set(la_a) & set(la_control) or set(la_b) & set(la_control):
+            raise ValueError("the control panel overlaps a source panel; A/B must stay disjoint from it")
+    labels_given = "local_ancestry_labels" in cfg
+    labels = _as_list(cfg, "local_ancestry_labels", [])
+    if labels_given:
+        if len(labels) != 2:
+            raise ValueError(f"local_ancestry_labels needs exactly two labels, got {labels!r}")
+        if len(set(labels)) != len(labels) or any(not x for x in labels):
+            raise ValueError(f"local_ancestry_labels must be two distinct non-empty labels, got {labels!r}")
+    if la_a and la_b and not labels_given:
+        labels = ["+".join(la_a), "+".join(la_b)]  # 由来源生成，不硬编码任何地理或成分语义
+
+    modern = _as_list(cfg, "aadr_modern", [])
+    ancient_prefix = _as_list(cfg, "aadr_ancient_prefix", [])
+    if any(not p for p in ancient_prefix):
+        raise ValueError("aadr_ancient_prefix must not contain an empty string (it would match everything)")
+
+    pops = _as_list(cfg, "local_ancestry_calibration_pops", [])
+    if not pops:
+        pops = list(axis) if axis else ([la_a[0]] + [la_b[0]] if (la_a and la_b) else [])
+    chroms = _as_list(cfg, "local_ancestry_calibration_chroms", ["1", "2", "6", "22"])
+    if any(not c for c in chroms):
+        raise ValueError("local_ancestry_calibration_chroms must not contain empty entries")
+
+    return {
+        "build": build,
+        "sample_id": _str(cfg, "sample_id", "SAMPLE"),
+        "name_zh": _str(cfg, "name_zh", "") or _str(cfg, "sample_id", "SAMPLE"),
+        "name_en": _str(cfg, "name_en", "") or _str(cfg, "sample_id", "SAMPLE"),
+        "threads": _str(cfg, "threads", "8"),
+        "mem_gb": _str(cfg, "mem_gb", "30"),
+        # ---- switches (explicit configuration only)
+        "regional_enabled": bool(regional),
+        "aadr_enabled": bool(modern or ancient_prefix),
+        "local_enabled": bool(la_a and la_b),
+        # ---- reference selection
+        "ref_superpop": regional,
+        "ref_subpops": subpops,
+        "axis_pops": axis,
+        "la_a": la_a,
+        "la_b": la_b,
+        "la_control": la_control,
+        "la_labels": labels,
+        "aadr_prefix": _str(cfg, "aadr_prefix", ""),
+        "aadr_annotation": _str(cfg, "aadr_annotation", ""),
+        "aadr_modern": modern,
+        "aadr_ancient_prefix": ancient_prefix,
+        # ---- thresholds
+        "min_call_rate_modern": _rate(cfg, "ancestry_min_call_rate_modern", 0.95),
+        "min_call_rate_target": _rate(cfg, "ancestry_min_call_rate_target", 0.95),
+        "min_call_rate_ancient": _rate(cfg, "aadr_min_call_rate_ancient", 0.50),
+        "min_projection_snps": _positive_int(cfg, "ancestry_min_projection_snps", 10000),
+        "min_group_n": _positive_int(cfg, "ancestry_min_group_n", 2),
+        # ---- calibration
+        "calibration_pops": pops,
+        "calibration_chroms": chroms,
+        "calibration_n": _positive_int(cfg, "local_ancestry_calibration_n", 20),
+        "calibration_seed": _int(cfg, "local_ancestry_calibration_seed", 1),
+        # ---- lineage history (optional evidence file)
+        "lineage_history_file": _str(cfg, "lineage_history_file", ""),
+    }
+
+
+# ---------------------------------------------------------------- manifest
+
+def build_manifest(sample_id, analysis_id, state="ok", reason_code="", **fields):
+    """一份 manifest 的最小骨架；调用方补齐 reference_release/parameters/... 等字段。"""
+    if state not in STATES:
+        raise ValueError(f"state must be one of {STATES}, got {state!r}")
+    m = {"schema_version": SCHEMA_VERSION, "sample_id": str(sample_id), "analysis_id": str(analysis_id),
+         "state": state, "reason_code": str(reason_code), "build": "GRCh37", "reference_release": "",
+         "parameters": {}, "tool_versions": {}, "input_fingerprints": {}, "outputs": []}
+    m.update(fields)
+    return m
+
+
+def disabled_manifest(sample_id, analysis_id, reason_code):
+    """显式禁用也要留下记录：30 才能区分"没跑"与"跑了但被配置禁用"。"""
+    return build_manifest(sample_id, analysis_id, state="disabled", reason_code=reason_code)
+
+
+def write_manifest(path, manifest):
+    """先写临时文件再原子替换：读者永远看不到半个 manifest。"""
+    state = manifest.get("state")
+    if state not in STATES:
+        raise ValueError(f"state must be one of {STATES}, got {state!r} (a run that is not finished is not 'ok')")
+    path = pathlib.Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(manifest, fh, ensure_ascii=False, indent=1, sort_keys=True)
+        fh.write("\n")
+    os.replace(tmp, path)
+    return path
+
+
+def read_manifest(path):
+    path = pathlib.Path(path)
+    if not path.exists():
+        return None
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return json.load(fh)
+    except (json.JSONDecodeError, OSError):
+        return None  # 损坏的 manifest 等同于没有：调用方必须重建
+
+
+def manifest_matches(actual, expected):
+    """这份产物能不能代表当前样本/配置/参考？
+
+    规则：actual 必须存在、含 sample_id、且（若写了 state）state == "ok"；expected 里的每个
+    键只要在 actual 中出现就必须相等。任何不等、任何关键键缺失都返回 False——调用方据此重建，
+    绝不复用旧结果。
+    """
+    if not isinstance(actual, dict) or not actual or not isinstance(expected, dict) or not expected:
+        return False
+    if actual.get("state") not in (None, "ok"):
+        return False
+    for k in REQUIRED_MANIFEST_KEYS:
+        if k not in actual:
+            return False
+    for k, v in expected.items():
+        if k not in actual:
+            if k in REQUIRED_MANIFEST_KEYS:
+                return False
+            continue
+        if actual[k] != v:
+            return False
+    return True
+
+
+def _cli(argv=None):
+    """最小入口，只给 run_all 用：把一个"按配置跳过"的分析写成 disabled manifest。
+
+        python3 scripts/ancestry_data.py --disabled <analysis_id> --out <path> --sample <id> --reason <code>
+
+    不是调度器，不扫目录、不推断状态：run_all 已经知道自己在跳过哪一步。
+    """
+    import argparse
+    ap = argparse.ArgumentParser(description="ancestry manifest helper (AN0)")
+    ap.add_argument("--disabled", metavar="ANALYSIS_ID", required=True)
+    ap.add_argument("--out", required=True)
+    ap.add_argument("--sample", required=True)
+    ap.add_argument("--reason", default="disabled_by_config")
+    a = ap.parse_args(argv)
+    m = disabled_manifest(a.sample, a.disabled, a.reason)
+    write_manifest(a.out, m)
+    print(f"wrote {a.out} (state=disabled, reason={a.reason})")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(_cli())

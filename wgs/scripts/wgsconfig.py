@@ -21,8 +21,18 @@ except ImportError:
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 
+def _config_path():
+    """Which config file to read. $WGS_CONFIG wins when set (absolute, or relative to the pipeline
+    root); otherwise config.yaml at the root. One config per sample/run, no shared mutable defaults."""
+    env = os.environ.get("WGS_CONFIG", "").strip()
+    if not env:
+        return ROOT / "config.yaml"
+    p = pathlib.Path(env).expanduser()
+    return (p if p.is_absolute() else ROOT / p).resolve()
+
+
 def _load():
-    f = ROOT / "config.yaml"
+    f = _config_path()
     if not f.exists():
         return {}
     if yaml:
@@ -114,6 +124,30 @@ LA_LABELS = list(CFG.get("local_ancestry_labels", ["NorthEA", "SouthEA"]))
 AXIS = list(CFG.get("axis_pops", ["CHS", "CHB"]))                 # per-chromosome axis: 0 = first, 1 = second
 AADR_MODERN = list(CFG.get("aadr_modern", []))                    # extra present-day AADR groups to keep
 AADR_ANCIENT_PREFIX = list(CFG.get("aadr_ancient_prefix", []))    # ancient AADR group-ID prefixes to project
+
+# ---- ancestry switches and validated parameters (AN0). These come from read_options(), which decides
+# "explicitly configured" from the keys written in config.yaml itself -- a shared default is never
+# mistaken for a user choice. The constants above keep their previous meaning and defaults so that
+# PRS and every existing consumer behave exactly as before.
+import sys as _sys
+_sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import ancestry_data as _ad
+OPT = _ad.read_options(CFG)
+REGIONAL_ENABLED = OPT["regional_enabled"]
+AADR_ENABLED = OPT["aadr_enabled"]
+LOCAL_ENABLED = OPT["local_enabled"]
+MIN_CR_MODERN = OPT["min_call_rate_modern"]
+MIN_CR_TARGET = OPT["min_call_rate_target"]
+MIN_CR_ANCIENT = OPT["min_call_rate_ancient"]
+MIN_PROJECTION_SNPS = OPT["min_projection_snps"]
+MIN_GROUP_N = OPT["min_group_n"]
+CALIB_POPS = OPT["calibration_pops"]
+CALIB_CHROMS = OPT["calibration_chroms"]
+CALIB_N = OPT["calibration_n"]
+CALIB_SEED = OPT["calibration_seed"]
+AADR_ANNOTATION = OPT["aadr_annotation"]
+LINEAGE_HISTORY_FILE = OPT["lineage_history_file"]
+ANALYSIS_ID = str(_g("analysis_id", ""))                          # optional; empty = derived from inputs
 
 def rel(p):
     """Path relative to the work root, for printing."""
