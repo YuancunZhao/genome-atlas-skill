@@ -179,17 +179,18 @@ def check_runtime(html_path):
         fail("report.html not found for the runtime check")
         return
     html = html_path.read_text(encoding="utf-8")
-    # The page may carry more than one <script> block (the boot diagnostic runs first), so take
-    # the last one -- that is the report itself.
-    i, j = html.rfind("<script>") + len("<script>"), html.rfind("</script>")
-    if i < len("<script>") or j <= i:
+    # The page carries several <script> blocks (boot diagnostic, payload, logic, progress markers).
+    # They share one global scope, so concatenating them reproduces what the browser executes.
+    blocks = re.findall(r"<script>(.*?)</script>", html, re.S)
+    if not blocks:
         fail("report.html has no inline <script> block")
         return
+    script = "\n".join(blocks)
     with tempfile.TemporaryDirectory() as td:
         p = pathlib.Path(td)
         (p / "stub.js").write_text(DOM_STUB, encoding="utf-8")
         (p / "runner.js").write_text(NODE_RUNNER, encoding="utf-8")
-        (p / "report.js").write_text(html[i:j], encoding="utf-8")
+        (p / "report.js").write_text(script, encoding="utf-8")
         try:
             r = subprocess.run([node, str(p / "runner.js"), str(p / "stub.js"), str(p / "report.js")],
                                capture_output=True, text=True, timeout=180)

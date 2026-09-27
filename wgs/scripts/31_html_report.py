@@ -54,11 +54,15 @@ document.addEventListener('DOMContentLoaded', function () {
   var b = document.getElementById('bootstate'); if (!b) return;
   if (b.textContent.indexOf('waiting') < 0) return;  // the report already reported itself -- do not overwrite it
   if (window.__earlyErrors.length) { b.textContent = 'SCRIPT ERROR: ' + window.__earlyErrors.join(' | '); }
-  else { b.textContent = 'the report script never ran -- open the developer console (F12) for the reason'; }
+  else { b.textContent = 'the report script never ran; last progress marker: ' + (window.__boot || 'none'); }
   b.style.color = '#ffd0c8';
 });
 </script>
 """
+
+# Progress markers: each one records how far the parser got, so a parse failure can be localised
+# without a developer console.
+_MARK = lambda s: '<script>window.__boot=' + json.dumps(s) + ';</script>\n'
 _BOOT = ('<div id="boot" style="position:fixed;top:0;left:0;right:0;z-index:99999;background:#111;color:#eee;'
          'font:12px/1.7 ui-monospace,Menlo,monospace;padding:5px 10px;text-align:center">build ' + _BUILD +
          ' &middot; <span id="bootstate">HTML parsed; waiting for the report script&hellip;</span></div>'
@@ -66,17 +70,30 @@ _BOOT = ('<div id="boot" style="position:fixed;top:0;left:0;right:0;z-index:9999
 head = _EARLY + head
 body = body + _BOOT
 js = open(S/"report_script.js", encoding="utf-8").read()
-# The inline payload is dumped with indent=0 so that the data is not one 634 KB line: Safari's HTML
-# tokenizer choked on that, and the report script never parsed.
+# The inline payload is dumped with indent=0 (a single 634 KB line choked Safari's tokenizer) and
+# split from the logic, so that a parse failure can be localised by the progress markers.
 _DUMP = lambda o: json.dumps(o, ensure_ascii=False, indent=0)
-js = (js.replace("__DATA__", _DUMP(D)).replace("__UI__", _DUMP(UI))
-        .replace("__FIND__", _DUMP(FIND)).replace("__PGX__", _DUMP(PGX)).replace("__PRS_EN__", _DUMP(PRS_ZH)).replace("__BLOOD__", _DUMP(BLOOD)))
+_REPL = {"__DATA__": _DUMP(D), "__UI__": _DUMP(UI), "__FIND__": _DUMP(FIND),
+         "__PGX__": _DUMP(PGX), "__PRS_EN__": _DUMP(PRS_ZH), "__BLOOD__": _DUMP(BLOOD)}
+def _subst(s):
+    for k, v in _REPL.items(): s = s.replace(k, v)
+    return s
+_lines = js.split("\n")
+_decl = [i for i, l in enumerate(_lines) if any(p in l for p in _REPL)]
+_split = (max(_decl) + 1) if _decl and max(_decl) < 60 else 0     # 0 = do not split (safe fallback)
+js_data = _subst("\n".join(_lines[:_split]))
+js_code = _subst("\n".join(_lines[_split:]))
 # The main script is wrapped so that a runtime failure reports itself: on a file:// page the
 # window.onerror listener only sees "Script error." when the detail is suppressed, but a catch
 # inside the same script always sees the real message. (Parse errors still only reach the console.)
-OUT.write_text(head + body + "<script>\ntry{\n" + js
+OUT.write_text(head + body
+               + _MARK("before-main-script")
+               + "<script>" + js_data + "</script>\n"
+               + _MARK("data-loaded")
+               + "<script>\ntry{\n" + js_code
                + "\n}catch(e){var _bf=document.getElementById('bootstate');"
                  "if(_bf){_bf.textContent='MAIN SCRIPT FAILED: '+(e&&e.message?e.message:e);_bf.style.color='#ffd0c8';}"
                  "try{document.title='REPORT ERROR: '+(e&&e.message?e.message:e);}catch(_){}"
-                 "console.error('[main script]',e);throw e;}\n</script>\n", encoding="utf-8")
+                 "console.error('[main script]',e);throw e;}\n</script>\n"
+               + _MARK("code-done"), encoding="utf-8")
 print("wrote", OUT, OUT.stat().st_size // 1024, "KB")
