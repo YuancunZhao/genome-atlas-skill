@@ -15,7 +15,10 @@ const C=()=>({ink:V('--ink'),muted:V('--muted'),lab:V('--lab'),faint:V('--faint'
 const fmt=n=>(n==null||Number.isNaN(n))?'—':n.toLocaleString('en-US');
 const CH = {}; const NUM={'font-weight':800};
 const foot=(s,c,w,y,txt_)=>txt(s,{x:w/2,y,'text-anchor':'middle','font-size':7,'font-weight':600,fill:c.faint,'letter-spacing':'.12em',class:'fade',style:'animation-delay:.9s'},txt_.toUpperCase());
-const reveal=(id,fn)=>{CH[id]=fn;const n=document.getElementById(id);n.style.cursor='pointer';n.addEventListener('click',()=>{n.innerHTML='';fn(n,C())})};
+// Clearing a figure with innerHTML='' is not portable: the containers are <svg> elements and
+// Safari throws on writing innerHTML to an SVG element, which took the whole render down with it.
+const clearEl=n=>{if(n.replaceChildren)n.replaceChildren();else while(n.firstChild)n.removeChild(n.firstChild)};
+const reveal=(id,fn)=>{CH[id]=fn;const n=document.getElementById(id);n.style.cursor='pointer';n.addEventListener('click',()=>{clearEl(n);fn(n,C())})};
 const K=D.kpi;
 F.depth=K.depth_auto; F.x=K.depth_x; F.y=K.depth_y; F.mt=fmt(K.depth_mt); F.callable=K.callable_gb; F.pass=fmt(K.pass_records); F.snv=fmt(K.snv); F.indel=fmt(K.indel); F.titv=K.titv;
 F.cmp=fmt(D.chip.compared); F.nocall=D.chip.nocall??'—'; F.nonp=D.chip.nocall_nopass??'—'; F.indel_n=D.chip.in_deletion??'—';
@@ -31,7 +34,7 @@ const renderAll=()=>{try{document.documentElement.setAttribute('lang',LANG==='zh
   document.getElementById('langbtn').textContent=t('toggle');
   document.title = TITLE();
   window.__renderErrors=[];
-  for(const id in CH){const n=document.getElementById(id);if(!n)continue;n.innerHTML='';
+  for(const id in CH){const n=document.getElementById(id);if(!n)continue;clearEl(n);
     try{CH[id](n,C())}catch(e){window.__renderErrors.push(id);console.error('[render] '+id,e);
       const err=document.createElementNS('http://www.w3.org/2000/svg','text');
       err.setAttribute('x',8);err.setAttribute('y',16);err.setAttribute('font-size',10);err.setAttribute('fill','#b3261e');
