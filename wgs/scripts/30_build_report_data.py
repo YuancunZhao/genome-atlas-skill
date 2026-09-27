@@ -123,6 +123,9 @@ D["sv_gene_dels"] = [{"chrom": str(r.chrom), "pos": int(r.pos), "gene": g,
                       "frac": round(float(r.dp_ratio), 2) if pd.notna(r.dp_ratio) else 0.5}
                      for r in _wgd.itertuples() for g in str(r.whole_gene_del).split(",") if g]
 D["sv_gene_dels_stats"] = {"events": int(len(_wgd)), "genes": len({e["gene"] for e in D["sv_gene_dels"]})}
+D["n_sv_gene_del_events"] = int(D["sv_gene_dels_stats"]["events"])  # 10 DEL events...
+D["n_sv_gene_dels"] = len(D["sv_gene_dels"])                        # ...spanning these gene-event pairs (15)
+D["n_sv_gene_del_genes"] = int(D["sv_gene_dels_stats"]["genes"])
 # SMN copies come from SMNCopyNumberCaller and STR lengths from ExpansionHunter; no step of
 # this repository runs either tool, so both sections degrade to "not assessed" when absent.
 _smn_f = W/"08_sv/smn/target.tsv"
@@ -167,6 +170,13 @@ if _eh_f.exists():
         D["str"].append({"locus": r.locus, "unit": r.unit, "gt": str(r.genotype), "max": int(r.max_allele),
                          "thr": t, "ci": _ci.get(r.locus), "cov": round(_cov[r.locus], 1) if r.locus in _cov else None,
                          "class": cls})
+    # Scalars for the copy: thresholds differ per locus (AFF2 200, ATN1 48, NIPA1 10, ...), so the
+    # panel normalises each bar to its own threshold. Emit the counts so the heading can state the
+    # real tally instead of a fixed "not run" claim.
+    D["n_str_loci"] = len(D["str"])
+    D["n_str_ruled"] = sum(1 for r in D["str"] if r.get("thr"))
+    D["n_str_over"] = sum(1 for r in D["str"] if r.get("thr") and r["max"] >= r["thr"])
+    D["n_str_norule"] = D["n_str_loci"] - D["n_str_ruled"]
 else:
     D["str"] = []
 # --- ROH (bcftools roh output; no step of this repository produces it)

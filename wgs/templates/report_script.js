@@ -249,7 +249,7 @@ reveal('cnv',(s,c)=>{
 /* ── 06 STR panel ── */
 reveal('str',(s,c)=>{
   const rows=D.str.filter(r=>r.thr).sort((a,b)=>b.max/b.thr-a.max/a.thr).slice(0,22), x0=78, x1=372, top=14, rh=13.6, X=v=>x0+(x1-x0)*Math.min(v,1.1)/1.1;
-  el(s,'line',{x1:X(1),y1:top-6,x2:X(1),y2:top+rows.length*rh,stroke:c.ink,'stroke-width':1}); txt(s,{x:X(1),y:top-9,'text-anchor':'middle','font-size':7,'font-weight':700,fill:c.ink},zh()?'已记录阈值':'recorded threshold');
+  el(s,'line',{x1:X(1),y1:top-6,x2:X(1),y2:top+rows.length*rh,stroke:c.ink,'stroke-width':1}); txt(s,{x:X(1),y:top-9,'text-anchor':'middle','font-size':7,'font-weight':700,fill:c.ink},zh()?'自身阈值':'own threshold');
   rows.forEach((r,i)=>{const y=top+i*rh+6, w=X(r.max/r.thr)-x0;
     txt(s,{x:x0-6,y:y+3,'text-anchor':'end','font-size':8,'font-weight':700,fill:c.ink},r.locus);
     el(s,'line',{x1:x0,y1:y,x2:X(1),y2:y,stroke:c.grid,'stroke-width':.5});
@@ -263,7 +263,7 @@ reveal('str',(s,c)=>{
   const worst=ruled.reduce((a,b)=>(!a||b.max/b.thr>a.max/a.thr)?b:a,null);
   const norule=all.filter(r=>!r.thr).length;
   foot(s,c,400,326,zh()
-    ?`条长 = 最长等位基因/已记录阈值${worst?` · 最接近：${worst.locus} ${(worst.max/worst.thr).toFixed(2)}×`:''}${over.length?` · ⚠ ${over.length} 个位点已达阈值`:' · 本样本无位点达阈值'}${norule?` · 另有 ${norule} 个已测位点无本地规则、未纳入本图`:''} · 置信区间见悬停 · ExpansionHunter 5`
+    ?`条长 = 最长等位基因/该位点自身阈值（逐位点不同）${worst?` · 最接近：${worst.locus} ${(worst.max/worst.thr).toFixed(2)}×`:''}${over.length?` · ⚠ ${over.length} 个位点已达阈值`:' · 本样本无位点达阈值'}${norule?` · 另有 ${norule} 个已测位点无本地规则、未纳入本图`:''} · 置信区间见悬停 · ExpansionHunter 5`
     :`bar = longest allele / recorded threshold${worst?` · closest: ${worst.locus} ${(worst.max/worst.thr).toFixed(2)}×`:''}${over.length?` · ⚠ ${over.length} locus/loci at or above threshold`:' · no locus at threshold in this sample'}${norule?` · ${norule} assayed loci have no local rule and are not shown`:''} · confidence intervals on hover · ExpansionHunter 5`);
 });
 
