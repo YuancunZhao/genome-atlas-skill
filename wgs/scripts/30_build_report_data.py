@@ -306,7 +306,10 @@ else:
     D["la_global"] = ({str(g["panel_id"]): float(g["value"]) for g in _gl} if _gl else {})
     D["la_state"], D["la_reason"] = _LA_STATE, _LA_REASON
 _pc = _read_tsv(W/"12_localanc/per_chrom.tsv", dtype={"chrom": str})
-D["la_per_chrom"] = _pc[["chrom", "NorthEA", "SouthEA"]].to_dict("records") if _pc is not None and len(_pc) else []
+# 列名来自配置的两个来源面板；缺失就退化为"只带 chrom"，而不是让整个构建 KeyError
+_PA, _PB = (OPT.get("la_labels") or ["", ""])[0], (OPT.get("la_labels") or ["", ""])[1]
+_pc_cols = ["chrom"] + [c for c in (_PA, _PB) if c and c in getattr(_pc, "columns", [])]
+D["la_per_chrom"] = _pc[_pc_cols].to_dict("records") if _pc is not None and len(_pc) else []
 _sg = _read_tsv(W/"12_localanc/segments.tsv", dtype={"chrom": str})
 if _sg is not None and len(_sg):
     _sg = _sg.copy(); _sg["hap"] = _sg["hap"].astype(str).str.replace("a", "", regex=False).astype(int)  # a1/a2 -> 1/2 for the painting figures

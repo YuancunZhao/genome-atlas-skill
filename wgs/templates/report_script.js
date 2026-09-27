@@ -757,7 +757,8 @@ reveal('timedist',(s,c)=>{
     el(s,'line',{x1:X0,y1:y,x2:X1+30,y2:y,stroke:c.grid,'stroke-width':.5});
     el(s,'line',{x1:X(g.mean_d),y1:y-7,x2:X(g.mean_d),y2:y+7,stroke:c.ink,'stroke-width':1.2});
     g.members.forEach(m=>{
-      const hi=!!(tg&&tg.label===g.label&&String(m.iid).indexOf('BaiyangcunM13')===0);
+      // 高亮的是**数据里那个最近个体**，不是写死的某个 ID：换样本时它自动跟着换。
+      const hi=!!((D.ho_near_individual||[])[0] && String(m.iid)===String(D.ho_near_individual[0].iid) && tg && tg.label===g.label);
       const dot=el(s,'circle',{cx:X(m.d),cy:y,r:hi?4.2:3,fill:hi?c.hero:COL(g),stroke:c.bg,'stroke-width':1.1,class:'pop'});
       tip(dot,`${m.iid} · d=${m.d.toFixed(5)} · call_rate ${m.call_rate} · ${fmt(m.date)} BP`);
       if(hi)txt(s,{x:X(m.d),y:y-10,'text-anchor':'middle','font-size':7.4,'font-weight':800,fill:c.hero,stroke:c.bg,'stroke-width':2.4,'paint-order':'stroke'},
@@ -766,8 +767,8 @@ reveal('timedist',(s,c)=>{
   const ny=sy0+groups.length*24+14;
   [Z?'距离 = HO-PCA 前 4 主成分的欧氏距离，越小越近；现代与古代在同一把尺上。'
       :'distance = Euclidean distance in the first 4 HO-PCA components, smaller = closer; modern and ancient share one scale',
-   Z?'单个体的距离噪声大：BaiyangcunM13 与其群体均值的差距不构成亲缘结论。'
-      :'a single genome is noisy: the gap between BaiyangcunM13 and its group mean is not a kinship result',
+   Z?`单个体的距离噪声大：${((D.ho_near_individual||[])[0]||{}).iid||'该个体'} 与其群体均值的差距不构成亲缘结论。`
+      :`a single genome is noisy: the gap between ${((D.ho_near_individual||[])[0]||{}).iid||'that individual'} and its group mean is not a kinship result`,
    Z?'本图（全局 PCA）与 FLARE 局部祖源（南北面板）是不同尺度，互不替代、也不矛盾。'
       :'this figure (global PCA) and the FLARE local-ancestry panels are different scales: neither replaces nor contradicts the other',
    Z?'区域着色依 panel/aadr_site_regions.tsv（秦岭—淮河分界）；未分类不猜色。'

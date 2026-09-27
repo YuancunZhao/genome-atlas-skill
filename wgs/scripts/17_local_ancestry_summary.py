@@ -63,8 +63,10 @@ if missing:
 frac=tot/tot.sum()
 print("\ngenome-wide ancestry fractions (both haplotypes):")
 for a,f_ in zip(ANC,frac): print(f"  {a:12s} {f_*100:6.2f}%")
-big=sg[(sg.anc=="SouthEA")&(sg.mb>=2)].sort_values("mb",ascending=False)
-print(f"\nSouthEA segments >=2 Mb: {len(big)}; longest {big.mb.max():.1f} Mb" if len(big) else "\nno SouthEA segment >=2 Mb")
+# 第二个来源面板的名字来自配置（la_labels），不是写死的 SouthEA
+_P1=(OPT.get("la_labels") or ["", ""])[1]
+big=sg[(sg.anc==_P1)&(sg.mb>=2)].sort_values("mb",ascending=False)
+print(f"\n{_P1} segments >=2 Mb: {len(big)}; longest {big.mb.max():.1f} Mb" if len(big) else f"\nno {_P1} segment >=2 Mb")
 print(big.head(10).to_string(index=False))
 sw=sg.groupby("anc").agg(n=("mb","size"),mb=("mb","sum"),median_mb=("mb","median"))
 print("\nsegment counts:"); print(sw.round(2).to_string())

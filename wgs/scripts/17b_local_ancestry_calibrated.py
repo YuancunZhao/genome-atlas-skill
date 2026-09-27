@@ -62,7 +62,7 @@ if cal:
     dn=np.average(same[A_COL],weights=same.w); ds=np.average(same[B_COL],weights=same.w)
     print(f"  {NAME_EN} (same chromosomes): {A_COL} {dn*100:.1f}%  {B_COL} {ds*100:.1f}%")
     for pop,n,m,s,ms,ss in out:
-        print(f"    vs {pop}: {NAME_EN} is {(dn-m)/s:+.1f} sd on NorthEA")
+        print(f"    vs {pop}: {NAME_EN} is {(dn-m)/s:+.1f} sd on {A_COL}")
     pd.DataFrame(out,columns=["pop","n","north_mean","north_sd","south_mean","south_sd"]).to_csv(f"{W}/calibration.tsv",sep="\t",index=False)
     # §7/AN6：把校准结果写回结构化结果，报告才能用**真实的**群体、人数与染色体，而不是写死 CHB/CHS
     # 与 1/2/6/22。这里同时记下实际参与汇总的染色体集合。
@@ -82,5 +82,5 @@ if cal:
             print(f"warning: could not attach calibration to local_ancestry.json ({e})", file=sys.stderr)
 pd.Series(gw).to_csv(f"{W}/dayu_global.tsv",sep="\t",header=False)
 dy.to_csv(f"{W}/per_chrom.tsv",sep="\t",index=False)
-print(f"\nper-chromosome SouthEA share ({NAME_EN}):")
-print(dy.sort_values("chrom",key=lambda s:s.astype(int))[["chrom","NorthEA","SouthEA"]].round(3).to_string(index=False))
+print(f"\nper-chromosome {B_COL} share ({NAME_EN}):")
+print(dy.sort_values("chrom",key=lambda s:s.astype(int))[["chrom",A_COL,B_COL]].round(3).to_string(index=False))
