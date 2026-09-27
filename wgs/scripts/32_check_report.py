@@ -135,6 +135,22 @@ def check_html(html_path):
             fail(f"rendered HTML contains '{bad}'")
 
 
+def check_print_and_narrow(html_path):
+    """打印与窄屏（AN6）：交付的是单文件 HTML，读者常直接打印成 PDF。
+
+    深色模式系统下打印若不强制亮底，会印出整页深蓝；过高的图不限制高度会只印出一半。
+    这些都在生成产物里可静态断言，比一次性人工试打更可靠。
+    """
+    text = pathlib.Path(html_path).read_text(encoding="utf-8")
+    for pat, why in ((r"@media\s*print", "a print media query"),
+                     (r"break-inside:\s*avoid", "break-inside avoidance for figures and tables"),
+                     (r"background:\s*#fff\s*!important", "forced light background when printing"),
+                     (r"max-height:\s*\d+mm", "a max height so tall figures fit one page"),
+                     (r"@media\s*\(max-width:560px\)", "a narrow-screen breakpoint")):
+        if not re.search(pat, text):
+            fail(f"report.html is missing {why} (pattern {pat})")
+
+
 def check_shapes(D):
     if "chip_hotspots" in D and "alt_reads" not in D["chip_hotspots"]:
         fail("chip_hotspots.alt_reads missing (F.chipalt depends on it)")
@@ -399,6 +415,7 @@ def main():
         fail(f"{json_path} not found")
     check_html(html_path)
     check_payload_escaping(html_path)
+    check_print_and_narrow(html_path)
     check_naming(root)
     check_runtime(html_path)
 

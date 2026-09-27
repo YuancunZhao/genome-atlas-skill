@@ -94,6 +94,35 @@
   @keyframes fade{from{opacity:0}}
   .draw{stroke-dasharray:1;stroke-dashoffset:1;animation:draw 1s cubic-bezier(.4,0,.2,1) both}
   @keyframes draw{to{stroke-dashoffset:0}}
+  /* 窄屏（手机竖屏）：收紧边距与字号；表格横向滚动而不是撑破版面；两列并排一律改单列 */
+  @media(max-width:560px){
+    .content{padding:18px 14px 44px}
+    .duo,.duo.w{gap:18px}
+    .stats{grid-template-columns:1fr 1fr;gap:8px}
+    .lede{font-size:12.5px;line-height:1.75}
+    .note{font-size:11px;line-height:1.7}
+    table{font-size:10.5px}
+    .fig svg{min-width:0}
+  }
+  /* 打印：一张 A4 一份报告。底色强制回亮色——否则在深色模式系统里打印会印出整页深蓝；
+     图与表不跨页断开；高图缩到一页内；动画、阴影去掉；details 的展开状态按用户当前选择保留。 */
+  @media print{
+    @page{margin:12mm}
+    :root, :root:not([data-theme="light"]){
+      --bg:#FFFFFF; --ink:#081F5C; --muted:rgba(8,31,92,.62); --lab:rgba(8,31,92,.74); --faint:rgba(8,31,92,.40);
+      --quiet:rgba(8,31,92,.16); --grid:rgba(8,31,92,.18); --track:rgba(8,31,92,.10);
+      --halo:rgba(255,255,255,.92);
+    }
+    html,body{background:#fff!important;color:var(--ink)}
+    .sheet{width:auto;max-width:none;display:block}
+    .spine{display:none}
+    .content{padding:0}
+    .fig,.tablewrap,.stats,.tiers,.callout,.finding,.kpi{break-inside:avoid;page-break-inside:avoid}
+    .fig svg{max-height:165mm}          /* 超过一页高度的图会只印出一半，宁可按比例缩小 */
+    .pop,.fade,.draw{animation:none!important;opacity:1!important}
+    *{box-shadow:none!important;text-shadow:none!important}
+    a{color:inherit;text-decoration:none}
+  }
   @media (prefers-reduced-motion:reduce){.pop,.fade{animation:none}.draw{animation:none;stroke-dasharray:none;stroke-dashoffset:0}}
   @media(max-width:820px){.sheet{grid-template-columns:1fr}.spine{display:none}.content{padding-left:0}.duo,.duo.w{grid-template-columns:1fr}.stats{grid-template-columns:1fr 1fr}.stats>div:nth-child(2){border-right:0}}
 </style>
