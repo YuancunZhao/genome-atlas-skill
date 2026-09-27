@@ -348,37 +348,75 @@ if _pa is not None and len(_pa):
     # the figure can put modern and ancient on a single axis and label which is which.
     _reg_tsv = _read_tsv(pathlib.Path(__file__).resolve().parents[1] / "panel" / "aadr_site_regions.tsv",
                          comment="#", keep_default_na=False)
-    # name_zh is only accepted when it actually starts with Han text: a column slip would otherwise
-    # put "north" on the figure as if it were the group's Chinese name.
-    _reg = ({str(r.label): (str(r.region) if str(r.region) in ("north", "south") else "",
-                            str(r.name_zh) if str(r.name_zh or "")[:1] and "\u4e00" <= str(r.name_zh)[0] <= "\u9fff" else "")
-             for r in _reg_tsv.itertuples()} if _reg_tsv is not None and len(_reg_tsv) else {})
-    _good = anc[anc.call_rate >= 0.5]
-    _ag = _good.groupby("label").agg(n=("d", "size"), d=("d", "mean"), date=("date", "mean"))
-    _ancient = _ag[_ag.n >= 2]
-    _modg = mod[mod.kind == "modern"].groupby("label").agg(n=("d", "size"), d=("d", "mean"))
-    _modg = _modg[_modg.n >= 2].nsmallest(10, "d")
-    def _aff(lab, kind, n, d, date_mean):
-        return {"label": str(lab), "kind": kind, "d": round(float(d), 5), "n": int(n),
-                "date_mean": int(date_mean), "region": _reg.get(str(lab), ("", ""))[0],
-                "name_zh": _reg.get(str(lab), ("", ""))[1]}
-    D["ho_affinity"] = sorted(
-        [_aff(k, "ancient", v.n, v.d, round(v.date)) for k, v in _ancient.iterrows()] +
-        [_aff(k, "modern", v.n, v.d, 0) for k, v in _modg.iterrows()], key=lambda r: r["d"])
-    # The strip holds the three closest ancient *groups*; the group of the closest ancient
-    # *individual* is emitted separately, because the caption quotes that genome and its group ranks
-    # far down the list -- without it the quoted genome has nothing to be compared against.
-    def _members(lab, limit=12):
-        return [{"iid": str(r.iid), "d": round(float(r.d), 5), "call_rate": round(float(r.call_rate), 3),
-                 "date": int(round(r.date))} for r in _good[_good.label == lab].nsmallest(limit, "d").itertuples()]
-    _strip_labs = [str(k) for k in _ancient.nsmallest(3, "d").index]
-    D["ho_affinity_strip"] = [dict(_aff(k, "ancient", _ancient.loc[k].n, _ancient.loc[k].d, round(_ancient.loc[k].date)),
-                                   mean_d=round(float(_ancient.loc[k].d), 5), members=_members(k)) for k in _strip_labs]
-    _tg = D["ho_near_individual"][0]["group"] if D["ho_near_individual"] else None
-    D["ho_target_group"] = (dict(_aff(_tg, "ancient", _ancient.loc[_tg].n, _ancient.loc[_tg].d, round(_ancient.loc[_tg].date)),
-                                 mean_d=round(float(_ancient.loc[_tg].d), 5), in_strip=_tg in _strip_labs,
-                                 members=_members(_tg))
-                            if _tg is not None and _tg in _ancient.index else None)
+    # --- the affinity ranking is read from 09b's structured result (AN2). Step 30 assembles; it does
+    # not re-group, re-threshold or recompute distances, because a second implementation is exactly how
+    # the report and the summary drift apart. `region` and the Chinese name are the one hand-curated
+    # layer and come from panel/ancestry_locations.tsv.
+    _sum = None
+    _sumf = W/"11_aadr/summary.json"
+    if _sumf.exists():
+        try:
+            _sum = json.loads(_sumf.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            _sum = None
+    _loc = _read_tsv(pathlib.Path(__file__).resolve().parents[1]/"panel"/"ancestry_locations.tsv",
+                     comment="#", keep_default_na=False)
+    _region, _zhname = {}, {}
+    if _loc is not None and len(_loc):
+        for r in _loc.itertuples():
+            sid = str(getattr(r, "source_id", ""))
+            note = str(getattr(r, "note", "") or "")
+            m = re.search(r"region=(north|south|unclassified)", note)
+            _region[sid] = m.group(1) if (m and m.group(1) in ("north", "south")) else ""
+            _zhname[sid] = str(getattr(r, "label_zh", "") or "")
+    if _sum and (_sum.get("groups") or {}).get("ancient"):
+        _recs = {str(r.get("record_id")): r for r in (_sum.get("records") or [])}
+        _by_group = {}
+        for _kind in ("ancient", "modern"):
+            for g in _sum["groups"][_kind]:
+                _by_group[str(g["group_id"])] = g
+        def _date_of(g):
+            ds = [(_recs.get(str(m)) or {}).get("date_mean_bp") for m in g["member_ids"]]
+            ds = [d for d in ds if isinstance(d, (int, float))]
+            return int(round(sum(ds) / len(ds))) if ds else 0
+        def _aff(g, kind):
+            lab = str(g["label"])
+            return {"label": lab, "kind": kind, "d": round(float(g["distance_mean"]), 5), "n": int(g["n"]),
+                    "date_mean": _date_of(g), "region": _region.get(lab, ""), "name_zh": _zhname.get(lab, "")}
+        # Default rankings exclude small groups (7.3): they stay available in the detail tables, but a
+        # group of one is not a population-level nearest neighbour and would otherwise outrank the real
+        # ones merely because a single genome happens to be close.
+        _ranked_anc = [g for g in _sum["groups"]["ancient"] if not g.get("small_group")]
+        _ranked_mod = [g for g in _sum["groups"]["modern"] if not g.get("small_group")]
+        D["ho_affinity"] = sorted(
+            [_aff(g, "ancient") for g in _ranked_anc] +
+            [_aff(g, "modern") for g in _ranked_mod[:10]], key=lambda r: r["d"])
+        def _members(gid, limit=12):
+            g = _by_group.get(str(gid))
+            if not g:
+                return []
+            out = []
+            for mid in g["member_ids"][:limit]:
+                r = _recs.get(str(mid))
+                if not r:
+                    continue
+                out.append({"iid": str(mid), "d": round(float(r.get("distance_to_target") or 0), 5),
+                            "call_rate": round(float(r.get("call_rate") or 0), 3),
+                            "date": int(r.get("date_mean_bp") or 0)})
+            return sorted(out, key=lambda x: x["d"])
+        _strip = [g for g in _ranked_anc if g.get("rank")][:3]
+        D["ho_affinity_strip"] = [dict(_aff(g, "ancient"), mean_d=round(float(g["distance_mean"]), 5),
+                                       members=_members(g["group_id"])) for g in _strip]
+        # The closest ancient genome's own group is emitted separately: the caption quotes that genome
+        # and its group can rank far down the list, so it would otherwise have nothing to compare with.
+        _tg = D["ho_near_individual"][0]["group"] if D["ho_near_individual"] else None
+        _tgg = _by_group.get(str(_tg)) if _tg else None
+        D["ho_target_group"] = (dict(_aff(_tgg, "ancient"), mean_d=round(float(_tgg["distance_mean"]), 5),
+                                     in_strip=any(g["group_id"] == _tgg["group_id"] for g in _strip),
+                                     members=_members(_tgg["group_id"]))
+                                if _tgg is not None else None)
+    else:
+        D["ho_affinity"] = []; D["ho_affinity_strip"] = []; D["ho_target_group"] = None
     # The template indexes ho_modern rows positionally (p[0]/p[1]/p[2]) -- arrays, not dicts.
     D["ho_modern"] = [[r.label, r.PC1_AVG, r.PC2_AVG] for r in mod.itertuples()]
     _me = _pa[_pa.kind == "target"] if "target" in set(_pa.kind) else _pa.tail(1)
