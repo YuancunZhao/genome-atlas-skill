@@ -391,22 +391,33 @@ reveal('hopca',(s,c)=>{
   pts.forEach(p=>{el(s,'circle',{cx:X(p[1]).toFixed(1),cy:Y(p[2]).toFixed(1),r:2,fill:COL[p[0]]||c.fd,opacity:COL[p[0]]?.6:.34})});
   anc.forEach(p=>{const d=el(s,'rect',{x:X(p.pc1)-2.4,y:Y(p.pc2)-2.4,width:4.8,height:4.8,fill:'none',stroke:c.ink,'stroke-width':1,opacity:.75});
     tip(d,`${p.label} · ${fmt(p.date)} BP`)});
-  // Spread the province labels around their points -- they used to share one offset and piled up on
-  // top of each other -- and keep the leader line that already ties each label to its sample.
-  const _LOFF=[[-52,-32],[52,-28],[-62,-4],[62,6],[-48,28],[48,32]];
-  const SHOW=Object.fromEntries((D.ho_prov||[]).map((p,i)=>[p.label,_LOFF[i%_LOFF.length]]));
-  D.ho_prov.forEach(p=>{const off=SHOW[p.label]; if(!off) return;
-    const lab=zh()?({Shandong:'山东',Henan:'河南',Fujian:'福建',Guangdong:'广东',Sichuan:'四川'}[p.label]):p.label;
-    const px=X(p.pc1),py=Y(p.pc2);
-    el(s,'circle',{cx:px,cy:py,r:2.6,fill:'none',stroke:c.ink,'stroke-width':1.2});
-    el(s,'line',{x1:px,y1:py,x2:px+off[0],y2:py+off[1],stroke:c.faint,'stroke-width':.7});
-    txt(s,{x:px+off[0]+(off[0]>=0?3:-3),y:py+off[1]+3,'text-anchor':off[0]>=0?'start':'end','font-size':9,'font-weight':700,fill:c.ink,stroke:c.bg,'stroke-width':2.6,'paint-order':'stroke'},lab)});
+  // D.ho_prov carries one row per sample, so labelling every row drew 67 labels and 67 leader lines on
+  // top of each other. Group by province instead, the way a clustering figure does it: one colour per
+  // province, one label at the group centroid, and a colour key in the corner.
+  const PROV_ZH={Shandong:'山东',Henan:'河南',Fujian:'福建',Guangdong:'广东',Sichuan:'四川',
+                 Hubei:'湖北',Jiangsu:'江苏',Shanxi:'陕西',Zhejiang:'浙江',Shanghai:'上海',Chongqing:'重庆'};
+  const PROV_C={Shandong:'#2f6fb0',Henan:'#c0504d',Fujian:'#4f9d69',Guangdong:'#8e6bbf',
+                Sichuan:'#d08c2a',Hubei:'#3aa6a6',Jiangsu:'#b0558e',Shanxi:'#7f8f2a',
+                Zhejiang:'#c76f9c',Shanghai:'#7a8b99',Chongqing:'#a0522d'};
+  const _pg={}; (D.ho_prov||[]).forEach(p=>{(_pg[p.label]=_pg[p.label]||[]).push(p)});
+  const _pcs=Object.entries(_pg).map(([k,arr])=>({label:k,n:arr.length,
+      x:arr.reduce((s,p)=>s+p.pc1,0)/arr.length, y:arr.reduce((s,p)=>s+p.pc2,0)/arr.length}))
+    .sort((p,q)=>q.n-p.n);
+  _pcs.forEach(p=>{const col=PROV_C[p.label]||c.ink, px=X(p.x), py=Y(p.y);
+    el(s,'circle',{cx:px,cy:py,r:3.2,fill:col,stroke:c.bg,'stroke-width':1.3,class:'pop'});
+    txt(s,{x:px,y:py-9,'text-anchor':'middle','font-size':9,'font-weight':700,fill:col,stroke:c.bg,'stroke-width':2.6,'paint-order':'stroke'},
+        zh()?(PROV_ZH[p.label]||p.label):p.label);
+    txt(s,{x:px,y:py+14,'text-anchor':'middle','font-size':6.5,'font-weight':600,fill:c.muted,stroke:c.bg,'stroke-width':2.2,'paint-order':'stroke'},'n='+p.n)});
+  {let kx=x0+8, ky=y0+8;
+   _pcs.slice(0,6).forEach((p,i)=>{const col=PROV_C[p.label]||c.ink;
+     el(s,'rect',{x:kx,y:ky+i*11,width:7,height:7,rx:1.5,fill:col});
+     txt(s,{x:kx+11,y:ky+i*11+6.5,'font-size':7.5,'font-weight':600,fill:c.muted},zh()?(PROV_ZH[p.label]||p.label):p.label)});}
   const mx=X(me[0]),my=Y(me[1]);
   el(s,'polygon',{points:`${mx},${my-7.8} ${mx+7.8},${my} ${mx},${my+7.8} ${mx-7.8},${my}`,fill:c.hero,stroke:c.bg,'stroke-width':1.5,class:'pop'});
   txt(s,{x:mx+11,y:my+4,'font-size':10,'font-weight':800,fill:c.ink,stroke:c.bg,'stroke-width':3,'paint-order':'stroke'},NAME());
   txt(s,{x:x0+W/2,y:y0+H+22,'text-anchor':'middle','font-size':8,'font-weight':700,fill:c.muted,'letter-spacing':'.1em'},'PC1');
   txt(s,{x:x0-30,y:y0+H/2,'text-anchor':'middle','font-size':8,'font-weight':700,fill:c.muted,'letter-spacing':'.1em',transform:`rotate(-90 ${x0-30} ${y0+H/2})`},'PC2');
-  foot(s,c,520,462,zh()?'空心方块 = 古代个体（投影）· 圆点 = 现代个体 · 菱形 = '+NAME():'open squares = ancient (projected) · dots = present-day · diamond = '+NAME());
+  foot(s,c,520,462,zh()?'空心方块 = 古代个体（投影）· 圆点 = 现代个体 · 彩色圆 = 汉族样本按省份聚合（色块见左上）· 菱形 = '+NAME():'open squares = ancient (projected) · dots = present-day · coloured circles = Han samples grouped by province (key at top left) · diamond = '+NAME());
 });
 
 /* ── distance vs time ── */
@@ -423,7 +434,7 @@ reveal('timedist',(s,c)=>{
   const xs=rows.map(r=>r.date), ys=rows.map(r=>r.d);
   const mx=xs.reduce((p,q)=>p+q,0)/xs.length, my=ys.reduce((p,q)=>p+q,0)/ys.length;
   const b1=xs.reduce((p,x,i)=>p+(x-mx)*(ys[i]-my),0)/xs.reduce((p,x)=>p+(x-mx)**2,0), b0=my-b1*mx;
-  el(s,'line',{x1:X(500),y1:Y(b0+b1*500),x2:X(7200),y2:Y(b0+b1*7200),stroke:c.faint,'stroke-width':1.2,'stroke-dasharray':'4 4'});
+  // 拟合线改到 r 算出来之后再画（见下）：|r| 太小时不该给出"趋势"的视觉暗示
   rows.forEach(r=>{const d=el(s,'circle',{cx:X(r.date),cy:Y(r.d),r:3.6+Math.sqrt(r.n),fill:a.n,opacity:.78,stroke:c.bg,'stroke-width':1.2,class:'pop'});
     tip(d,`${r.label} · n=${r.n} · ${fmt(Math.round(r.date))} BP · d=${r.d.toFixed(4)}`)});
   const near=rows[0];
@@ -433,16 +444,19 @@ reveal('timedist',(s,c)=>{
         _sxx=xs.reduce((a,x)=>a+x*x,0), _syy=ys.reduce((a,y)=>a+y*y,0), _sxy=xs.reduce((a,x,i)=>a+x*ys[i],0);
   const _rr=(_n*_sxy-_sx*_sy)/Math.sqrt((_n*_sxx-_sx*_sx)*(_n*_syy-_sy*_sy));
   const _dmed=[...ys].sort((a,b)=>a-b)[Math.floor(_n/2)];
+  // The fit is drawn only when it means something. At |r| < 0.3 a dashed regression line implies a
+  // trend the data does not support -- this sample sits at r = 0.09, where the line was pure noise.
+  if(Math.abs(_rr)>=0.3) el(s,'line',{x1:X(500),y1:Y(b0+b1*500),x2:X(7200),y2:Y(b0+b1*7200),stroke:c.faint,'stroke-width':1.2,'stroke-dasharray':'4 4'});
   el(s,'line',{x1:x0,y1:Y(_dmed),x2:x0+W,y2:Y(_dmed),stroke:c.grid,'stroke-width':.9,'stroke-dasharray':'2 3'});
   txt(s,{x:x0+W-2,y:Y(_dmed)-4,'text-anchor':'end','font-size':7.5,'font-weight':600,fill:c.faint},(zh()?'距离中位 ':'median ')+_dmed.toFixed(3));
   txt(s,{x:x0+2,y:y0+11,'font-size':8.5,'font-weight':700,fill:c.ink,stroke:c.bg,'stroke-width':2.6,'paint-order':'stroke'},
       zh()?`${_n} 个古代人群 · 与年代相关 r=${_rr.toFixed(2)}（${Math.abs(_rr)<0.3?'几乎无趋势':'趋势明显'}）`
          :`${_n} ancient groups · r=${_rr.toFixed(2)} vs date (${Math.abs(_rr)<0.3?'no real trend':'clear trend'})`);
   txt(s,{x:X(near.date)+10,y:Y(near.d)+3,'font-size':9,'font-weight':700,fill:c.ink,stroke:c.bg,'stroke-width':2.6,'paint-order':'stroke'},
-      (zh()?'河南 焦作 · 最近 d=':'Henan Jiaozuo · nearest d=')+near.d.toFixed(4));
+      (ANC_ZH[near.label]||near.label.replace(/_/g,' ')) + (zh()?' · 最近 d=':' · nearest d=') + near.d.toFixed(4));
   txt(s,{x:x0+W/2,y:y0+H+34,'text-anchor':'middle','font-size':8,'font-weight':700,fill:c.muted,'letter-spacing':'.08em'},zh()?'年代（距今年数）':'YEARS BEFORE PRESENT');
   txt(s,{x:x0-38,y:y0+H/2,'text-anchor':'middle','font-size':8,'font-weight':700,fill:c.muted,'letter-spacing':'.08em',transform:`rotate(-90 ${x0-38} ${y0+H/2})`},zh()?'到样本的距离':'DISTANCE TO SAMPLE');
-  foot(s,c,420,462,zh()?'圆越大样本越多 · 虚线为线性趋势 · 点线 = 距离中位数 · r = 与年代的相关 · 越靠左越古老':'bigger circle = more individuals · dashed = linear trend · dotted = median distance · r = correlation with date · older to the left');
+  foot(s,c,420,462,zh()?'圆越大样本越多 · 点线 = 距离中位数 · r = 与年代的相关 · 越靠左越古老 · |r|<0.3 时不画拟合线':'bigger circle = more individuals · dotted = median distance · r = correlation with date · older to the left · no fit drawn when |r|<0.3');
 });
 
 /* ── archaic ideogram ── */
