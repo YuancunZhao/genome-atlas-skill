@@ -109,7 +109,10 @@ THREADS = str(_g("threads", 8))
 MEM_GB = str(_g("mem_gb", 30))
 
 # ---- analysis parameters
-BUILD = str(_g("build", "GRCh37"))                        # only GRCh37 is supported for now
+import ancestry_data as _ad  # normalize_build: 唯一的 build 校验点
+BUILD = _ad.normalize_build(_g("build", "GRCh37"))
+# 校验只有一处（ancestry_data.normalize_build）：注释里说"只支持 GRCh37"而代码不校验，等于没限制 ——
+# `build: GRCh38` 会被静默接受，而 FASTA/chain/1000G/AADR/注释全是 GRCh37，位点按错误坐标系解释。
 MIN_DP = int(_g("callable_min_depth", 8))                 # callable mask: minimum depth
 MIN_MQ = int(_g("callable_min_mapq", 20))                 # callable mask: minimum mapping quality
 MIN_BQ = int(_g("min_base_quality", 20))                  # read depth/allele counting: minimum BASE quality
@@ -133,7 +136,6 @@ AADR_ANCIENT_PREFIX = list(CFG.get("aadr_ancient_prefix", []))    # ancient AADR
 # PRS and every existing consumer behave exactly as before.
 import sys as _sys
 _sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-import ancestry_data as _ad
 OPT = _ad.read_options(CFG)
 REGIONAL_ENABLED = OPT["regional_enabled"]
 AADR_ENABLED = OPT["aadr_enabled"]

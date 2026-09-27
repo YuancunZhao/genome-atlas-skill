@@ -24,7 +24,25 @@ from gt_alleles import gt_alleles  # noqa: E402  复用它，不另写一个 GT 
 SCHEMA_VERSION = 1
 STATES = ("ok", "disabled", "unavailable", "failed")
 REQUIRED_MANIFEST_KEYS = ("sample_id",)
+# 只支持 GRCh37。别名（hg19 / b37 / GRCh37.p13）归一化到规范名，避免"同一个 build 两种写法"
+# 在配置校验与下游取参考时给出不同结论。新增 build 必须同时具备 FASTA/chain/1000G/AADR/注释，
+# 否则位点会按错误的坐标系解释而没有任何一步失败。
 SUPPORTED_BUILDS = ("GRCh37",)
+BUILD_ALIASES = {"GRCh37": "GRCh37", "grch37": "GRCh37", "hg19": "GRCh37", "b37": "GRCh37",
+                 "GRCh37.p13": "GRCh37"}
+
+
+def normalize_build(value, default="GRCh37"):
+    """把配置里的 build 写法归一化；不支持的取值抛出 ValueError（列出可接受的写法）。"""
+    raw = (value if isinstance(value, str) else "") or default
+    key = raw.strip()
+    if key not in BUILD_ALIASES:
+        raise ValueError(
+            f"unsupported reference build {raw!r}: this pipeline's FASTA, chain files, 1000G panel, "
+            f"AADR set and annotation GFF are GRCh37, so another build would be read in the wrong "
+            f"coordinate system without any step failing. Accepted: GRCh37 (aliases "
+            f"{sorted(set(BUILD_ALIASES) - {'GRCh37'})}).")
+    return BUILD_ALIASES[key]
 
 _LIST_KEYS = (
     "ref_subpops", "axis_pops", "local_ancestry_a", "local_ancestry_b", "local_ancestry_control",
@@ -147,11 +165,7 @@ def read_options(cfg):
     if not isinstance(cfg, dict):
         raise ValueError(f"configuration must be a mapping, got {type(cfg).__name__}")
 
-    build = _str(cfg, "build", "GRCh37") or "GRCh37"
-    if build not in SUPPORTED_BUILDS:
-        raise ValueError(
-            f"build {build!r} is not supported (this pipeline is GRCh37 only); refusing before any work"
-        )
+    build = normalize_build(_str(cfg, "build", "GRCh37"))
 
     regional = _str(cfg, "ref_superpop", "")
     subpops = _as_list(cfg, "ref_subpops", [])
