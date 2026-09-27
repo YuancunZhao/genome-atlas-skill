@@ -31,6 +31,10 @@ F.yterm=D.y_terminal; F.yformed=fmt(D.ypath[D.ypath.length-1].formed); F.mthg=D.
 const renderAll=()=>{try{document.documentElement.setAttribute('lang',LANG==='zh'?'zh-Hans':'en');
   {const _bs=document.getElementById('bootstate');if(_bs)_bs.textContent='rendering…';}
   document.querySelectorAll('[data-i18n]').forEach(e=>{e.innerHTML=t(e.getAttribute('data-i18n'))});
+  // The PCA legend had a literal `${NAME()}` in the static template -- JavaScript syntax that nothing
+  // substitutes, so it reached the page as text. Fill it here with the other runtime strings, which
+  // also makes it follow the language toggle.
+  {const _lm=document.getElementById('lbl_me');if(_lm)_lm.textContent=NAME();}
   document.getElementById('langbtn').textContent=t('toggle');
   document.title = TITLE();
   window.__renderErrors=[];
