@@ -70,6 +70,26 @@ def check_shapes(D):
         fail("roh_stats.n_gt5 > 0 without any roh rows")
 
 
+def check_sections(D):
+    """H1: every section carries a status; 'unavailable' must explain itself bilingually."""
+    secs = D.get("sections")
+    if not isinstance(secs, list) or not secs:
+        fail("sections status table missing from report data")
+        return
+    ids = [s.get("id") for s in secs]
+    dup = {i for i in ids if ids.count(i) > 1}
+    if dup:
+        fail(f"duplicate section ids: {sorted(dup)}")
+    for s in secs:
+        st = s.get("status")
+        if st not in ("ok", "negative", "unavailable"):
+            fail(f"section {s.get('id')}: bad status {st!r}")
+        if st == "unavailable" and not (s.get("code") and s.get("reason_zh") and s.get("reason_en")):
+            fail(f"section {s.get('id')}: unavailable without a code and bilingual reason")
+        if st == "negative" and not s.get("evidence"):
+            fail(f"section {s.get('id')}: negative without an evidence path")
+
+
 def check_naming(root):
     """Main chromosomes must use the reference naming (1..22,X,Y,MT); a chr-prefixed main
     contig silently breaks region queries everywhere downstream. Decoy/unplaced names in
@@ -109,6 +129,7 @@ def main():
         D = json.load(open(json_path))
         check_keys(root, D)
         check_shapes(D)
+        check_sections(D)
     else:
         fail(f"{json_path} not found")
     check_html(html_path)

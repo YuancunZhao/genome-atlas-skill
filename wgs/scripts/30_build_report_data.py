@@ -261,6 +261,53 @@ D["ho_near_ancient"] = _na.to_dict("records") if _na is not None and len(_na) el
 _pr = D.get("prs") or []
 _cov = [r.get("coverage_pct") for r in _pr if isinstance(r.get("coverage_pct"), (int, float)) and r["coverage_pct"] >= 0]
 D["prs_rho"] = {"subset": f"{min(_cov):.0f}–{max(_cov):.0f}%" if _cov else "-", "imputed": "-"}
+# --- section status table (H1). The arrays and objects above stay type-stable; this table records,
+# per section, whether it is ok, a genuine negative, or unavailable -- with a machine-readable
+# reason code and a bilingual reason, so a report can say why instead of showing an empty box.
+# "unavailable" is never a negative result, and it is never used for sections that have no
+# positive/negative meaning in the first place (QC, ancestry) beyond stating the missing input.
+_SEC = []
+def _sec(sid, status, code=None, zh=None, en=None, ev=None, detail=None):
+    _SEC.append({"id": sid, "status": status, "code": code, "reason_zh": zh, "reason_en": en,
+                 "evidence": ev, "detail": detail})
+def _has(key):
+    v = D.get(key)
+    return bool(v) if isinstance(v, (list, dict)) else v is not None
+def _need(sid, ok, code, zh, en, ev, detail=None):
+    _sec(sid, "ok" if ok else "unavailable", None if ok else code, None if ok else zh,
+         None if ok else en, ev, detail)
+_MISS_IN   = ("no_input",       "交付不含该模块所需输入",        "this section's input was not part of the delivery")
+_MISS_OUT  = ("missing_output", "生产者已运行但没有留下输出",    "the producing step ran but left no output")
+_MISS_STEP = ("step_not_run",   "本流程没有产出该模块的步骤",    "no step of this pipeline produces this section")
+
+_need("chip", _has("chip") and D["chip"].get("compared", 0) > 0, *_MISS_IN, ev="01_qc/chip_vs_wgs_summary.tsv")
+_need("pgx_pharmcat", _has("pgx_pharmcat"), *_MISS_STEP, ev="06_pgx/pharmcat/pharmcat_summary.tsv", detail=len(D.get("pgx_pharmcat") or []))
+_need("cyp2d6", D.get("cyp2d6") not in (None, "-"), *_MISS_STEP, ev="06_pgx/cyrius/target.tsv", detail=D.get("cyp2d6"))
+_need("hla", _has("hla"), *_MISS_STEP, ev="06_pgx/t1k/dayu_genotype.tsv", detail=len(D.get("hla") or {}))
+_need("kir", _has("kir"), *_MISS_STEP, ev="16_panels/kir.tsv", detail=len(D.get("kir") or []))
+_need("sv", D.get("sv_total", 0) > 0, *_MISS_STEP, ev="08_sv/sv_filtered.tsv", detail=D.get("sv_total"))
+_need("smn", (D.get("smn") or {}).get("SMN1") is not None, *_MISS_OUT, ev="08_sv/smn/target.tsv", detail=D.get("smn"))
+_need("str", _has("str"), *_MISS_OUT, ev="08_sv/eh/eh_summary.tsv", detail=len(D.get("str") or []))
+_need("roh", _has("roh"), *_MISS_OUT, ev="09_misc/roh_1mb_nocen.bed", detail=D.get("roh_stats"))
+_need("chip_hotspots", _has("chip_hotspots") and D["chip_hotspots"].get("median_depth", 0) > 0, *_MISS_OUT, ev="13_somatic/chip_hotspots.tsv", detail=D.get("chip_hotspots"))
+_need("somatic", _has("somatic"), *_MISS_OUT, ev="13_somatic/summary.tsv", detail=D.get("somatic"))
+_need("telomere", _has("telomere") and D["telomere"].get("k7", 0) >= 100000,
+      "insufficient_reads", "端粒重复读段太少，无法估计长度", "too few telomeric repeat reads to estimate a length",
+      ev="14_telomere/counts.tsv", detail=(D.get("telomere") or {}).get("k7"))
+_need("phase", _has("phase"), *_MISS_OUT, ev="10_phase/summary.txt", detail=D.get("phase"))
+_need("spectrum", _has("spectrum"), *_MISS_OUT, ev="17_mutspec/spectrum96.tsv", detail=len(D.get("spectrum") or []))
+_need("density", _has("density"), *_MISS_OUT, ev="00_input/target.pass.vcf.gz")
+_need("prs", _has("prs"), *_MISS_OUT, ev="07_prs/prs_wgs.tsv", detail=len(D.get("prs") or []))
+_need("behaviour", _has("behaviour"), *_MISS_OUT, ev="20_behaviour/", detail=len(D.get("behaviour") or []))
+_need("candidate", _has("candidate"), *_MISS_OUT, ev="20_behaviour/candidate_genes.tsv", detail=len(D.get("candidate") or []))
+_need("ancestry", _has("pca_global") and _has("near_global"), *_MISS_OUT, ev="04_ancestry/")
+_need("local_ancestry", _has("la_segments") or _has("la_global"), *_MISS_OUT, ev="12_localanc/segments.tsv")
+_need("archaic", _has("archaic"), *_MISS_OUT, ev="15_archaic/segments_all.tsv")
+_need("aadr", _has("ho_modern"), *_MISS_OUT, ev="11_aadr/proj_annotated.tsv")
+_need("clinvar", D.get("clinvar_total", 0) > 0, *_MISS_OUT, ev="05_clinvar/clinvar_all_hits.tsv", detail=D.get("clinvar_total"))
+_need("lof", _has("lof"), *_MISS_OUT, ev="05_clinvar/lof_table.tsv", detail=D.get("lof"))
+D["sections"] = _SEC
+# --- end section status table
 D["name_zh"] = NAME_ZH; D["name_en"] = NAME_EN; D["sample"] = SAMPLE
 D["title_zh"] = NAME_ZH; D["title_en"] = NAME_EN
 json.dump(D, open(W/"report_data.json", "w"), ensure_ascii=False)
