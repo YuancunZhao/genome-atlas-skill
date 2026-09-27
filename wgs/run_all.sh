@@ -12,6 +12,9 @@ step(){ echo -e "\n=== $* ==="; }
 skipped(){ echo -e "\n=== skip $1: $2 ==="; python3 $S/ancestry_data.py --disabled "$1" \
   --out "$PROJ/wgs/$3/manifest.json" --sample "$SAMPLE" --reason "$2"; }
 
+# 运行事实（H6）：第一步之前记录 run id / 代码修订 / 有效参数 / 工具与参考版本。
+# 事后回答不了「那次用的哪棵树、哪个参考、有没有未提交改动」是最常见的复现障碍。
+python3 $S/_run_info.py || echo "warning: could not write run_info.json (continuing)"
 step 00 prepare inputs and QC;                            bash  $S/00_qc.sh
 step 01 normalise the VCF and build the callable mask;         bash  $S/01_normalize.sh
 step 02 re-call X with the right ploidy and pile up MT;        bash  $S/02_recall_x_mt.sh
