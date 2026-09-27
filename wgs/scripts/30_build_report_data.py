@@ -50,7 +50,9 @@ D["ypath"] = ypath; D["y_terminal"] = ypath[-1]["snp"]
 # but "no hg19-mapped site / low coverage" when both are zero, and the figure must not conflate them.
 ysn = pd.read_csv(W/"03_haplo/y_terminal_snps.tsv", sep="\t"); D["y_snps"] = ysn[["branch", "snp", "depth", "n_der", "n_anc", "state"]].to_dict("records")
 # --- mt
-hg = pd.read_csv(W/"03_haplo/haplogrep3.txt", sep="\t")
+# keep_default_na=False: an empty Found_Polys cell used to become NaN, and str(NaN) is the *string*
+# "nan", which then surfaced in the report as one "defining site hit" for the haplogroup.
+hg = pd.read_csv(W/"03_haplo/haplogrep3.txt", sep="\t", keep_default_na=False)
 row = hg.iloc[0]; found = str(row["Found_Polys"]).split(); rem = [x.split(" ")[0] for x in str(row["Remaining_Polys"]).split(") ")]
 rem = re.findall(r"(\d+(?:\.\d+)?[ACGTd])", str(row["Remaining_Polys"]))
 D["mt"] = {"hg": row["Haplogroup"], "quality": float(row["Quality"]), "found": found, "private": rem, "notfound": str(row["Not_Found_Polys"]).split()}

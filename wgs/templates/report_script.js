@@ -67,11 +67,11 @@ reveal('chromdepth',(s,c)=>{
     txt(s,{x:x0+bw+5,y:y+3,'font-size':8,'font-weight':800,fill:c.ink},r.depth+'×');
     const px=x0+W1+120, ratio=r.len>0?r.n_pass/r.len*1e6:0, bw2=W2*Math.min(ratio,maxr)/maxr;
     el(s,'line',{x1:px,y1:y,x2:px+W2,y2:y,stroke:c.grid,'stroke-width':.6});
-    const b2=el(s,'rect',{x:px,y:y-3.6,width:r.chrom==='MT'?0:bw2,height:7.2,rx:1.5,fill:sex?c.data2:c.data,class:'fade',style:`animation-delay:${.2+i*.03}s`}); tip(b2,`chr${r.chrom}: ${fmt(r.n_pass)} PASS variants`);
-    txt(s,{x:px+(r.chrom==='MT'?0:bw2)+5,y:y+3,'font-size':7.5,'font-weight':800,fill:c.muted},r.chrom==='MT'?fmt(r.n_pass)+(zh()?' 个':''):fmt(r.n_pass));
+    const b2=el(s,'rect',{x:px,y:y-3.6,width:r.chrom==='MT'?0:bw2,height:7.2,rx:1.5,fill:sex?c.data2:c.data,class:'fade',style:`animation-delay:${.2+i*.03}s`}); tip(b2, r.chrom==='MT' ? (zh()?'chrMT：PASS 调用集不含 MT，变异见母系分析':'chrMT: the PASS call set has no MT records; see the MT panel') : `chr${r.chrom}: ${fmt(r.n_pass)} PASS variants`);
+    txt(s,{x:px+(r.chrom==='MT'?0:bw2)+5,y:y+3,'font-size':7.5,'font-weight':800,fill:c.muted},r.chrom==='MT'?(zh()?'见母系分析':'see MT panel'):fmt(r.n_pass));
   });
   [0,10,20,30,40].forEach(v=>{const x=x0+W1*v/40,yb=top+rows.length*rh+8;el(s,'line',{x1:x,y1:yb,x2:x,y2:yb+4,stroke:c.faint,'stroke-width':.8});txt(s,{x,y:yb+13,'text-anchor':'middle','font-size':7,fill:c.faint},v+'×')});
-  foot(s,c,900,348,zh()?`X 约为常染色体一半、Y 更低：男性 · 线粒体 ${fmt((D.chrom.find(r=>r.chrom==='MT')||{}).depth||0)}× 超出刻度`:`X about half of autosomes, Y lower: male · mitochondria ${fmt((D.chrom.find(r=>r.chrom==='MT')||{}).depth||0)}× off scale`);
+  foot(s,c,900,348,zh()?`X 约为常染色体一半、Y 更低：男性 · 线粒体 ${fmt((D.chrom.find(r=>r.chrom==='MT')||{}).depth||0)}× 超出刻度 · MT 的变异由独立 pileup 分析给出（PASS 调用集不含 MT，故此处不计）`:`X about half of autosomes, Y lower: male · mitochondria ${fmt((D.chrom.find(r=>r.chrom==='MT')||{}).depth||0)}× off scale · MT variants come from a separate pileup analysis (the PASS call set has no MT records, so none are counted here)`);
 });
 
 
@@ -135,7 +135,10 @@ reveal('mtstrip',(s,c)=>{
   });
   const _h0=(D.mt_het||[])[0]; if(_h0){const hx=x0+(x1-x0)*_h0.pos/L; el(s,'path',{d:`M${hx-5} ${y+34} L${hx} ${y+27} L${hx+5} ${y+34} Z`,fill:c.hero}); txt(s,{x:hx,y:y+45,'text-anchor':'middle','font-size':7,'font-weight':700,fill:c.ink},`${_h0.pos}${_h0.alt||''} ${(_h0.af*100).toFixed(0)}%`)}
   txt(s,{x:x0,y:y+80,'font-size':22,'font-weight':700,fill:c.ink,...NUM},D.mt.hg);
-  txt(s,{x:x0+80,y:y+80,'font-size':10,'font-weight':600,fill:c.muted},'PhyloTree '+D.versions.phylotree+' · '+D.mt.found.length+(zh()?' 个定义位点命中 · 质量 ':' defining sites · quality ')+D.mt.quality);
+  const _mtF=D.mt.found.length;
+  const _mtTag = _mtF ? (zh()?`${_mtF} 个定义位点命中`:`${_mtF} defining sites`)
+                      : (zh()?'HSD 内无变异：PASS VCF 不含 MT 调用，单倍群仅据 pileup 覆盖判断':`no variants in the HSD: the PASS VCF has no MT calls, so the call rests on pileup coverage alone`);
+  txt(s,{x:x0+80,y:y+80,'font-size':10,'font-weight':600,fill:c.muted},'PhyloTree '+D.versions.phylotree+' · '+_mtTag+(zh()?' · 质量 ':' · quality ')+D.mt.quality);
   const _hetTxt=(D.mt_het||[]).map(h=>`m.${h.pos}${h.alt||''} ${(h.af*100).toFixed(0)}%`).join('、');
   const _hetNote=(D.mt_het||[]).length && (D.mt_het||[]).every(h=>[310,3107].includes(h.pos));
   const lines=zh()?['未命中的支系定义位点：'+D.mt.notfound.join('、'),'私有变异（'+D.mt.private.length+'）：'+D.mt.private.join(' '),'异质性：'+(_hetTxt||'未检出')+(_hetNote?'（310/3107 是已知参考序列伪影位点）':'')]:
