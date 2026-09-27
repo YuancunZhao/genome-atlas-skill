@@ -127,6 +127,7 @@ def check_sections(D):
     dup = {i for i in ids if ids.count(i) > 1}
     if dup:
         fail(f"duplicate section ids: {sorted(dup)}")
+    known_codes = {"no_input", "missing_output", "step_not_run", "insufficient_reads"}
     for s in secs:
         st = s.get("status")
         if st not in ("ok", "negative", "unavailable"):
@@ -135,6 +136,10 @@ def check_sections(D):
             fail(f"section {s.get('id')}: unavailable without a code and bilingual reason")
         if st == "negative" and not s.get("evidence"):
             fail(f"section {s.get('id')}: negative without an evidence path")
+        if s.get("code") and s["code"] not in known_codes:
+            fail(f"section {s.get('id')}: unknown reason code {s['code']!r}")
+        if not (s.get("name_zh") and s.get("name_en")):
+            fail(f"section {s.get('id')}: missing bilingual display name (renderSections reads it)")
 
 
 def check_naming(root):
@@ -210,7 +215,7 @@ def check_runtime(html_path):
 def main():
     root = pathlib.Path(__file__).resolve().parents[1]
     json_path = pathlib.Path(sys.argv[1]) if len(sys.argv) > 1 else root / "work/wgs/report_data.json"
-    html_path = pathlib.Path(sys.argv[2]) if len(sys.argv) > 2 else None
+    html_path = pathlib.Path(sys.argv[2]) if len(sys.argv) > 2 else root / "work/report/report.html"
 
     check_constants(root)
     D = {}

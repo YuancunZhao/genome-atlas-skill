@@ -81,7 +81,10 @@ D["clinvar"] = {k: int(v) for k, v in cls.items()}; D["clinvar_total"] = len(cv)
 lof = pd.read_csv(W/"05_clinvar/lof_table.tsv", sep="\t"); rare = pd.read_csv(W/"05_clinvar/lof_rare_final.tsv", sep="\t")
 D["lof"] = {"all": len(lof), "rare": len(rare), "rare_hom": int((rare.zyg == "hom/hemi").sum()), "rare_constrained": int((rare.oe_lof_upper < 0.6).sum())}
 # --- PGx
-pc = pd.read_csv(W/"06_pgx/pharmcat/pharmcat_summary.tsv", sep="\t").fillna("")
+# No step of this repository runs the PharmCAT reporter; the summary is an externally
+# produced input, so it degrades to an empty list and the sections table records the fact.
+_pc_f = W/"06_pgx/pharmcat/pharmcat_summary.tsv"
+pc = pd.read_csv(_pc_f, sep="\t").fillna("") if _pc_f.exists() else pd.DataFrame()
 D["pgx_pharmcat"] = pc.to_dict("records")
 _cy = W/"06_pgx/cyrius/target.tsv"
 D["cyp2d6"] = open(_cy).read().split("\n")[1].split("\t")[1] if _cy.exists() else "-"
@@ -91,8 +94,10 @@ D["hla"] = {r[0]: [str(r[2]).replace("HLA-", ""), str(r[5]).replace("HLA-", "") 
 # --- PRS
 pr = pd.read_csv(W/"07_prs/prs_wgs.tsv", sep="\t"); D["prs"] = pr.round(1).fillna(-1).to_dict("records")
 # --- SV counts (13 writes sv_filtered.tsv; it is empty when no Delly VCF was produced)
-sv = pd.read_csv(W/"08_sv/sv_filtered.tsv", sep="\t", dtype={"chrom": str})
-D["sv_counts"] = sv.svtype.value_counts().to_dict(); D["sv_total"] = len(sv)
+_sv_f = W/"08_sv/sv_filtered.tsv"
+sv = pd.read_csv(_sv_f, sep="\t", dtype={"chrom": str}) if _sv_f.exists() else pd.DataFrame(columns=["svtype", "dp_ratio", "genes"])
+D["sv_counts"] = sv.svtype.value_counts().to_dict()
+D["sv_total"] = len(sv)
 _gd = sv[(sv.svtype == "DEL") & (sv.dp_ratio.notna()) & (sv.dp_ratio < 0.2) & sv.genes.fillna("").astype(str).str.len().gt(0)] if len(sv) else sv
 D["sv_gene_dels"] = [{"chrom": str(r.chrom), "pos": int(r.pos), "gene": str(r.genes).split(",")[0], "frac": round(float(r.dp_ratio), 2)} for r in _gd.itertuples()]
 # SMN copies come from SMNCopyNumberCaller and STR lengths from ExpansionHunter; no step of
@@ -267,9 +272,25 @@ D["prs_rho"] = {"subset": f"{min(_cov):.0f}–{max(_cov):.0f}%" if _cov else "-"
 # "unavailable" is never a negative result, and it is never used for sections that have no
 # positive/negative meaning in the first place (QC, ancestry) beyond stating the missing input.
 _SEC = []
+# Bilingual display names so the JS status note can name a section without hardcoding them again.
+_SEC_NAMES = {
+    "chip": ("芯片—WGS 一致性", "chip vs WGS consistency"), "pgx_pharmcat": ("PharmCAT 药物基因组", "PharmCAT pharmacogenomics"),
+    "cyp2d6": ("CYP2D6（Cyrius）", "CYP2D6 (Cyrius)"), "hla": ("HLA 分型（T1K）", "HLA typing (T1K)"),
+    "kir": ("KIR 与 HLA 配体", "KIR and HLA ligands"), "sv": ("结构变异（Delly）", "structural variants (Delly)"),
+    "smn": ("SMN 拷贝数", "SMN copy number"), "str": ("短串联重复（EH）", "short tandem repeats (EH)"),
+    "roh": ("纯合区段（ROH）", "runs of homozygosity"), "chip_hotspots": ("CHIP 热点", "CHIP hotspots"),
+    "somatic": ("体细胞信号", "somatic signals"), "telomere": ("端粒", "telomere"),
+    "phase": ("相位统计", "phasing statistics"), "spectrum": ("突变谱", "mutation spectrum"),
+    "density": ("全基因组密度", "genome-wide density"), "prs": ("多基因评分", "polygenic scores"),
+    "behaviour": ("行为特征评分", "behavioural scores"), "candidate": ("候选基因位点", "candidate-gene variants"),
+    "ancestry": ("祖源分析", "ancestry"), "local_ancestry": ("局部祖源", "local ancestry"),
+    "archaic": ("古人类渗入", "archaic introgression"), "aadr": ("古 DNA 投影", "ancient DNA projection"),
+    "clinvar": ("ClinVar 命中", "ClinVar hits"), "lof": ("功能丧失变异", "loss-of-function variants"),
+}
 def _sec(sid, status, code=None, zh=None, en=None, ev=None, detail=None):
-    _SEC.append({"id": sid, "status": status, "code": code, "reason_zh": zh, "reason_en": en,
-                 "evidence": ev, "detail": detail})
+    nm = _SEC_NAMES.get(sid, (sid, sid))
+    _SEC.append({"id": sid, "status": status, "name_zh": nm[0], "name_en": nm[1], "code": code,
+                 "reason_zh": zh, "reason_en": en, "evidence": ev, "detail": detail})
 def _has(key):
     v = D.get(key)
     return bool(v) if isinstance(v, (list, dict)) else v is not None
@@ -277,7 +298,7 @@ def _need(sid, ok, code, zh, en, ev, detail=None):
     _sec(sid, "ok" if ok else "unavailable", None if ok else code, None if ok else zh,
          None if ok else en, ev, detail)
 _MISS_IN   = ("no_input",       "交付不含该模块所需输入",        "this section's input was not part of the delivery")
-_MISS_OUT  = ("missing_output", "生产者已运行但没有留下输出",    "the producing step ran but left no output")
+_MISS_OUT  = ("missing_output", "未找到该模块的输出（未运行或失败，二者在此不可区分）", "no output found for this section (not run or failed; the two are indistinguishable here)")
 _MISS_STEP = ("step_not_run",   "本流程没有产出该模块的步骤",    "no step of this pipeline produces this section")
 
 _need("chip", _has("chip") and D["chip"].get("compared", 0) > 0, *_MISS_IN, ev="01_qc/chip_vs_wgs_summary.tsv")
@@ -285,10 +306,16 @@ _need("pgx_pharmcat", _has("pgx_pharmcat"), *_MISS_STEP, ev="06_pgx/pharmcat/pha
 _need("cyp2d6", D.get("cyp2d6") not in (None, "-"), *_MISS_STEP, ev="06_pgx/cyrius/target.tsv", detail=D.get("cyp2d6"))
 _need("hla", _has("hla"), *_MISS_STEP, ev="06_pgx/t1k/dayu_genotype.tsv", detail=len(D.get("hla") or {}))
 _need("kir", _has("kir"), *_MISS_STEP, ev="16_panels/kir.tsv", detail=len(D.get("kir") or []))
-_need("sv", D.get("sv_total", 0) > 0, *_MISS_STEP, ev="08_sv/sv_filtered.tsv", detail=D.get("sv_total"))
+# A zero SV table is a genuine negative only when Delly actually produced a VCF; without the
+# bcf the empty table is step 13's not-run fallback. Either way "unavailable" is wrong for a
+# real zero, and "ok" is wrong for the fallback.
+_need("sv", _sv_f.exists() and (D.get("sv_total", 0) > 0 or (W/"08_sv/delly/target.sv.bcf").exists()),
+      *_MISS_STEP, ev="08_sv/sv_filtered.tsv", detail=D.get("sv_total"))
 _need("smn", (D.get("smn") or {}).get("SMN1") is not None, *_MISS_OUT, ev="08_sv/smn/target.tsv", detail=D.get("smn"))
 _need("str", _has("str"), *_MISS_OUT, ev="08_sv/eh/eh_summary.tsv", detail=len(D.get("str") or []))
-_need("roh", _has("roh"), *_MISS_OUT, ev="09_misc/roh_1mb_nocen.bed", detail=D.get("roh_stats"))
+# The ROH bed is produced outside this pipeline; an empty bed from a real run is a negative
+# result, so the section is ok whenever the file exists at all.
+_need("roh", (W/"09_misc/roh_1mb_nocen.bed").exists(), *_MISS_OUT, ev="09_misc/roh_1mb_nocen.bed", detail=D.get("roh_stats"))
 _need("chip_hotspots", _has("chip_hotspots") and D["chip_hotspots"].get("median_depth", 0) > 0, *_MISS_OUT, ev="13_somatic/chip_hotspots.tsv", detail=D.get("chip_hotspots"))
 _need("somatic", _has("somatic"), *_MISS_OUT, ev="13_somatic/summary.tsv", detail=D.get("somatic"))
 _need("telomere", _has("telomere") and D["telomere"].get("k7", 0) >= 100000,

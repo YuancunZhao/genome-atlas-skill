@@ -40,7 +40,7 @@ const renderAll=()=>{try{document.documentElement.setAttribute('lang',LANG==='zh
       err.setAttribute('x',8);err.setAttribute('y',16);err.setAttribute('font-size',10);err.setAttribute('fill','#b3261e');
       err.textContent=id+': '+(e&&e.message?e.message:e);n.appendChild(err)}}
   if(window.__renderErrors.length)console.warn('[render] failed figures:',window.__renderErrors.join(', '));
-  renderKpi(); renderFindings(); renderPgx(); renderHla(); renderMisc(); if(typeof deepRender==='function') deepRender();{const _bd=document.getElementById('bootstate');if(_bd){const _nf=(window.__renderErrors||[]).length,_nt=Object.keys(CH).length;_bd.textContent='rendered · figures '+(_nt-_nf)+'/'+_nt+(_nf?' (failed: '+window.__renderErrors.join(', ')+')':'');_bd.style.color=_nf?'#ffb4a2':'#9ae6b4';}}}catch(e){console.error('[renderAll]',e);{const _be=document.getElementById('bootstate');if(_be){_be.textContent='RENDER FAILED: '+(e&&e.message?e.message:e);_be.style.color='#ffb4a2';}}try{document.body.insertAdjacentHTML('afterbegin','<div style="margin:14px auto;max-width:900px;padding:10px 14px;border:1px solid #b3261e;border-radius:8px;color:#b3261e;font:13px/1.5 system-ui">render error: '+(e&&e.message?e.message:e)+'</div>')}catch(_){}}};
+  renderKpi(); renderFindings(); renderPgx(); renderHla(); renderMisc(); renderSections(); if(typeof deepRender==='function') deepRender();{const _bd=document.getElementById('bootstate');if(_bd){const _nf=(window.__renderErrors||[]).length,_nt=Object.keys(CH).length;_bd.textContent='rendered · figures '+(_nt-_nf)+'/'+_nt+(_nf?' (failed: '+window.__renderErrors.join(', ')+')':'');_bd.style.color=_nf?'#ffb4a2':'#9ae6b4';}}}catch(e){console.error('[renderAll]',e);{const _be=document.getElementById('bootstate');if(_be){_be.textContent='RENDER FAILED: '+(e&&e.message?e.message:e);_be.style.color='#ffb4a2';}}try{document.body.insertAdjacentHTML('afterbegin','<div style="margin:14px auto;max-width:900px;padding:10px 14px;border:1px solid #b3261e;border-radius:8px;color:#b3261e;font:13px/1.5 system-ui">render error: '+(e&&e.message?e.message:e)+'</div>')}catch(_){}}};
 document.getElementById('langbtn').addEventListener('click',()=>{LANG=zh()?'en':'zh';try{localStorage.setItem('dayu-lang',LANG)}catch(e){};renderAll()});
 if(window.matchMedia){window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change',renderAll)}
 const prsName=n=>zh()?(PRS_EN[n]||n):n;
@@ -220,8 +220,21 @@ reveal('roh',(s,c)=>{
   });
   foot(s,c,900,296,zh()?'深色段 = ≥1.5 Mb 的纯合区 · 浅色 = 1–1.5 Mb · 小刻度 = 着丝粒 · 跨着丝粒/端粒的伪影段已剔除':'dark = homozygous run ≥1.5 Mb · light = 1–1.5 Mb · tick = centromere · segments spanning centromeres/telomeres removed');
 });
-function renderMisc(){
-  const items=zh()?[['SMN1 / SMN2',(D.smn&&D.smn.SMN1!=null)?`${D.smn.SMN1} / ${D.smn.SMN2} 份${D.smn.carrier===false?' · 非 SMA 携带者':''}`:'未评估（无 SMN 拷贝数产物）'],['线粒体异质性',(D.mt_het||[]).map(h=>`m.${h.pos}${h.alt||''} ${(h.af*100).toFixed(0)}%`).join('、')||'未检出'],['结构变异总数',`${fmt(D.sv_total)}（DEL ${fmt(D.sv_counts.DEL)} · DUP ${D.sv_counts.DUP} · INV ${D.sv_counts.INV}）`],['罕见功能丧失变异',`${D.lof.rare} 个 · 纯合 ${D.lof.rare_hom} 个均在重复区`],['X 染色体',(D.par_het!=null?`PAR 重调后 ${fmt(D.par_het)} 个杂合位点`:'PAR 重调数据缺失')],['近亲检查',`ROH ≥1 Mb ${D.roh_stats.n} 段 · 合计 ${D.roh_stats.total_mb} Mb · 无 >5 Mb`]]:
+// Consumes D.sections (step 30's status table): every section not "ok" is listed with its
+// machine reason code and bilingual reason, so an empty figure is explained instead of
+// reading as a negative result. All-ok reports render nothing here.
+function renderSections(){
+  const el=document.getElementById('secstatus'); if(!el) return;
+  const bad=(D.sections||[]).filter(s=>s&&s.status!=='ok');
+  if(!bad.length){el.innerHTML='';return;}
+  const L=s=>zh()?(s.name_zh||s.id):(s.name_en||s.id);
+  const R=s=>zh()?(s.reason_zh||s.code||''):(s.reason_en||s.code||'');
+  el.innerHTML=(zh()
+    ?'<b>数据状态：</b>以下模块本次不可用，对应的空图或空表<b>不是阴性结果</b>——<br>'
+    :'<b>Data status:</b> the sections below were unavailable; their empty figures are <b>not negative results</b> —<br>')
+    +bad.map(s=>`· ${L(s)} — ${R(s)}${s.evidence?` <span style="opacity:.55">(${s.evidence})</span>`:''}`).join('<br>');
+}
+function renderMisc(){  const items=zh()?[['SMN1 / SMN2',(D.smn&&D.smn.SMN1!=null)?`${D.smn.SMN1} / ${D.smn.SMN2} 份${D.smn.carrier===false?' · 非 SMA 携带者':''}`:'未评估（无 SMN 拷贝数产物）'],['线粒体异质性',(D.mt_het||[]).map(h=>`m.${h.pos}${h.alt||''} ${(h.af*100).toFixed(0)}%`).join('、')||'未检出'],['结构变异总数',`${fmt(D.sv_total)}（DEL ${fmt(D.sv_counts.DEL)} · DUP ${D.sv_counts.DUP} · INV ${D.sv_counts.INV}）`],['罕见功能丧失变异',`${D.lof.rare} 个 · 纯合 ${D.lof.rare_hom} 个均在重复区`],['X 染色体',(D.par_het!=null?`PAR 重调后 ${fmt(D.par_het)} 个杂合位点`:'PAR 重调数据缺失')],['近亲检查',`ROH ≥1 Mb ${D.roh_stats.n} 段 · 合计 ${D.roh_stats.total_mb} Mb · 无 >5 Mb`]]:
     [['SMN1 / SMN2',(D.smn&&D.smn.SMN1!=null)?`${D.smn.SMN1} / ${D.smn.SMN2} copies${D.smn.carrier===false?' · not an SMA carrier':''}`:'not assessed (no SMN copy-number output)'],['mt heteroplasmy',(D.mt_het||[]).map(h=>`m.${h.pos}${h.alt||''} ${(h.af*100).toFixed(0)}%`).join(', ')||'none detected'],['Structural variants',`${fmt(D.sv_total)} (DEL ${fmt(D.sv_counts.DEL)} · DUP ${D.sv_counts.DUP} · INV ${D.sv_counts.INV})`],['Rare loss-of-function',`${D.lof.rare} · ${D.lof.rare_hom} homozygous, all in repeats`],['X chromosome',(D.par_het!=null?`${fmt(D.par_het)} heterozygous PAR sites after re-calling`:'PAR re-call data unavailable')],['Relatedness',`${D.roh_stats.n} ROH ≥1 Mb · ${D.roh_stats.total_mb} Mb total · none >5 Mb`]];
   document.getElementById('misc').innerHTML=items.map(([k,v])=>`<div><div class="k">${k}</div><div class="v" style="font-size:12px">${v}</div></div>`).join('');
 }
