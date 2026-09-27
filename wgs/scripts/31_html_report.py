@@ -118,34 +118,20 @@ if not _decl:
     raise SystemExit("31_html_report: no payload placeholder found in report_script.js")
 js_code = "\n".join(l for i, l in enumerate(_lines) if i not in _decl)   # logic only; payload is built below
 
-# On Safari the whole 54 KB logic block silently did nothing -- no error, no effect -- while the
-# blocks after it ran fine. The logic is therefore emitted as a series of small blocks too, each
-# with its own progress marker and error report, so a failure names the exact part.
-_CODE_CAP = 12000
+# Safari scopes a top-level `const` to its own <script> element, so splitting the logic broke every
+# cross-block reference: the page reported "Can't find variable: reveal" and "renderAll", the figures
+# stayed empty and document.title never changed, while Chrome, node and jsc all worked. The logic is
+# therefore one block again. The payload stays chunked because it only ever assigns to window.*
+# properties, which are shared. The per-statement markers keep the diagnostics.
 def _code_blocks():
-    parts, buf, size = [], [], 0
-    for lineno, ln in enumerate(js_code.split("\n"), 1):
-        buf.append(ln)
-        size += len(ln) + 1
-        # Only break at a top-level statement boundary: a line with no leading indent that ends a
-        # statement or a block. Breaking anywhere else split an argument list, which JavaScriptCore
-        # rejected with 'Unexpected keyword catch'.
-        if ln[:1] not in (" ", "\t") and ln.rstrip().endswith((";", "}")):
-            # Record the source line of the last completed statement. Safari reports only
-            # 'Script error. @0:0' for these blocks, so "how far did it get" is the only signal.
-            buf.append("window.__boot='L%d';" % lineno)
-            if size >= _CODE_CAP:
-                parts.append("\n".join(buf)); buf, size = [], 0
-    if buf:
-        parts.append("\n".join(buf))
     out = []
-    for i, part in enumerate(parts):
-        # No try/catch per block: `try` introduces a block scope, so a `const` defined in one block
-        # would be invisible in the next (JavaScriptCore: 'reveal is not defined'). The marker before
-        # each block plus the window error listener is enough to localise a failure.
-        out.append(_MARK("code-%d/%d" % (i + 1, len(parts))))
-        out.append("<script>\n" + part + "\n</script>\n")
-    return "".join(out)
+    for lineno, ln in enumerate(js_code.split("\n"), 1):
+        out.append(ln)
+        # Record the source line of the last completed statement. Safari reports only
+        # 'Script error. @0:0' for a failing inline script, so "how far did it get" is the signal.
+        if ln[:1] not in (" ", "\t") and ln.rstrip().endswith((";", "}")):
+            out.append("window.__boot='L%d';" % lineno)
+    return "<script>\n" + "\n".join(out) + "\n</script>\n"
 
 def _payload_blocks():
     out = []
