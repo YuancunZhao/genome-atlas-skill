@@ -25,6 +25,7 @@ const reveal=(id,fn)=>{CH[id]=fn;const n=document.getElementById(id);n.style.cur
 const GENES=(()=>{const s=new Set();
   ['candidate','pgx','hla_disease','kir','sv_gene_dels','behaviour'].forEach(k=>(D[k]||[]).forEach(r=>{if(r&&r.gene)s.add(String(r.gene))}));
   (FIND||[]).forEach(f=>{if(f&&f.gene)s.add(String(f.gene))});   // findings live in the YAML payload, not in D
+  (PGX||[]).forEach(r=>{if(r&&r.gene)s.add(String(r.gene))});    // as does the PGx table (CYP2D6, SLCO1B1 ...)
   ['ABO','Rh','FY','JK','MNS','KELL','LU','DI','DO','CO','LW','SC','IN','VEL','XG','YT','OK'].forEach(b=>s.delete(b));
   return s;})();
 const gI=g=>'<i class="gname">'+g+'</i>';
