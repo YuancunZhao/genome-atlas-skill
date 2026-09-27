@@ -123,14 +123,18 @@ js_code = "\n".join(l for i, l in enumerate(_lines) if i not in _decl)   # logic
 _CODE_CAP = 12000
 def _code_blocks():
     parts, buf, size = [], [], 0
-    for ln in js_code.split("\n"):
+    for lineno, ln in enumerate(js_code.split("\n"), 1):
         buf.append(ln)
         size += len(ln) + 1
         # Only break at a top-level statement boundary: a line with no leading indent that ends a
         # statement or a block. Breaking anywhere else split an argument list, which JavaScriptCore
         # rejected with 'Unexpected keyword catch'.
-        if size >= _CODE_CAP and ln[:1] not in (" ", "\t") and ln.rstrip().endswith((";", "}")):
-            parts.append("\n".join(buf)); buf, size = [], 0
+        if ln[:1] not in (" ", "\t") and ln.rstrip().endswith((";", "}")):
+            # Record the source line of the last completed statement. Safari reports only
+            # 'Script error. @0:0' for these blocks, so "how far did it get" is the only signal.
+            buf.append("window.__boot='L%d';" % lineno)
+            if size >= _CODE_CAP:
+                parts.append("\n".join(buf)); buf, size = [], 0
     if buf:
         parts.append("\n".join(buf))
     out = []
