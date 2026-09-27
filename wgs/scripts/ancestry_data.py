@@ -851,3 +851,70 @@ def ancestry_copy(D):
         out["c_y"] = ["父系：本次交付没有得到可用的 Y 判定（原因见状态表）",
                       "Father's line: no usable Y call in this delivery (see the status table)"]
     return out
+
+
+# ─────────────────────────────────────────── AN5: 载荷卫生与分析状态（供 30/31 共用）
+
+def json_clean(obj):
+    """递归把 NaN/Infinity 变成 null，并把 numpy 标量转成原生类型。
+
+    json.dumps 默认把 NaN 写成裸 NaN —— 不是合法 JSON，浏览器的 JSON.parse 会拒绝；而这些值来自
+    pandas 的缺失，语义本来就是 null。
+    """
+    if isinstance(obj, float):
+        return obj if (obj == obj and obj not in (float("inf"), float("-inf"))) else None
+    if isinstance(obj, dict):
+        return {k: json_clean(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [json_clean(v) for v in obj]
+    try:
+        import numpy as _np
+        if isinstance(obj, _np.generic):
+            return json_clean(obj.item())
+    except Exception:
+        pass
+    return obj
+
+
+def json_text(obj):
+    """合法 JSON 文本（allow_nan=False / NaN 已转 null）。"""
+    return json.dumps(json_clean(obj), ensure_ascii=False, allow_nan=False)
+
+
+def js_string_literal(text):
+    """写成 JS 字符串字面量，并断开闭合标签序列。
+
+    数据里若含 "</script"（例如某个显示名），浏览器会在那里结束脚本块，剩下的载荷变成页面文字、
+    图表全空 —— 而所有静态检查仍然通过。把斜杠转义后 JSON 与 JS 都把它当普通斜杠，数据不变、
+    解析器不再提前收尾。
+    """
+    return json.dumps(text, ensure_ascii=False).replace("</", "<\\/")
+
+
+def analysis_state(dir_path, expected=None, names=("summary.json", "local_ancestry.json")):
+    """读某分析目录的 manifest 与结构化结果，返回 (state, reason_code, doc)。
+
+    缺 manifest → missing_manifest（旧结果必须重建，不能当current用）；指纹不符 → stale_result；
+    结果读不出来 → unreadable_result；没有结果文件 → missing_result。**不**从"文件在不在"推断，
+    也不读旧路径猜结果。
+    """
+    d = pathlib.Path(dir_path)
+    man = read_manifest(d / "manifest.json")
+    if not man:
+        return "unavailable", "missing_manifest", None
+    # 逐键比对标识（sample_id / analysis_id / 参考版本…），但**不**把 state 当准入条件：state 是这份
+    # manifest 要如实报告的结论，disabled/failed 必须原样传出去，不能一律折叠成 unavailable。
+    # （manifest_matches 另有一条 "state 必须是 ok" 的规则，适用于"能不能复用结果"，不是这里。）
+    for k, v in (expected or {}).items():
+        if v in (None, ""):
+            continue
+        if str(man.get(k)) != str(v):
+            return "unavailable", "stale_result", None
+    for name in names:
+        f = d / name
+        if f.exists():
+            try:
+                return str(man.get("state") or "ok"), str(man.get("reason_code") or ""), json.loads(f.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                return "unavailable", "unreadable_result", None
+    return "unavailable", "missing_result", None

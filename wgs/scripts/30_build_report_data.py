@@ -292,23 +292,9 @@ else:
 # local ancestry (steps 16/16b/17/17b)
 # AN5（§7）：祖源各节的状态来自结构化结果与 manifest 校验。缺 manifest、指纹不符或文件损坏都
 # 直接标成 unavailable 并给出原因代码，绝不"读旧路径猜结果"，也不用 0% 假值兜底。
-def _analysis_state(dir_path, expected=None):
-    """(state, reason_code, doc)。doc 是 summary.json / local_ancestry.json 的内容或 None。"""
-    import ancestry_data as _ad
-    d = pathlib.Path(dir_path)
-    man = _ad.read_manifest(d / "manifest.json")
-    if not man:
-        return "unavailable", "missing_manifest", None
-    if not _ad.manifest_matches(man, {"sample_id": SAMPLE, **(expected or {})}):
-        return "unavailable", "stale_result", None
-    for name in ("summary.json", "local_ancestry.json"):
-        sj = d / name
-        if sj.exists():
-            try:
-                return str(man.get("state") or "ok"), str(man.get("reason_code") or ""), json.loads(sj.read_text(encoding="utf-8"))
-            except (json.JSONDecodeError, OSError):
-                return "unavailable", "unreadable_result", None
-    return "unavailable", "missing_result", None
+# 分析状态判定放在 ancestry_data 里（可测）：缺 manifest / 指纹不符 / 结果损坏各有原因码。
+import ancestry_data as _ad
+_analysis_state = lambda d, expected=None: _ad.analysis_state(d, {"sample_id": SAMPLE, **(expected or {})})  # noqa: E731
 
 _LA_STATE, _LA_REASON, _LA_DOC = _analysis_state(W/"12_localanc")
 _AADR_STATE, _AADR_REASON, _AADR_DOC = _analysis_state(W/"11_aadr")
