@@ -72,6 +72,10 @@
   td.g{font-family:var(--num);font-weight:600;font-size:14px;letter-spacing:.06em;white-space:nowrap}
   td.rs{color:var(--muted);white-space:nowrap;font-size:10.5px}
   td.gene{font-weight:700;white-space:nowrap}
+  /* HGNC convention: gene symbols italic, protein names upright. Applied only to symbols the data
+     declares as genes (see GENES in the script) -- never a blanket regex over the prose, where
+     tokens such as PASS, CRAM, VCF, MGI or the blood-group system names would be caught. */
+  .gname{font-style:italic}
   td.num{font-family:var(--num);font-weight:600;white-space:nowrap}
   .pill{display:inline-block;font-size:9px;font-weight:700;letter-spacing:.08em;padding:1px 7px;border:1px solid var(--data);color:var(--data);border-radius:99px;margin-left:6px;vertical-align:middle}
   .pill.hi{background:var(--data);color:var(--bg)}

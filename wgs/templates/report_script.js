@@ -19,6 +19,17 @@ const foot=(s,c,w,y,txt_)=>txt(s,{x:w/2,y,'text-anchor':'middle','font-size':7,'
 // Safari throws on writing innerHTML to an SVG element, which took the whole render down with it.
 const clearEl=n=>{if(n.replaceChildren)n.replaceChildren();else while(n.firstChild)n.removeChild(n.firstChild)};
 const reveal=(id,fn)=>{CH[id]=fn;const n=document.getElementById(id);n.style.cursor='pointer';n.addEventListener('click',()=>{clearEl(n);fn(n,C())})};
+// HGNC convention: gene symbols are italic, protein names stay upright. The set comes from the data's
+// own gene fields, never from a regex over the prose -- tokens such as PASS, CRAM, VCF, MGI, PLINK or
+// the blood-group system names (ABO, Rh, FY ...) are not genes and must not be italicised.
+const GENES=(()=>{const s=new Set();
+  ['candidate','pgx','hla_disease','kir','sv_gene_dels','behaviour'].forEach(k=>(D[k]||[]).forEach(r=>{if(r&&r.gene)s.add(String(r.gene))}));
+  (FIND||[]).forEach(f=>{if(f&&f.gene)s.add(String(f.gene))});   // findings live in the YAML payload, not in D
+  ['ABO','Rh','FY','JK','MNS','KELL','LU','DI','DO','CO','LW','SC','IN','VEL','XG','YT','OK'].forEach(b=>s.delete(b));
+  return s;})();
+const gI=g=>'<i class="gname">'+g+'</i>';
+// Wrap symbols in element text only (never inside tags), so marked names are not nested twice.
+const gEm=h=>h.replace(/>([^<>]+)</g,(m,t)=>'>'+t.replace(/\b[A-Z][A-Z0-9]{2,11}\b/g,x=>GENES.has(x)?gI(x):x)+'<');
 const K=D.kpi;
 F.depth=K.depth_auto; F.x=K.depth_x; F.y=K.depth_y; F.mt=fmt(K.depth_mt); F.callable=K.callable_gb; F.pass=fmt(K.pass_records); F.snv=fmt(K.snv); F.indel=fmt(K.indel); F.titv=K.titv;
 F.cmp=fmt(D.chip.compared); F.nocall=D.chip.nocall??'—'; F.nonp=D.chip.nocall_nopass??'—'; F.indel_n=D.chip.in_deletion??'—';
@@ -30,7 +41,7 @@ F.yterm=D.y_terminal; F.yformed=fmt(D.ypath[D.ypath.length-1].formed); F.mthg=D.
 
 const renderAll=()=>{try{document.documentElement.setAttribute('lang',LANG==='zh'?'zh-Hans':'en');
   {const _bs=document.getElementById('bootstate');if(_bs)_bs.textContent='rendering…';}
-  document.querySelectorAll('[data-i18n]').forEach(e=>{e.innerHTML=t(e.getAttribute('data-i18n'))});
+  document.querySelectorAll('[data-i18n]').forEach(e=>{e.innerHTML=gEm(t(e.getAttribute('data-i18n')))});
   // The PCA legend had a literal `${NAME()}` in the static template -- JavaScript syntax that nothing
   // substitutes, so it reached the page as text. Fill it here with the other runtime strings, which
   // also makes it follow the language toggle.
@@ -177,7 +188,7 @@ reveal('pcaeas',(s,c)=>{const shade={CHB:c.hero,CHS:c.data,JPT:c.data2,CDX:c.fd,
 
 /* ── 03 findings ── */
 function renderFindings(){
-  document.getElementById('findings').innerHTML=FIND.map(f=>`<div class="finding"><div><div class="g">${f.gene}<small>${zh()?f.gt_zh:f.gt_en}</small></div><span class="stamp${f.hot?' hot':''}">${zh()?f.tag_zh:f.tag_en}</span></div><div><div class="b">${zh()?f.zh:f.en}</div>${f.act_zh?`<div class="act">${zh()?f.act_zh:f.act_en}</div>`:''}</div></div>`).join('');
+  document.getElementById('findings').innerHTML=FIND.map(f=>`<div class="finding"><div><div class="g">${gI(f.gene)}<small>${zh()?f.gt_zh:f.gt_en}</small></div><span class="stamp${f.hot?' hot':''}">${zh()?f.tag_zh:f.tag_en}</span></div><div><div class="b">${zh()?f.zh:f.en}</div>${f.act_zh?`<div class="act">${zh()?f.act_zh:f.act_en}</div>`:''}</div></div>`).join('');
 }
 /* ── 03 ClinVar bars ── */
 reveal('cvbars',(s,c)=>{
@@ -194,7 +205,7 @@ reveal('cvbars',(s,c)=>{
 
 /* ── 04 PGx ── */
 function renderPgx(){
-  document.getElementById('pgx').innerHTML=PGX.map(r=>`<tr><td class="gene">${r.gene}</td><td class="g">${r.dip}</td><td>${zh()?r.ph_zh:r.ph_en}</td><td>${zh()?r.zh:r.en}</td><td class="rs">${r.src}</td></tr>`).join('');
+  document.getElementById('pgx').innerHTML=PGX.map(r=>`<tr><td class="gene">${gI(r.gene)}</td><td class="g">${r.dip}</td><td>${zh()?r.ph_zh:r.ph_en}</td><td>${zh()?r.zh:r.en}</td><td class="rs">${r.src}</td></tr>`).join('');
 }
 function renderHla(){
   const order=['HLA-A','HLA-B','HLA-C','HLA-DRB1','HLA-DQA1','HLA-DQB1','HLA-DPA1','HLA-DPB1'];
@@ -509,7 +520,7 @@ function deepRender(){
     const col=unk?'#c9a227':(yes?'var(--ancs)':'var(--muted)');
     return `<tr><td class="gene">${cond}</td><td class="rs">${req}</td><td class="g" style="color:${col}">${cell}</td><td>${nt}</td></tr>`}).join('');
   const cd=document.getElementById('tb_cand');
-  if(cd) cd.innerHTML=D.candidate.map(r=>`<tr><td class="gene">${r.gene}</td><td class="rs">${r.rsid} · ${zh()?r.variant:(r.variant_en||r.variant)}</td><td class="g">${r.genotype}</td><td class="rs">${zh()?r.popular_claim:(r.popular_claim_en||'')}</td><td>${zh()?r.what_evidence_supports:(r.evidence_en||'')}</td></tr>`).join('');
+  if(cd) cd.innerHTML=D.candidate.map(r=>`<tr><td class="gene">${gI(r.gene)}</td><td class="rs">${r.rsid} · ${zh()?r.variant:(r.variant_en||r.variant)}</td><td class="g">${r.genotype}</td><td class="rs">${zh()?r.popular_claim:(r.popular_claim_en||'')}</td><td>${zh()?r.what_evidence_supports:(r.evidence_en||'')}</td></tr>`).join('');
   statGrid('k_la',[[`${F.north}<small>%</small>`,zh()?`北方东亚成分，比北京汉平均高 ${F.sdchb} 个标准差`:`northern East Asian; ${F.sdchb} sd above the Beijing Han mean`,'northern east asian'],
                    [`${F.south}<small>%</small>`,zh()?`南方东亚成分（北京汉 ${100-F.chb}%、南方汉 ${100-F.chs}%）`:`southern (Beijing Han ${100-F.chb}%, southern Han ${100-F.chs}%)`,'southern east asian'],
                    [`${F.noise}<small>%</small>`,zh()?'欧洲 + 南亚，方法的噪声底':'European + South Asian, the noise floor','noise floor'],
@@ -596,7 +607,7 @@ reveal('circos',(s,c)=>{
     const t=at(ch,pos); const [x0,y0]=P(R.roh[0]-3,t),[x1,y1]=P(R.roh[0]-drop,t);
     el(s,'line',{x1:x0,y1:y0,x2:x1,y2:y1,stroke:c.faint,'stroke-width':.8});
     const right=Math.cos(t)>=0;
-    txt(s,{x:x1+(right?4:-4),y:y1,'text-anchor':right?'start':'end','dominant-baseline':'central','font-size':9,'font-weight':700,fill:c.lab,stroke:c.bg,'stroke-width':2.6,'paint-order':'stroke'},name);
+    txt(s,{x:x1+(right?4:-4),y:y1,'text-anchor':right?'start':'end','dominant-baseline':'central','font-size':9,'font-weight':700,'font-style':'italic',fill:c.lab,stroke:c.bg,'stroke-width':2.6,'paint-order':'stroke'},name);
   });
   txt(s,{x:CX,y:CY-16,'text-anchor':'middle','font-size':12,'font-weight':700,fill:c.muted,'letter-spacing':'.16em'},NAME().toUpperCase());
   txt(s,{x:CX,y:CY+14,'text-anchor':'middle','font-size':30,'font-weight':800,fill:c.ink,...NUM},(((D.chrlen?Object.entries(D.chrlen).filter(([c])=>/^\d+$/.test(c)&&+c<23).reduce((a,e)=>a+(e[1]||0),0):0)/1e9).toFixed(2))+' Gb');
