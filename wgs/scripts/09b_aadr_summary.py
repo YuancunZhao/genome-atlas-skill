@@ -118,11 +118,15 @@ pd.DataFrame([{"label": g["label"], "n": g["n"], "d": g["distance_mean"]} for g 
              ).to_csv(f"{W}/near_modern.tsv", sep="\t", index=False)
 # The table has always been the n>=2 view, and its "date" column is the mean date of the group (not the
 # lower bound of a range that most records do not have). Keep both, so existing readers are unaffected.
+# per-group mean date, taken from the same rows this summary is built on
+_anc_rows = s[s.kind == "ancient"]
 _pub = {g["label"]: g for g in groups_anc if g["n"] >= MIN_GROUP_N}
-pd.DataFrame([{"label": g["label"], "n": g["n"], "d": g["distance_mean"],
-               "date": (lambda rows: (pd.Series([r.get("date_mean_bp") for r in rows]).dropna().mean()
-                                      if any(r.get("date_mean_bp") is not None for r in rows) else 0))(
-                   [r for r in recs if r.get("group_id") == g["group_id"]])}
+_dates = {}
+for g in _pub.values():
+    sub = pd.to_numeric(_anc_rows[_anc_rows.source_population_id == g["group_id"]].get("date_mean_bp"),
+                        errors="coerce").dropna()
+    _dates[g["label"]] = float(sub.mean()) if len(sub) else 0.0
+pd.DataFrame([{"label": g["label"], "n": g["n"], "d": g["distance_mean"], "date": _dates[g["label"]]}
               for g in _pub.values()]).to_csv(f"{W}/near_ancient.tsv", sep="\t", index=False)
 s["d"] = s["distance_to_target"]
 if "date_mean_bp" in s.columns:
