@@ -82,6 +82,7 @@ _SUMMARY = """<script>
   if (b && b.textContent.indexOf('rendered') >= 0) return;      // it worked -- stay out of the way
   var parts = [];
   parts.push('progress marker: ' + (window.__boot || 'none'));
+  parts.push('all logic blocks reached: ' + (window.__codeDone || 'no'));
   parts.push('boot strip element: ' + (b ? 'found' : 'MISSING'));
   parts.push('document.title: ' + document.title);
   parts.push('early errors: ' + JSON.stringify(window.__earlyErrors || []));
@@ -167,6 +168,6 @@ OUT.write_text(head + _EXAMPLE_BANNER + body
                + _payload_blocks()
                + _MARK("payload-loaded")
                + _code_blocks()
-               + _MARK("code-done")
+               + "<script>window.__codeDone='yes';</script>\n"
                + _SUMMARY, encoding="utf-8")
 print("wrote", OUT, OUT.stat().st_size // 1024, "KB")
