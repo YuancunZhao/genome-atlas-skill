@@ -468,6 +468,69 @@ reveal('hopca',(s,c)=>{
 });
 
 /* ── distance vs time ── */
+/* ── AN6: 离线地图的共用坐标变换、年代筛选与绘制 ─────────────────────────────
+   底图是世界范围的等距圆柱投影、固定 viewBox 0 0 360 180（每度 1 单位，x = lon+180,
+   y = 90-lat）。地图上每个点都必须走同一个变换，否则点会与轮廓错位。不引入 GIS 库或
+   在线瓦片：底图是一次性转好的静态 path，内嵌在页面里。 */
+
+const GEO_VB = { w: 360, h: 180 };
+const geoXY = (lat, lon) => ({ x: (Number(lon) + 180) * (GEO_VB.w / 360),
+                               y: (90 - Number(lat)) * (GEO_VB.h / 180) });
+/* 注意 Number(null) === 0、Number('') === 0：直接 Number() 会把"没有坐标"变成几内亚湾的 (0,0)。
+   §7 明确要求空值不能变成 (0,0)，所以先排除 null/undefined/空串，再判断数值与范围。 */
+const geoValid = (lat, lon) => {
+  if (lat === null || lat === undefined || lat === '' || lon === null || lon === undefined || lon === '') return false;
+  const a = Number(lat), b = Number(lon);
+  return Number.isFinite(a) && Number.isFinite(b) && Math.abs(a) <= 90 && Math.abs(b) <= 180;
+};
+
+/* §7 的筛选约定：判断记录的时间区间与所选范围是否相交。只有均值者按点处理；区间未知的
+   记录不猜——它既不进筛选结果，也不被当成"远古"或"现代"。 */
+function overlapsAge(minBP, maxBP, loBP, hiBP) {
+  return Number.isFinite(minBP) && Number.isFinite(maxBP) && maxBP >= loBP && minBP <= hiBP;
+}
+function ageInRange(rec, loBP, hiBP) {
+  const lo = Number(rec && rec.date_min_bp), hi = Number(rec && rec.date_max_bp);
+  const mean = Number(rec && rec.date_mean_bp);
+  if (Number.isFinite(lo) && Number.isFinite(hi)) return overlapsAge(lo, hi, loBP, hiBP);
+  if (Number.isFinite(mean)) return overlapsAge(mean, mean, loBP, hiBP);
+  return null;                       // 年代未知
+}
+
+/* 共用地图：底图 + 点 + 选择联动。现代图与古代图只是传入的 locations 不同——同一段绘制逻辑，
+   避免两个视图对"精度""无坐标"给出不一致的处理。返回 { placed, unplaced } 计数。 */
+function drawGeoMap(svg, locations, selectedId, onSelect, opts) {
+  const o = opts || {}, Z = zh();
+  const rows = Array.isArray(locations) ? locations : [];
+  const placed = rows.filter(r => geoValid(r.latitude, r.longitude));
+  const unplaced = rows.length - placed.length;
+  // 底图：内嵌的 <symbol id="world_land">；没有它也能画点（只是没有轮廓）
+  el(svg, 'use', { href: '#world_land', class: 'landlayer', x: 0, y: 0 });
+  const maxD = Math.max(1e-9, ...placed.map(r => Number(r.distance_mean) || 0));
+  placed.forEach((r, i) => {
+    const p = geoXY(r.latitude, r.longitude);
+    const isSite = (r.precision || 'site') === 'site';
+    const sel = String(r.id) === String(selectedId);
+    // 精度不同形状不同：地区级坐标不能画得像一个已知遗址。
+    const node = isSite
+      ? el(svg, 'circle', { cx: p.x, cy: p.y, r: sel ? 3.2 : 2.2, class: 'mapdot', 'data-id': r.id })
+      : el(svg, 'rect', { x: p.x - 2.4, y: p.y - 2.4, width: 4.8, height: 4.8, rx: .6, class: 'mapregion', 'data-id': r.id });
+    // 距离用单色阶（不是尺寸）：大样本数不该看起来像更大的祖源份额。
+    const t = maxD > 0 ? Math.min(1, (Number(r.distance_mean) || 0) / maxD) : 0;
+    node.setAttribute('fill-opacity', (sel ? 1 : 0.35 + 0.6 * (1 - t)).toFixed(2));
+    if (sel) node.setAttribute('stroke-width', '1.2');
+    node.setAttribute('tabindex', '0');           // 键盘可达
+    node.setAttribute('role', 'button');
+    tip(node, `${r.label || r.id}${r.n ? ' · n=' + r.n : ''}` +
+             (Number.isFinite(Number(r.distance_mean)) ? ` · d=${Number(r.distance_mean).toFixed(4)}` : ''));
+    const pick = () => { if (typeof onSelect === 'function') onSelect(String(r.id)); };
+    node.addEventListener('click', pick);
+    node.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(); } });
+    node.addEventListener('focus', pick);
+  });
+  return { placed: placed.length, unplaced: unplaced };
+}
+
 /* ── affinity ranking (W-T1). Replaces the distance-vs-age scatter: a group mean and a single
       genome's minimum are different statistics, so the old figure mixed them on one y-axis with a
       time axis that carried no signal (r=0.09). Here both kinds share one distance axis, sorted,
