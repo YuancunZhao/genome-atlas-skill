@@ -465,8 +465,8 @@ function deepRender(){
                       [`${F.phmax}<small>Mb</small>`,zh()?'最大相位块':'largest phase block','max block']]);
   statGrid('k_som',[[`${F.mtcn}`,zh()?'线粒体拷贝/细胞（正常 100–500）':'mtDNA copies per cell (100–500 normal)','mtdna copy number'],
                     [`${F.ydr}`,zh()?'Y 染色体深度比（<0.45 才提示镶嵌性丢失）':'Y depth ratio (mosaic loss below 0.45)','y depth ratio'],
-                    [`${F.chipalt}`,zh()?`19 个克隆性造血热点的支持读段，中位深度 ${((D.chip_hotspots||{}).median_depth)||0}×`:`reads at 19 clonal-haematopoiesis hotspots, median depth ${((D.chip_hotspots||{}).median_depth)||0}×`,'clonal haematopoiesis'],
-                    [`${F.telk7}`,zh()?`端粒重复读段（共 ${F.teltot} 条读段中），不足以估计端粒长度`:`telomeric reads of ${F.teltot} total, too few for a length estimate`,'telomeric reads']]);
+                    [`${F.chipalt}`,zh()?`${((D.chip_hotspots||{}).n_tested)||0} 个克隆性造血热点共 ${F.chipalt} 条 ALT 读段${(((D.chip_hotspots||{}).hotspots)||[]).length?`（最多：${((D.chip_hotspots.hotspots[0]||{}).hotspot)||''} ${(100*((D.chip_hotspots.hotspots[0]||{}).vaf||0)).toFixed(1)}%）`:''}；低水平读段是噪声敏感的观察，不构成 CHIP 证实，也不排除更低水平克隆`:`${F.chipalt} alt reads across ${((D.chip_hotspots||{}).n_tested)||0} CHIP hotspots${(((D.chip_hotspots||{}).hotspots)||[]).length?` (max: ${((D.chip_hotspots.hotspots[0]||{}).hotspot)||''} ${(100*((D.chip_hotspots.hotspots[0]||{}).vaf||0)).toFixed(1)}%)`:''}; low-level reads are a noise-prone observation, neither confirming CHIP nor excluding lower-level clones`,'clonal haematopoiesis'],
+                    [`${F.telk7}`,zh()?`端粒重复读段（共 ${F.teltot} 条读段中），不足以估计端粒长度（k7≥100000 为工作门槛而非验证阈值；绝对长度另需 GC/读长校正）`:`telomeric reads of ${F.teltot} total, too few for a length estimate (k7>=100000 is a working gate, not a validated threshold; absolute lengths would need GC/read-length correction)`,'telomeric reads']]);
   const tb=document.getElementById('tb_anc');
   if(tb) tb.innerHTML=D.ho_near_ancient.slice(0,10).map(r=>{const nm=zh()?(ANC_ZH[r.label]||r.label):r.label.replace(/_/g,' ');
     return `<tr><td class="gene">${nm}</td><td class="num">${r.n}</td><td class="num">${fmt(Math.round(r.date))}</td><td class="num">${r.d.toFixed(4)}</td></tr>`}).join('');

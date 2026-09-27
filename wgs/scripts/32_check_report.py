@@ -141,6 +141,24 @@ def check_shapes(D):
             if not e.get("gene") or "," in e["gene"]:
                 fail(f"sv_gene_dels entries must carry one gene name each, got {e.get('gene')!r}")
                 break
+    # M5: chip_hotspots must carry the non-zero per-hotspot detail (strongest first) and
+    # its alt_reads total must match that list; the KPI states an observation, not a CHIP call.
+    ch = D.get("chip_hotspots") or {}
+    if ch.get("median_depth"):
+        hs = ch.get("hotspots")
+        if not isinstance(hs, list):
+            fail("chip_hotspots lacks the per-hotspot list the KPI caption reads")
+        else:
+            if any(h.get("alt_reads", 0) <= 0 for h in hs):
+                fail("chip_hotspots.hotspots lists entries with no alt reads")
+            if sum(h.get("alt_reads", 0) for h in hs) != ch.get("alt_reads"):
+                fail("chip_hotspots.alt_reads does not equal the sum of its per-hotspot list")
+            if len(hs) > 1 and any(hs[i]["alt_reads"] < hs[i + 1]["alt_reads"] for i in range(len(hs) - 1)):
+                fail("chip_hotspots.hotspots is not sorted strongest-first")
+    # M5: an insufficient_reads telomere verdict must disclose the working 100000 gate.
+    tel = next((s for s in (D.get("sections") or []) if s.get("id") == "telomere"), None)
+    if tel and tel.get("code") == "insufficient_reads" and "100000" not in (tel.get("reason_zh") or "") + (tel.get("reason_en") or ""):
+        fail("telomere insufficient_reads reason does not disclose the 100000 working gate")
 
 
 def check_sections(D):

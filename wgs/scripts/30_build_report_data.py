@@ -255,7 +255,12 @@ _sm = _read_tsv(W/"13_somatic/summary.tsv")
 D["somatic"] = {r.metric: r.value for r in _sm.itertuples()} if _sm is not None and len(_sm) else {}
 _ch = _read_tsv(W/"13_somatic/chip_hotspots.tsv")
 D["chip_hotspots"] = {"median_depth": float(_ch.depth.median()) if _ch is not None and len(_ch) else 0.0,
-                      "alt_reads": int(_ch.alt_reads.sum()) if _ch is not None and len(_ch) else 0}
+                      "alt_reads": int(_ch.alt_reads.sum()) if _ch is not None and len(_ch) else 0,
+                      "n_tested": int(len(_ch)) if _ch is not None else 0,
+                      # Non-zero hotspots only, strongest first, so the KPI can say which
+                      # site the reads sit on instead of an aggregate "supporting reads".
+                      "hotspots": (sorted([{"hotspot": str(r.hotspot), "depth": int(r.depth), "alt_reads": int(r.alt_reads), "vaf": float(r.vaf)}
+                                    for r in _ch.itertuples() if r.alt_reads > 0], key=lambda h: -h["alt_reads"]) if _ch is not None else [])}
 # telomere (step 22)
 _tl = W/"14_telomere/counts.tsv"
 if _tl.exists():
@@ -355,9 +360,15 @@ _need("str", _has("str"), *_MISS_OUT, ev="08_sv/eh/eh_summary.tsv", detail=len(D
 _need("roh", (W/"09_misc/roh_1mb_nocen.bed").exists(), *_MISS_OUT, ev="09_misc/roh_1mb_nocen.bed", detail=D.get("roh_stats"))
 _need("chip_hotspots", _has("chip_hotspots") and D["chip_hotspots"].get("median_depth", 0) > 0, *_MISS_OUT, ev="13_somatic/chip_hotspots.tsv", detail=D.get("chip_hotspots"))
 _need("somatic", _has("somatic"), *_MISS_OUT, ev="13_somatic/summary.tsv", detail=D.get("somatic"))
-_need("telomere", _has("telomere") and D["telomere"].get("k7", 0) >= 100000,
-      "insufficient_reads", "端粒重复读段太少，无法估计长度", "too few telomeric repeat reads to estimate a length",
-      ev="14_telomere/counts.tsv", detail=(D.get("telomere") or {}).get("k7"))
+# The 100k-read gate is a working floor for a usable TelSeq-style estimate, not a validated
+# threshold; the reason says so and notes that an absolute-length conversion would still
+# need GC and read-length bias correction (22_telomere.sh estimate.tsv).
+_tl_k7 = (D.get("telomere") or {}).get("k7", 0)
+_need("telomere", _has("telomere") and _tl_k7 >= 100000,
+      "insufficient_reads",
+      f"端粒重复读段过少（k7={_tl_k7}，门槛 100000 为工作设定而非经验证阈值），无法可靠估计长度；绝对长度换算还需 GC 与读长偏差校正",
+      f"too few telomeric repeat reads for a reliable length estimate (k7={_tl_k7}; the 100000 gate is a working floor, not a validated threshold); absolute lengths would further need GC and read-length bias correction",
+      ev="14_telomere/counts.tsv", detail=_tl_k7)
 _need("phase", _has("phase"), *_MISS_OUT, ev="10_phase/summary.txt", detail=D.get("phase"))
 _need("spectrum", _has("spectrum"), *_MISS_OUT, ev="17_mutspec/spectrum96.tsv", detail=len(D.get("spectrum") or []))
 _need("density", _has("density"), *_MISS_OUT, ev="00_input/target.pass.vcf.gz")
