@@ -5,6 +5,42 @@ source "$(dirname "$0")/../scripts/env.sh"
 mkdir -p "$REF_DIR"/{b37,hg38,chain,annot,imp,aadr,archaic,ytree,prs}
 cd "$REF_DIR"
 
+# H6 (was item #8): every download used to go straight to its final name with no check. A truncated or
+# corrupt transfer is the worst failure mode here -- the file exists, later steps read it, and the only
+# symptom is a subtly wrong result. fetch() downloads to .part, verifies, and only then renames, so a
+# failure can never leave a plausible-looking file behind.
+#   - curl -f makes an HTTP error a non-zero exit instead of a saved error page
+#   - the result must be non-empty and above a per-file floor
+#   - by extension: gzip/bgzip archives must pass gzip -t; JSON must parse; text must have content
+fetch(){
+  local url=$1 out=$2 min=${3:-1024}
+  if [ -s "$out" ]; then
+    if ! verify "$out"; then
+      echo "WARNING: existing $out fails verification; re-downloading" >&2
+    else
+      return 0
+    fi
+  fi
+  curl -fsSL --retry 3 -o "$out.part" "$url" || { echo "download failed: $url" >&2; rm -f "$out.part"; return 1; }
+  local sz; sz=$(stat -c %s "$out.part" 2>/dev/null || echo 0)
+  if [ "$sz" -lt "$min" ]; then
+    echo "download too small ($sz < $min bytes): $url" >&2; rm -f "$out.part"; return 1
+  fi
+  if ! verify "$out.part"; then rm -f "$out.part"; return 1; fi
+  mv "$out.part" "$out"
+  echo "fetched $(basename "$out") ($sz bytes)"
+}
+
+verify(){
+  local f=$1
+  case "$f" in
+    *.gz|*.bgz) gzip -t "$f" 2>/dev/null || { echo "not a valid gzip stream: $f" >&2; return 1; } ;;
+    *.json) python3 -c "import json,sys; json.load(open(sys.argv[1]))" "$f" 2>/dev/null               || { echo "not valid JSON: $f" >&2; return 1; } ;;
+    *.txt|*.tsv|*.csv|*.ind|*.snp) [ -s "$f" ] || { echo "empty: $f" >&2; return 1; } ;;
+    *) [ -s "$f" ] || { echo "empty: $f" >&2; return 1; } ;;
+  esac
+}
+
 # GRCh37 primary reference (the build every step below assumes)
 [ -f b37/human_g1k_v37.fasta ] || {
   curl -sSL -o b37/human_g1k_v37.fasta.gz https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/technical/reference/human_g1k_v37.fasta.gz
@@ -34,9 +70,10 @@ for c in $(seq 1 22) X; do [ -f "imp/ALL.chr$c.vcf.gz" ] || curl -sSL -o "imp/AL
 [ -f annot/gnomad.v2.1.1.lof_metrics.by_gene.txt.bgz ] || curl -sSL -o annot/gnomad.v2.1.1.lof_metrics.by_gene.txt.bgz https://storage.googleapis.com/gcp-public-data--gnomad/release/2.1.1/constraint/gnomad.v2.1.1.lof_metrics.by_gene.txt.bgz
 
 # Y tree (YFull) and the ybrowse SNP position index
-[ -f ytree/current_tree.json ] || curl -sSL -o ytree/current_tree.json https://raw.githubusercontent.com/YFullTeam/YTree/master/current_tree.json
-[ -f ytree/current_version.txt ] || curl -sSL -o ytree/current_version.txt https://raw.githubusercontent.com/YFullTeam/YTree/master/current_version.txt
-[ -f ytree/snps_hg19.csv ] || curl -sSL -o ytree/snps_hg19.csv http://ybrowse.org/gbrowse2/gff/snps_hg19.csv
+# 这三件决定 Y 单倍群走向：树坏了或 SNP 索引截断，调用结果会错得很安静，所以逐件校验
+fetch https://raw.githubusercontent.com/YFullTeam/YTree/master/current_tree.json ytree/current_tree.json 100000
+fetch https://raw.githubusercontent.com/YFullTeam/YTree/master/current_version.txt ytree/current_version.txt 4
+fetch http://ybrowse.org/gbrowse2/gff/snps_hg19.csv ytree/snps_hg19.csv 100000
 
 # optional panels: ancient DNA (AADR Human Origins) and archaic introgression (Sprime, Browning 2018)
 if [ "${WITH_AADR:-1}" = "1" ]; then
