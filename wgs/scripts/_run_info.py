@@ -65,6 +65,27 @@ def _code_revision(root):
             "dirty": bool(dirty), "dirty_entries": len([l for l in dirty.splitlines() if l.strip()]) if dirty else 0}
 
 
+def _input_fingerprints():
+    """关键输入的大小与修改时间。整文件哈希对几十 GB 的 CRAM 不现实；size+mtime 足以发现"输入变了"。
+
+    H6 要求样本/输入/参数/工具/参考变化后缓存失效。判定"变了"只需要一个稳定的指纹，不需要
+    密码学强度——所以这里不读文件内容，读取成本与文件大小无关。
+    """
+    out = {}
+    for name, val in (("reads", READS), ("fastq1", FASTQ1), ("fastq2", FASTQ2),
+                      ("vendor_vcf", VENDOR_VCF), ("y_reads", Y_READS)):
+        if not val:
+            out[name] = None            # 空可选项显式记为 null，而不是缺键
+            continue
+        p = pathlib.Path(str(val))
+        if p.exists():
+            st = p.stat()
+            out[name] = {"path": str(p), "size": st.st_size, "mtime": int(st.st_mtime)}
+        else:
+            out[name] = {"path": str(p), "missing": True}
+    return out
+
+
 def _reference_info():
     """Build plus a fingerprint of the reference index, so a later run can tell if the reference changed."""
     fai = pathlib.Path(str(FASTA) + ".fai")
@@ -93,9 +114,48 @@ def build(run_id=None, started=None):
         "host": {"hostname": socket.gethostname(), "cpu": os.cpu_count(), "platform": platform.platform()},
         "code": _code_revision(_c.ROOT),
         "reference": _reference_info(),
+        "inputs": _input_fingerprints(),
         "parameters": values,
         "tools": _tool_versions(),
     }
+
+
+def default_path():
+    return pathlib.Path(_c.W) / "run_info.json"
+
+
+def append_step(name, status, rc=None, seconds=None, products=None, note="", path=None):
+    """记下一步的结束状态与产物，追加进 run_info.json 的 steps。
+
+    H6：保留退出状态与产物关联、失败不复用半成品。做法是读-改-写并在失败时拒绝覆盖上一次的
+    成功记录：一个被中断的步骤必须留下痕迹，而不是让下一轮以为它跑过。
+    """
+    out = pathlib.Path(path) if path else default_path()
+    info = build()                      # 新文件也要带运行事实，不能只剩一个孤立的 steps
+    if out.exists():
+        try:
+            info = json.loads(out.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            # 读不动就重建：宁可丢历史，也不要把坏文件当依据
+            info = build()
+        info.setdefault("steps", [])
+    info.setdefault("steps", [])
+    entry = {"name": str(name), "status": status}
+    if rc is not None:
+        entry["rc"] = int(rc)
+    if seconds is not None:
+        entry["seconds"] = round(float(seconds), 1)
+    if products:
+        entry["products"] = [str(x) for x in products]
+    if note:
+        entry["note"] = str(note)
+    entry["at"] = datetime.datetime.now().astimezone().isoformat(timespec="seconds")
+    info["steps"].append(entry)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    tmp = out.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(info, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+    tmp.replace(out)          # 原子替换：读者不会看到半个 steps
+    return out, entry
 
 
 def write(path=None, **kw):
@@ -106,7 +166,29 @@ def write(path=None, **kw):
     return out, info
 
 
+def _main(argv):
+    import argparse
+    ap = argparse.ArgumentParser(description="record run facts, or one step's outcome")
+    ap.add_argument("--step", help="step name to record")
+    ap.add_argument("--status", default="ok", choices=["ok", "failed", "skipped"])
+    ap.add_argument("--rc", type=int, default=None)
+    ap.add_argument("--seconds", type=float, default=None)
+    ap.add_argument("--products", nargs="*", default=None)
+    ap.add_argument("--note", default="")
+    ap.add_argument("--out", default=None)
+    a = ap.parse_args(argv)
+    if a.step:
+        out, entry = append_step(a.step, a.status, rc=a.rc, seconds=a.seconds,
+                                 products=a.products, note=a.note, path=a.out)
+        print(f"{a.status}: {entry['name']}" + (f" (rc={entry['rc']})" if "rc" in entry else ""))
+        return 0
+    return None
+
+
 if __name__ == "__main__":
+    _r = _main(sys.argv[1:])
+    if _r is not None:
+        sys.exit(_r)
     out, info = write()
     print(f"wrote {out}")
     print(f"  run {info['run_id']} · {info['code']['branch']}@{str(info['code']['commit'])[:8]}"

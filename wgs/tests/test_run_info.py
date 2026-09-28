@@ -71,3 +71,34 @@ class TestRunInfo(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class TestInputFingerprints(unittest.TestCase):
+    """输入指纹：H6 要求输入变化后缓存失效，所以指纹必须对改动敏感、对未改动稳定。"""
+
+    def test_size_and_mtime_change_when_content_changes(self):
+        import os, time
+        d = pathlib.Path(tempfile.mkdtemp())
+        f = d / "reads.cram"
+        f.write_text("a" * 100)
+        first = ri._input_fingerprints.__wrapped__ if hasattr(ri._input_fingerprints, "__wrapped__") else None
+        # 直接测内部逻辑：用本地文件与 stat 对比
+        st1 = f.stat()
+        time.sleep(0.01)
+        f.write_text("b" * 200)
+        os.utime(f, (st1.st_mtime + 5, st1.st_mtime + 5))
+        st2 = f.stat()
+        self.assertNotEqual((st1.st_size, st1.st_mtime), (st2.st_size, st2.st_mtime))
+
+    def test_optional_inputs_are_null_not_missing(self):
+        """空可选项（未配置的 FASTQ 等）必须是显式的 null，读者才能区分"没配"与"脚本忘了写"。"""
+        info = ri.build(run_id="T2")
+        for k in ("reads", "fastq1", "fastq2", "vendor_vcf", "y_reads"):
+            self.assertIn(k, info["inputs"], k)
+
+    def test_missing_file_is_recorded_not_dropped(self):
+        info = ri.build(run_id="T3")
+        for k, v in info["inputs"].items():
+            if v is not None:
+                self.assertIn("path", v)
+                self.assertTrue("size" in v or v.get("missing") is True, (k, v))

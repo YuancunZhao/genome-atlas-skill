@@ -5,7 +5,16 @@ set -euo pipefail
 cd "$(dirname "$0")"
 source scripts/env.sh
 S=scripts
-step(){ echo -e "\n=== $* ==="; }
+# 每步的退出状态与产物关联（H6）：进入下一步时把上一步记为 ok，失败时由 trap ERR 记为 failed。
+# 一次失败的运行必须在 run_info.json 里留下痕迹——否则下一轮会以为这一步跑过。
+_STEP_NAME=""; _STEP_T0=$SECONDS
+step(){
+  if [ -n "$_STEP_NAME" ]; then
+    python3 "$S/_run_info.py" --step "$_STEP_NAME" --status ok --seconds $((SECONDS-_STEP_T0)) >/dev/null 2>&1 || true
+  fi
+  echo -e "\n=== $* ==="; _STEP_NAME="$*"; _STEP_T0=$SECONDS
+}
+trap 'rc=$?; if [ -n "$_STEP_NAME" ]; then python3 "$S/_run_info.py" --step "$_STEP_NAME" --status failed --rc $rc >/dev/null 2>&1 || true; fi; echo "STEP FAILED (rc=$rc): $_STEP_NAME" >&2' ERR
 # Ancestry steps follow the switches validated from config.yaml (read_options, §7 AN0). A step that is
 # off writes a disabled manifest, so step 30 can tell "not configured" from "not run" instead of
 # silently reusing an older result. A failing step still stops the run.
@@ -84,3 +93,4 @@ the conclusions are yours to write, under the rules in SKILL.md. Then:
     python3 scripts/31_html_report.py
 
 MSG
+if [ -n "$_STEP_NAME" ]; then python3 "$S/_run_info.py" --step "$_STEP_NAME" --status ok --seconds $((SECONDS-_STEP_T0)) >/dev/null 2>&1 || true; fi
