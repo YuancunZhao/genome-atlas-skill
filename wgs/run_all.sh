@@ -62,6 +62,7 @@ step 09c lineage history and evidence;                        python3 $S/lineage
 step 10b CYP2D6 star alleles;                                bash  $S/10b_cyrius.sh
 step 10 PharmCAT star alleles, CYP2D6, HLA;                    bash  $S/10_pharmcat.sh
 step 11 extended pharmacogenomic markers;                      python3 $S/11_pgx_extra.py
+step 11b HLA and KIR typing with T1K;                      bash  $S/11b_t1k.sh
 step 12 polygenic scores;                                      python3 $S/12_prs.py
 step 13 structural variants and copy number;                   python3 $S/13_sv_filter.py
 step 14 read-backed phasing;                                   bash  $S/14_phase_reads.sh
