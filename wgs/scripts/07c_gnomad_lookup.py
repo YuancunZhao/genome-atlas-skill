@@ -6,7 +6,17 @@ from wgsconfig import *  # noqa: F401,F403 -- P, W, REF, TOOLS, SAMPLE, THREADS 
 
 import pandas as pd, numpy as np, requests, time, json, os
 W = f"{P}/wgs/05_clinvar"; CACHE = f"{W}/gnomad_cache.json"
+DATASET = "gnomad_r2_1"          # H6: the cache must say which dataset it came from
+_META = {"dataset": DATASET, "first_written": None, "last_updated": None, "queries": 0, "unresolved": 0}
 cache = json.load(open(CACHE)) if os.path.exists(CACHE) else {}
+# 缓存里原先没有任何"这是哪个数据集、什么时候查的"的记录。没有它，一份缓存无法判断是否仍适用于当前的
+# gnomAD 版本，也无法说明上次有多少条没查成——两者都会让"未解析"看起来像"不存在"。
+cache.setdefault("_meta", dict(_META))
+cache["_meta"]["dataset"] = DATASET
+# setdefault 不够：_META 的默认值里 first_written 是 None（键存在、值为空），setdefault 不会覆盖它。
+_now = __import__("datetime").datetime.now().astimezone().isoformat(timespec="seconds")
+if not cache["_meta"].get("first_written"):
+    cache["_meta"]["first_written"] = _now
 Q = "{ variant(variantId: \"%s\", dataset: gnomad_r2_1) { exome { ac an populations { id ac an } } genome { ac an populations { id ac an } } } }"
 def look(vid):
     # a cached failure is retried on the next run; only a definitive answer is final
@@ -40,12 +50,20 @@ vids = sorted(set(f"{r.chrom}-{r.pos}-{r.ref}-{r.alt}" for df in (cand, plp, con
 print("querying", len(vids), "variants")
 for i, v in enumerate(vids):
     look(v)
-    if i % 25 == 0: json.dump(cache, open(CACHE, "w")); print(i, flush=True)
-json.dump(cache, open(CACHE, "w"))
+    if i % 25 == 0:
+        cache["_meta"]["unresolved"] = sum(1 for k, v in cache.items() if k != "_meta" and v.get("error"))
+        json.dump(cache, open(CACHE, "w")); print(i, flush=True)
 _unresolved = [v for v in vids if v not in cache or cache[v].get("error")]
+cache["_meta"]["last_updated"] = __import__("datetime").datetime.now().astimezone().isoformat(timespec="seconds")
+cache["_meta"]["queries"] = sum(1 for k in cache if k != "_meta")
+cache["_meta"]["unresolved"] = len(_unresolved)
+json.dump(cache, open(CACHE, "w"))
+print(f"cache: {cache['_meta']['queries']} variants, {cache['_meta']['unresolved']} unresolved, "
+      f"dataset {DATASET}, written {cache['_meta']['last_updated']}")
 if _unresolved:
     print(f"WARNING: {len(_unresolved)} of {len(vids)} queries failed; re-run this script to retry them", file=sys.stderr)
 def add(df):
+    # cache 里的 _meta 不是变异条目；按 key 取值本身就绕开了它，这里显式说明以免以后有人改成遍历。
     g = [cache.get(f"{r.chrom}-{r.pos}-{r.ref}-{r.alt}") for r in df.itertuples()]
     df = df.copy()
     df["gnomad_found"] = [bool(x and x.get("found")) for x in g]
