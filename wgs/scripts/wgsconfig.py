@@ -79,6 +79,11 @@ FASTQ1 = str(_g("fastq1", ""))                            # optional, only used 
 FASTQ2 = str(_g("fastq2", ""))
 VENDOR_VCF = str(_g("vendor_vcf", ""))                    # optional: a VCF delivered with the reads
 Y_READS = str(_g("y_reads", ""))                          # optional: a separate Y-only BAM
+# 该配置项目前**没有消费者**：没有任何脚本会优先使用它。留着它是为了记录样本可能带 Y-only BAM，
+# 但不让一个设置了却无效的开关看起来像生效了——设置了就明确告警一次。
+if Y_READS:
+    print(f"warning: y_reads is set ({Y_READS}) but no step consumes it yet; Y calling still uses the CRAM",
+          file=__import__("sys").stderr)
 
 # ---- references
 FASTA = str(_g("fasta", REF / "b37" / "human_g1k_v37.fasta"))
