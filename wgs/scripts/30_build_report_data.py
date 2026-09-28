@@ -111,7 +111,7 @@ if not _REG.exists() and _OLD.exists():
           file=sys.stderr)
     raise SystemExit(2)
 ke = pd.read_csv(_REG, sep="\t"); mee = pd.read_csv(W/"04_ancestry/regional.target.proj.sscore", sep="\t")
-D["pca_eas"]   # 键名是 D 契约的一部分（report_script.js 读 D.pca_eas），与文件名的地域命名无关 = {"pts": [[r.Population, round(r.PC1_AVG, 4), round(r.PC2_AVG, 4)] for r in ke.itertuples()], "me": [round(mee.PC1_AVG[0], 4), round(mee.PC2_AVG[0], 4)]}
+D["pca_eas"] = {"pts": [[r.Population, round(r.PC1_AVG, 4), round(r.PC2_AVG, 4)] for r in ke.itertuples()], "me": [round(mee.PC1_AVG[0], 4), round(mee.PC2_AVG[0], 4)]}  # 键名 pca_eas 是 D 契约的一部分（report_script.js 读 D.pca_eas），与文件名的地域命名无关；2cf8340 曾把赋值误写进注释，导致该键从未写入
 D["anc"] = {"n_global": sum(1 for _ in open(W/"04_ancestry/prune.prune.in")), "n_eas": sum(1 for _ in open(W/"04_ancestry/prune.regional.prune.in")), "summary": open(W/"04_ancestry/summary.txt").read()}
 D["pop"] = {"n_super": int((ps.SuperPop == "EAS").sum()), "n_sub": int(ps.Population.isin(["CHS", "CHB"]).sum())}  # sizes the percentile captions quote
 # PAR heterozygous sites in the re-called X VCF (GRCh37 PAR1/PAR2); the misc caption quotes this
