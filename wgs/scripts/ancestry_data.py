@@ -814,6 +814,40 @@ def _fmt_d(v, digits=4):
         return "—"
 
 
+# 1000G 面板的群体标签是拉丁转写；zh 文案按面板命名规则转写，不认识的标签原样返回（宁缺毋滥）。
+_POP_ZH = {"Chongqing": "重庆", "Sichuan": "四川", "Hubei": "湖北", "Beijing": "北京",
+           "Southern": "南方", "Northern": "北方", "Fujian": "福建"}
+
+def _pop_zh(label):
+    """Han_Chongqing → 重庆汉族；China_* 的古代群体已有 name_zh，由调用方使用。"""
+    if not isinstance(label, str):
+        return str(label or "")
+    if label.startswith("Han_") and len(label) > 4:
+        place = label[4:]
+        return f"{_POP_ZH.get(place, place)}汉族"
+    return label
+
+def _pop_en(label):
+    """Han_Chongqing → Han from Chongqing；其余原样。"""
+    if isinstance(label, str) and label.startswith("Han_") and len(label) > 4:
+        return f"Han from {label[4:].replace('_', ' ')}"
+    return label
+
+def _iid_readable(iid):
+    """BaiyangcunM13.SG → Baiyangcun M13：去掉 .SG/.AG/.DG 等技术后缀，站点名与编号间加空格。"""
+    s = str(iid).split(".")[0]
+    import re
+    m = re.match(r"^([A-Za-z][a-z]+?)([A-Z]\d+)$", s)
+    return f"{m.group(1)} {m.group(2)}" if m else s
+
+def _grp_name_zh(anc_rows, group):
+    """按 group 标签找古代群体的 name_zh（如 China_MLBA → 中国 中晚期青铜）；没有就用原标签。"""
+    for r in anc_rows:
+        if r.get("label") == group and r.get("name_zh"):
+            return r["name_zh"]
+    return group or ""
+
+
 def ancestry_copy(D):
     """由数据生成祖源与父母系的**事实**文案，返回 {key: [zh, en]}。
 
@@ -832,20 +866,21 @@ def ancestry_copy(D):
     n_elig = _n((acc.get("counts") or {}).get("eligible")) if isinstance(acc, dict) else None
     n_coord = _n((acc.get("counts") or {}).get("mapped")) if isinstance(acc, dict) else None
 
-    # --- 祖源标题：最近的现代群体（群体级）与最近的古代个体（个体级），两者分开说
+    # --- 祖源标题（W3 A1 口径）：最近的现代**群体**与最近的古代**基因组**分开说，不混用统计量
     if aff:
         m = mods[0] if mods else None
         a = ancs[0] if ancs else None
         zh_parts, en_parts = [], []
         if m:
-            zh_parts.append(f"最接近的现代人群是 {m['label']}（n={m['n']}，d={_fmt_d(m['d'])}）")
-            en_parts.append(f"nearest present-day group is {m['label']} (n={m['n']}, d={_fmt_d(m['d'])})")
-        if a:
-            zh_parts.append(f"最近的古代群体是 {a['label']}（n={a['n']}，d={_fmt_d(a['d'])}）")
-            en_parts.append(f"nearest ancient group is {a['label']} (n={a['n']}, d={_fmt_d(a['d'])})")
+            zh_parts.append(f"现代人群里最近的是{_pop_zh(m['label'])}")
+            en_parts.append(f"the nearest present-day group is {_pop_en(m['label'])}")
         if near_i:
-            zh_parts.append(f"距离最近的古代基因组是 {near_i['iid']}（d={_fmt_d(near_i['d'])}）")
-            en_parts.append(f"closest ancient genome is {near_i['iid']} (d={_fmt_d(near_i['d'])})")
+            zh_parts.append(f"古代基因组里距离最近的是 {_iid_readable(near_i['iid'])}"
+                            f"（{_grp_name_zh(ancs, near_i.get('group'))}）")
+            en_parts.append(f"the nearest ancient genome is {_iid_readable(near_i['iid'])} ({near_i.get('group')})")
+        elif a:
+            zh_parts.append(f"最近的古代群体是 {_pop_zh(a['label'])}（n={a['n']}，d={_fmt_d(a['d'])}）")
+            en_parts.append(f"nearest ancient group is {a['label']} (n={a['n']}, d={_fmt_d(a['d'])})")
         out["c_anc"] = ["在所选参考面板中，" + "；".join(zh_parts),
                         "Within the selected reference panel: " + "; ".join(en_parts)]
     else:
@@ -866,17 +901,43 @@ def ancestry_copy(D):
     if bits_zh:
         out["sub_anc"] = [" · ".join(bits_zh), " · ".join(bits_en)]
 
-    # --- 祖源脚注：只描述"最接近"，并明说不由此推断身份
+    # --- 祖源脚注（W3 A2 口径）：最近的现代人群（前几个）、最近古代个体（带 call_rate）、
+    #     个体噪声与群体均值不同量级的提示、不做亲缘/族群推断的边界声明
     if aff and (mods or ancs):
-        out["n_anc"] = [
-            "距离是所选参考面板内、目标到各群体成员的欧氏距离均值，越小越近；"
-            "群体只按样本量达标的成员计算，样本不足的群体仍可在明细中查看。"
-            "本报告只描述在哪些参照里更接近，不据此推断族群身份或籍贯。",
-            "Distances are the mean Euclidean distance from the target to each group's members inside the "
-            "selected reference panel; smaller is closer. Groups are summarised only when enough members pass "
-            "the coverage gates, and small groups remain visible in the detail tables. This describes which "
-            "reference groups are nearer, not an ethnic or geographic identity.",
-        ]
+        top_m = mods[:3]
+        zh_m, en_m = "", ""
+        if top_m:
+            places = [r["label"][4:] for r in top_m if str(r["label"]).startswith("Han_")]
+            zh_places = [_POP_ZH.get(p, p) for p in places]
+            if len(places) == len(top_m):          # 前几名全是 Han_* 时合并成「重庆、四川的汉族样本」
+                zh_m = "、".join(zh_places) + "的汉族样本"
+                en_m = "Han samples from " + ", ".join(p.replace("_", " ") for p in places)
+            else:
+                zh_m = "、".join(_pop_zh(r["label"]) for r in top_m)
+                en_m = ", ".join(_pop_en(r["label"]) for r in top_m)
+        zh_bits, en_bits = [], []
+        if zh_m:
+            zh_bits.append(f"最近的现代人群是{zh_m}")
+            en_bits.append(f"The nearest present-day groups are {en_m}")
+        if near_i:
+            _cr = None
+            for mem in (D.get("ho_target_group") or {}).get("members") or []:
+                if mem.get("iid") == near_i.get("iid") and _n(mem.get("call_rate")) is not None:
+                    _cr = float(mem["call_rate"])
+                    break
+            zh_bits.append(f"距离最近的古代基因组是 {_iid_readable(near_i['iid'])}"
+                           f"（d={_fmt_d(near_i['d'], 3)}，call_rate {f'{_cr:.2f}' if _cr is not None else '—'}）")
+            en_bits.append(f"The nearest ancient genome is {_iid_readable(near_i['iid'])} "
+                           f"(d={_fmt_d(near_i['d'], 3)}, call_rate {f'{_cr:.2f}' if _cr is not None else '—'})")
+            _gz = _grp_name_zh(ancs, near_i.get("group"))
+            _gd = next((r["d"] for r in ancs if r.get("label") == near_i.get("group")), None)
+            zh_bits.append(f"单个基因组的距离噪声大，且与其所属群体均值（{_gz}，{_fmt_d(_gd, 3) if _gd is not None else '—'}）"
+                           f"不在同一量级")
+            en_bits.append(f"A single genome's distance is noisy and is not on the same scale as its group's "
+                           f"mean ({near_i.get('group')}, {_fmt_d(_gd, 3) if _gd is not None else '—'})")
+        zh_bits.append("这里只描述“与哪些人群最接近”，不由此做亲缘或族群推断")
+        en_bits.append("This section states only which groups lie closest and draws no kinship or ethnic inference")
+        out["n_anc"] = ["；".join(zh_bits) + "。", ". ".join(en_bits) + "."]
 
     # --- 父系正文：从实际路径生成，不写死任何支系名
     ypath = list(D.get("ypath") or [])

@@ -128,8 +128,8 @@ class TestDegradedModes(unittest.TestCase):
     def test_generated_copy_never_claims_identity(self):
         copy = ad.ancestry_copy({"ho_affinity": [{"label": "Han_Chongqing", "kind": "modern", "n": 3, "d": 0.01}],
                                  "ho_near_individual": [{"iid": "X.SG", "d": 0.003}]})
-        self.assertIn("不据此推断", copy["n_anc"][0])
-        self.assertIn("not an ethnic", copy["n_anc"][1])
+        self.assertIn("不由此做亲缘或族群推断", copy["n_anc"][0])
+        self.assertIn("no kinship or ethnic inference", copy["n_anc"][1])
 
 
 if __name__ == "__main__":
