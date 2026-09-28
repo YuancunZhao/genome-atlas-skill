@@ -7,6 +7,8 @@ from wgsconfig import *  # noqa: F401,F403 -- P, W, REF, TOOLS, SAMPLE, THREADS 
 
 import subprocess, pandas as pd, os, collections, bisect
 from gt_alleles import gt_alleles
+import _sex_evidence as _se
+EFFECTIVE_SEX, _SEX_REC = _se.evidence_sex()   # 证据优先；回退声明时已在记录里说明原因
 P=str(P); PV=KG_PFILE+".pvar"; W=f"{P}/wgs/20_behaviour"
 os.makedirs(W,exist_ok=True)
 # Step 01 writes target.*; fall back to the {SAMPLE}.* name of older run layouts.
@@ -41,7 +43,8 @@ def callable_(c, p):
 # hemizygous, so a diploid-homozygous record there is the caller's representation of one allele.
 PAR_X = ((60001, 2699520), (154931044, 155260560))
 def hemizygous_x(c, p):
-    return c == "X" and SEX == "male" and not any(s <= p <= e for s, e in PAR_X)
+    # 用证据判定性别：把女性样本按男性规则解读，会在 X 上把两条等位的一致性误判成半合子。
+    return c == "X" and EFFECTIVE_SEX == "male" and not any(s <= p <= e for s, e in PAR_X)
 
 rows=[]
 for gene,rs,var,claim,truth in M:

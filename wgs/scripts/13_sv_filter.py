@@ -5,6 +5,9 @@ import sys, pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from wgsconfig import *  # noqa: F401,F403 -- P, W, REF, TOOLS, SAMPLE, THREADS ...
 
+import _sex_evidence as _se
+EFFECTIVE_SEX, _SEX_REC = _se.evidence_sex()   # 证据优先；回退声明时已在记录里说明原因
+
 import subprocess, gzip, io, collections, bisect, os
 import pandas as pd, numpy as np
 PROJ = str(P); W = f"{PROJ}/wgs/08_sv"
@@ -40,9 +43,11 @@ def region_depth(c, s, e):
         return np.nan
     out = subprocess.run(["tabix", f"{PROJ}/wgs/01_qc/depth.regions.bed.gz", f"{c}:{max(1,s)}-{e}"], capture_output=True, text=True).stdout
     v = [float(l.split("\t")[3]) for l in out.splitlines()]
-    # X depth baseline follows the sample's sex (b37 non-PAR X is hemizygous in males); a
-    # fixed 0.5 factor would double every female X ratio and call normal coverage a DUP.
-    ploidy = 0.5 if (c == "Y" or (c == "X" and SEX.startswith("m"))) else 1.0
+    # X depth baseline follows the sample's sex (b37 non-PAR X is hemizygous in males); a fixed 0.5
+    # factor would double every female X ratio and call normal coverage a DUP. Which sex this is comes
+    # from the depth evidence (_sex_evidence), not from the declaration alone: a declared-male sample
+    # that was sequenced without a Y would otherwise have every Y deletion scored against a wrong baseline.
+    ploidy = 0.5 if (c == "Y" or (c == "X" and EFFECTIVE_SEX.startswith("m"))) else 1.0
     base = MEAN_DP * ploidy
     return np.median(v) / base if v else np.nan
 big = nonbnd[(nonbnd.svtype.isin(["DEL", "DUP"])) & (nonbnd["size"] >= 2000)]

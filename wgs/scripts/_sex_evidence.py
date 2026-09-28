@@ -139,6 +139,29 @@ def check(summary=None, declared=None):
     return out
 
 
+def evidence_sex(declared=None, summary=None, log=print):
+    """本样本应按哪种性染色体构成处理，以及依据记录。
+
+    有证据就用证据；证据不可用时回退到声明值，但把回退原因写进记录——回退是可以的（否则一个缺
+    深度汇总的环境会连带停掉 Y 相关分析），沉默地回退不行。与声明冲突时告警一次。
+    """
+    rec = check(summary=summary, declared=declared)
+    inf = rec.get("inferred")
+    if inf == "has_y":
+        sex = "male"
+    elif inf == "no_y":
+        sex = "female"
+    else:
+        sex = "male" if str(declared if declared is not None else _c.SEX).lower().startswith("m") else "female"
+        log(f"warning: sex-chromosome evidence unavailable ({rec.get('reason_code')}); "
+            f"falling back to the declared sex ({sex})")
+    if rec.get("agrees_with_declared") is False:
+        log(f"WARNING: the data disagrees with the declared sex: {rec.get('why')}; "
+            f"downstream sex-specific results must be degraded")
+    rec["used_sex"] = sex
+    return sex, rec
+
+
 if __name__ == "__main__":
     rec = check()
     path = pathlib.Path(_c.W) / "sex_evidence.json"

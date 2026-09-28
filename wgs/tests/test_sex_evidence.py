@@ -83,5 +83,36 @@ class TestSexEvidence(unittest.TestCase):
         self.assertEqual(se._depth_means(bad)[1], "depth_summary_unexpected_columns")
 
 
+class TestEffectiveSex(unittest.TestCase):
+    """下游怎么得到"该按哪种性别处理"：证据优先，回退可以但必须留话。"""
+
+    def test_evidence_wins_over_the_declaration(self):
+        p = _write_summary(AUTOS + [("X", 52.0), ("Y", 0.05)])   # 数据说无 Y
+        logs = []
+        sex, rec = se.evidence_sex(declared="male", summary=p, log=logs.append)
+        self.assertEqual(sex, "female", "证据必须压过声明")
+        self.assertFalse(rec["agrees_with_declared"])
+        self.assertTrue(any("disagrees" in m for m in logs), logs)
+
+    def test_male_shape_yields_male(self):
+        p = _write_summary(AUTOS + [("X", 26.65), ("Y", 9.1)])
+        sex, rec = se.evidence_sex(declared="male", summary=p, log=lambda *_: None)
+        self.assertEqual(sex, "male")
+        self.assertTrue(rec["agrees_with_declared"])
+
+    def test_unavailable_evidence_falls_back_loudly(self):
+        """回退到声明值是可以的（否则缺深度汇总的环境会连带停掉 Y 分析），但必须说明。"""
+        logs = []
+        sex, rec = se.evidence_sex(declared="female", summary="/nonexistent.txt", log=logs.append)
+        self.assertEqual(sex, "female")
+        self.assertEqual(rec["state"], "unavailable")
+        self.assertTrue(any("unavailable" in m and "falling back" in m for m in logs), logs)
+
+    def test_used_sex_is_recorded_on_the_result(self):
+        p = _write_summary(AUTOS + [("X", 26.65), ("Y", 9.1)])
+        _, rec = se.evidence_sex(declared="male", summary=p, log=lambda *_: None)
+        self.assertEqual(rec["used_sex"], "male")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
