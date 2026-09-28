@@ -105,12 +105,15 @@ if _t_rate < float(MIN_CR_TARGET) or _t_n < float(MIN_PROJECTION_SNPS):
 say = print
 if "source_population_id" not in s.columns:
     s["source_population_id"] = s.get("sample_label", s.get("label"))
-if "group_id" not in s.columns:
-    # Group key is (dataset, population, location) per 7.3; the location half keeps the same population
-    # at different sites apart instead of averaging them together.
-    s["group_id"] = s["source_population_id"]
 if "record_id" not in s.columns:
     s["record_id"] = s["iid"]
+# 同人不重复计数：同一 iid 出现两行（上游拼接或缓存残留）会把一个人当成两个人进入组均值。
+# 保留第一行并留话，静默合并会让 n 和 distance_mean 都说不清自己算的是谁。
+_dup = s["iid"].duplicated(keep="first")
+if _dup.any():
+    print(f"note: dropped {_dup.sum()} duplicated iid row(s) (kept the first of each)", file=sys.stderr)
+    s = s[~_dup].reset_index(drop=True)
+    me = s[s.kind == "target"]
 
 # Geographic and dating fields come from the normalised .anno metadata that 08 wrote in full (7.3
 # requires the history views to read it, and the earlier code never carried it into this summary at
@@ -144,6 +147,15 @@ for c in ("latitude", "longitude", "n_called_snps", "call_rate"):
 _DATE_COL = "date_mean_bp" if "date_mean_bp" in s.columns else ("date" if "date" in s.columns else None)
 if _DATE_COL and "date_mean_bp" not in s.columns:
     s["date_mean_bp"] = pd.to_numeric(s[_DATE_COL], errors="coerce")
+if "group_id" not in s.columns:
+    # 分组键带地点（§7.3 的 dataset/population/location）：同一群体在不同遗址是两组，不能把两地
+    # 的个体平均成一个 n=2 的"群体"、再拿第一个地点当作整组的位置。地点未知的记录退回纯群体键。
+    _loc = s["location_id"].astype(str).str.strip() if "location_id" in s.columns else None
+    if _loc is not None:
+        s["group_id"] = [str(pop) if (loc == "" or loc.lower() == "nan") else f"{pop}|{loc}"
+                         for pop, loc in zip(s["source_population_id"], _loc.fillna(""))]
+    else:
+        s["group_id"] = s["source_population_id"]
 
 recs = s.to_dict("records")
 groups_mod = ad.group_summaries(
@@ -165,7 +177,7 @@ _anc_rows = s[s.kind == "ancient"]
 _pub = {g["label"]: g for g in groups_anc if g["n"] >= MIN_GROUP_N}
 _dates = {}
 for g in _pub.values():
-    sub = pd.to_numeric(_anc_rows[_anc_rows.source_population_id == g["group_id"]].get(_DATE_COL),
+    sub = pd.to_numeric(_anc_rows[_anc_rows["group_id"] == g["group_id"]].get(_DATE_COL),
                         errors="coerce").dropna() if _DATE_COL else pd.Series(dtype=float)
     _dates[g["label"]] = float(sub.mean()) if len(sub) else 0.0
 pd.DataFrame([{"label": g["label"], "n": g["n"], "d": g["distance_mean"], "date": _dates[g["label"]]}

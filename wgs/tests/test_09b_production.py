@@ -148,5 +148,48 @@ class TestKindAnnotations(unittest.TestCase):
             self.assertEqual(counts["excluded"], 1)
 
 
+@unittest.skipIf(_SKIP, _SKIP)
+class TestGroupingBySite(unittest.TestCase):
+    """同组不同遗址分开成两组；同一 iid 出现两行只算一个人。"""
+
+    def _panel_with_sites(self, td):
+        w = _write_panel(td, {
+            "TESTSAMPLE": (130, 130000),
+            "HAN1": (0, 130000), "HAN2": (650, 130000), "AM1": (30000, 130000),
+        })
+        # HAN1/HAN2 同属 Han 群体，但位于两个遗址：修复前被合成一个 n=2 的"群体"，
+        # location_id 取第一个地点，还挤进默认排名。
+        (w / "reference_metadata.tsv").write_text(
+            "record_id\tlocation_id\tlocality\tlatitude\tlongitude\tdate_min_bp\tdate_max_bp\n"
+            "HAN1\tlocA\tSiteA\t30\t120\t\t\n"
+            "HAN2\tlocB\tSiteB\t31\t121\t\t\n"
+            "AM1\tlocC\tSiteC\t32\t122\t500\t2000\n", encoding="utf-8")
+        return w
+
+    def test_same_group_at_two_sites_is_two_groups(self):
+        with tempfile.TemporaryDirectory() as td:
+            cfg = _write_config(td)
+            w = self._panel_with_sites(td)
+            r = _run_09b(cfg)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            groups = _summary(w)["groups"]["modern"]
+            self.assertEqual({g["group_id"] for g in groups}, {"Han|locA", "Han|locB"},
+                             "同一群体在两个遗址是两组，不能平均到一起")
+            self.assertTrue(all(g["n"] == 1 for g in groups), "两遗址各 1 人，没有 n=2 的合并组")
+            self.assertTrue(all(g["rank"] is None for g in groups), "n=1 的组不进默认排名")
+
+    def test_a_duplicated_iid_counts_once(self):
+        with tempfile.TemporaryDirectory() as td:
+            cfg = _write_config(td)
+            w = self._panel_with_sites(td)
+            with open(w / "proj.sscore", "a", encoding="utf-8") as fh:   # HAN1 再来一行
+                fh.write("Han\tHAN1\t0.1100\t0.0200\t0.0300\t0.0400\tNA\t0\t0\t0\t0\n")
+            r = _run_09b(cfg)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            counts = _summary(w)["counts"]
+            self.assertEqual(counts["selected"], 4, "同一 iid 两行只算一个人")
+            self.assertIn("duplicated iid", r.stderr)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
