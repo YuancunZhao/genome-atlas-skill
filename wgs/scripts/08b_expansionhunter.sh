@@ -69,8 +69,13 @@ with open(w / "target.vcf", encoding="utf-8") as fh:
             continue
         f = line.rstrip("\n").split("\t")
         info = dict(kv.split("=", 1) for kv in f[7].split(";") if "=" in kv)
-        gt = f[9].split(":")[0] if len(f) > 9 else ""
-        al = [int(x) for x in gt.replace("|", "/").split("/") if x.isdigit()]
+        # genotype 列是重复次数（REPCN，如 "27/27"；男性 X 连锁位点为单倍型 "27"），不是 GT 的
+        # 等位基因索引（"1/1"）。30 用 max_allele 对逐位点阈值，写成索引会把每个位点都变成 1。
+        # EH 原生 REPCN 两位点时顺序不定（实测 10/2），交付的 eh_summary 一律升序——按交付格式排序。
+        _m = dict(zip(f[8].split(":"), f[9].split(":"))) if len(f) > 9 else {}
+        _rep = _m.get("REPCN", "")
+        al = [int(x) for x in _rep.replace("|", "/").split("/") if x.isdigit()]
+        gt = "/".join(str(x) for x in sorted(al)) if al else _rep
         rows.append((info.get("REPID", f[2]), info.get("RU", ""), gt,
                      str(max(al)) if al else ""))
 # 按 locus 名排序。交付的 eh_summary.tsv 就是字母序（AFF2, AR, ATN1, ATXN1 ...），而 ExpansionHunter
