@@ -121,5 +121,32 @@ class TestTargetGate(unittest.TestCase):
             self.assertIn("target_below_coverage_gate", r.stderr + r.stdout)
 
 
+@unittest.skipIf(_SKIP, _SKIP)
+class TestKindAnnotations(unittest.TestCase):
+    """modern/ancient 连续两筛互不污染：每条记录带的是自己 kind 的判定。"""
+
+    def test_both_kinds_keep_their_own_verdicts(self):
+        with tempfile.TemporaryDirectory() as td:
+            cfg = _write_config(td)
+            # HAN2 覆盖 0.846 < 0.95 → modern 判不合格；AM1 覆盖 0.769 >= 0.50 → ancient 判合格。
+            # 09b 先筛 modern 再筛 ancient：修复前第二遍把合格的 HAN1 改成 other_kind。
+            w = _write_panel(td, {
+                "TESTSAMPLE": (130, 130000),
+                "HAN1": (0, 130000), "HAN2": (20000, 130000), "AM1": (30000, 130000),
+            })
+            r = _run_09b(cfg)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            recs = {x["iid"]: x for x in _summary(w)["records"]}
+            self.assertTrue(recs["HAN1"]["eligible"])
+            self.assertIsNone(recs["HAN1"]["exclusion_reason"])
+            self.assertFalse(recs["HAN2"]["eligible"])
+            self.assertEqual(recs["HAN2"]["exclusion_reason"], "low_call_rate")
+            self.assertTrue(recs["AM1"]["eligible"], "ancient 记录带 ancient 轮的判定")
+            # 目标不是任何一轮判定的对象：不带合格标注，也不计入被排除
+            self.assertNotIn("eligible", recs["TESTSAMPLE"])
+            counts = _summary(w)["counts"]
+            self.assertEqual(counts["excluded"], 1)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

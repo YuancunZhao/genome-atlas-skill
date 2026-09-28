@@ -468,6 +468,20 @@ class TestEligibleRecords(unittest.TestCase):
         loose = ad.eligible_records(self._recs(), kind="ancient", min_rate=None, min_snps=None)
         self.assertEqual(sorted(r["record_id"] for r in loose), ["close_but_thin", "solid", "too_few_snps"])
 
+    def test_a_second_kind_pass_does_not_overwrite_the_first(self):
+        """09b 拿同一份列表连筛 modern 再筛 ancient：第二遍不能把第一遍判合格的 modern 改成
+        other_kind——两种 kind 的标注互不污染，每条记录带的是自己那一类的判定。"""
+        recs = self._recs()
+        ad.eligible_records(recs, kind="modern", min_rate=0.95, min_snps=10000)
+        ad.eligible_records(recs, kind="ancient", min_rate=0.5, min_snps=10000)
+        by_id = {r["record_id"]: r for r in recs}
+        self.assertTrue(by_id["modern"]["eligible"])
+        self.assertIsNone(by_id["modern"]["exclusion_reason"])
+        self.assertEqual(by_id["close_but_thin"]["exclusion_reason"], "low_call_rate")
+        # 不是任何一次判定对象的记录（未知 kind）不带合格标注，也不被算成"被排除"
+        self.assertNotIn("eligible", by_id["unknown_kind"])
+        self.assertNotIn("exclusion_reason", by_id["unknown_kind"])
+
 
     def test_pandas_nan_is_treated_as_missing_not_as_a_number(self):
         """从 pandas 出来的缺失是 NaN，不是 None：既不能比较，也不能被 int() 撞出异常。"""

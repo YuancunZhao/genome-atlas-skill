@@ -678,15 +678,18 @@ def eligible_records(records, kind, min_rate=None, min_snps=None):
     """默认榜单、PCA 与地图共用的唯一合格集合。
 
     就地标注 `eligible` / `exclusion_reason`（被排除的记录留在原地供详情使用），返回合格记录并
-    保持输入顺序。`kind` 之外的一律排除，所以现代/古代/未分类不会互相混进对方的榜单；门槛只对
-    调用方显式给出的维度生效（None = 该维度不设门槛）。
+    保持输入顺序。标注**只作用于 kind 与本次请求相同的记录**：09b 拿同一份列表连筛 modern 再筛
+    ancient，若每次都改写全部记录，第二遍会把第一遍判合格的 modern 全部改成 other_kind——两种
+    kind 的结论因此互不覆盖，每条记录最终带的是它自己那一类的判定；kind 之外的记录（含 target
+    与未知 kind）不带任何合格标注，也不混进任何一方的榜单。门槛只对调用方显式给出的维度生效
+    （None = 该维度不设门槛）。
     """
     out = []
     for r in records:
-        reason = None
         if r.get("kind") != kind:
-            reason = "other_kind"
-        elif _number_or_none(r.get("distance_to_target")) is None:
+            continue
+        reason = None
+        if _number_or_none(r.get("distance_to_target")) is None:
             reason = "no_distance"
         elif min_rate is not None:
             rate = _number_or_none(r.get("call_rate"))
