@@ -45,6 +45,7 @@ if [ "${AADR_ENABLED:-0}" = "1" ]; then
   step 08 extract the ancient-DNA panel;                         python3 $S/08_aadr_extract.py
   step 09 ancient-DNA PCA and projection;                        bash  $S/09_aadr_pca.sh
   step 09b nearest present-day and ancient groups;               python3 $S/09b_aadr_summary.py
+step 09c runs of homozygosity;                                bash  $S/09c_roh.sh
 else
   skipped 08-aadr-extract aadr_not_configured 08
   skipped 09-aadr-pca aadr_not_configured 09
