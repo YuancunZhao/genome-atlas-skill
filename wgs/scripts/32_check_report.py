@@ -233,8 +233,13 @@ def check_shapes(D):
     # reference panel: an earlier version demanded China_-prefixed labels, a north/south vocabulary and
     # a Han name_zh, which would fail for every non-Chinese panel and for the English rendering.
     aff = D.get("ho_affinity") or []
+    # AN7: a build with the ancient-DNA projection disabled legitimately has no ho_affinity -- the
+    # requirement applies only when the aadr section itself claims the analysis ran and is ok.
+    # Unconditionally demanding it failed every non-AADR configuration as a false positive.
+    _aadr = next((s for s in (D.get("sections") or []) if s.get("id") == "aadr"), None)
     if not aff:
-        fail("ho_affinity missing or empty (the ancestry figure has nothing to draw)")
+        if _aadr and _aadr.get("status") == "ok":
+            fail("ho_affinity missing or empty although the aadr section is ok (the ancestry figure has nothing to draw)")
     else:
         ds = [r.get("d") for r in aff]
         if ds != sorted(ds):
