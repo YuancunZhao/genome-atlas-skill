@@ -160,7 +160,13 @@ TAIL = 4          # 分辨率判据只看末端四级（与 HANDOFF 记录的"�
 # conservative_from_path（连续弱链 → 上一级），并把来源写清楚，免得两种来源被当成一回事。
 _HIST = _lh.load_history(_json.loads((pathlib.Path(__file__).resolve().parents[1] / "panel" /
                                       "lineage_history.json").read_text(encoding="utf-8")))
-_CONS, _CONS_WHY = _lh.reviewed_call(_HIST, "y", path[-1][0] if path else None)
+# 只在本样本与复核记录标注的 sample_id 相符时才采用该记录（复审 AN4）：否则一个样本的人工结论
+# 会顺着支系名传播给所有同支系样本。被拒绝时把原因打到 stderr，便于发现"记录其实没生效"。
+_CONC_REJECT = []
+_CONS, _CONS_WHY = _lh.reviewed_call(_HIST, "y", path[-1][0] if path else None, sample_id=SAMPLE,
+                                     log=_CONC_REJECT.append)
+for _m in _CONC_REJECT:
+    print(f"NOTE: {_m}", file=sys.stderr)
 _if_reviewed = _CONS is not None
 if _CONS:
     _CONS_SRC = "reviewed:" + str(((_HIST.get("reviewed_calls") or {}).get(

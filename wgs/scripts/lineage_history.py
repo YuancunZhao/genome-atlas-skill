@@ -229,11 +229,15 @@ def conservative_from_path(path, solid=5, tail=4):
     return str(path[pos - 1][0]) if pos > 0 else None
 
 
-def reviewed_call(history, kind, reported_hg):
+def reviewed_call(history, kind, reported_hg, sample_id=None, log=None):
     """带理由的复核记录（panel/lineage_history.json 的 reviewed_calls）优先于任何自动规则。
 
     §7 要求 conservative_hg 来自实际证据或带理由的复核记录，而不是"树里最深节点"或某个阈值。
-    键形如 `y:N-CTS4714`；没有命中就返回 (None, None)，由调用方决定是否回退到通用规则。
+    键形如 `y:N-CTS4714`。
+
+    **样本限定（复审 AN4）**：键只写支系，所以一个样本的人工复核结论会被**任何**调出同一支系的
+    新样本继承——那是把一个样本的判断当成通用规则。因此记录里必须写明 sample_id，且只在**当前样本
+    与之相符**时才生效；没有 sample_id 的旧记录一律不套用（并说明原因），由调用方回退到通用规则。
     """
     hist = history or {}
     node = str(reported_hg or "")
@@ -242,6 +246,18 @@ def reviewed_call(history, kind, reported_hg):
     key = node if ":" in node else f"{kind}:{node}"
     rec = (hist.get("reviewed_calls") or {}).get(key)
     if not isinstance(rec, dict) or not rec.get("conservative_hg"):
+        return None, None
+    owner = rec.get("sample_id")
+    if not owner:
+        # 旧记录没有样本标记：不得当成通用规则套给任何样本。
+        if log:
+            log(f"reviewed call for {key} carries no sample_id and is NOT applied; "
+                f"it is one sample's review, not a rule (add sample_id to use it)")
+        return None, None
+    if sample_id is None or str(owner) != str(sample_id):
+        if log:
+            log(f"reviewed call for {key} belongs to {owner}, not to this sample; "
+                f"falling back to the generic rule")
         return None, None
     return str(rec["conservative_hg"]), str(rec.get("reason") or "reviewed by hand")
 
