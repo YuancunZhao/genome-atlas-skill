@@ -604,7 +604,11 @@ function drawGeoMap(svg, locations, selectedId, onSelect, opts) {
    位置是**参考样本的来源地**，不是把目标样本投成某个坐标（§7）。筛选只是换一个查看已算好的
    结果：不重建 PCA，也不在前端重算任何排名。时间轴左古右今，同时给出 BP 与公元（BP 基准 1950）。*/
 reveal('geomap',(s,c)=>{
-  const A=(D.ancestry&&D.ancestry.analyses)||[], Z=zh(), a=A.find(x=>x.dataset==='AADR')||A[0]||{};
+  // 复审 AN6-P1：原先固定优先 AADR，不看数据说哪一份是默认。现在按 default_analysis_id 选；它为空
+  // （没有任何分析处于 ok）时不画，而不是拿另一份数据集的位置冒充当前结果。
+  const A=(D.ancestry&&D.ancestry.analyses)||[], Z=zh();
+  const _defId=(D.ancestry&&D.ancestry.default_analysis_id)||'';
+  const a=(_defId&&A.find(x=>String(x.analysis_id)===String(_defId)))|| (_defId?null:A[0]) || {};
   const all=(a.records||[]);
   const groups=(Array.isArray(a.groups)?a.groups:((a.groups||{}).ancient||[]));
   const ranked=groups.filter(g=>g.rank&&!g.small_group).sort((x,y)=>x.rank-y.rank);

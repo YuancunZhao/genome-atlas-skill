@@ -529,7 +529,14 @@ for _doc, _st, _rs in ((_AADR_DOC, _AADR_STATE, _AADR_REASON), (_kg_doc, _kg_sta
                               ("analysis_id", "dataset", "reference_release", "scope", "components", "metric",
                                "thresholds", "counts", "target", "records", "groups", "sources")}
                              | {"state": _st, "reason_code": _rs})
-_default = next((a.get("analysis_id") for a in _anc_analyses if a.get("dataset") == "AADR"), "")
+# 复审 AN6-P1：默认分析原先硬编码挑 AADR。一个只启用 1000G（或禁用了 AADR）的样本，报告仍会宣称
+# 默认分析是 AADR——那是个不存在于本次运行里的选择。改为按**数据顺序取第一个 state=ok 的分析**：
+# 顺序即配置里的启用顺序，state 决定它这次是否真的产出。全都不可用时留空，由消费端如实处理。
+_default = next((a.get("analysis_id") for a in _anc_analyses if a.get("state") == "ok"), "")
+if _default:
+    print(f"30: default analysis = {_default}", file=sys.stderr)
+else:
+    print("30: no analysis is in state ok; default_analysis_id left empty", file=sys.stderr)
 D["ancestry"] = {"schema_version": 1, "default_analysis_id": _default or
                  (_anc_analyses[0].get("analysis_id") if _anc_analyses else ""),
                  "analyses": _anc_analyses,
