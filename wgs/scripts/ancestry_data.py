@@ -950,7 +950,21 @@ def analysis_state(dir_path, expected=None, names=("summary.json", "local_ancest
     也不读旧路径猜结果。
     """
     d = pathlib.Path(dir_path)
-    man = read_manifest(d / "manifest.json")
+    # 步骤级 manifest（manifest.<step-id>.json）由 run_all 在"该步被配置禁用或失败"时写。它**优先于**
+    # 目录里的 manifest.json：那一步没有产出，目录里若有结果只能来自更早的运行，用它等于让禁用状态
+    # 失效（复审 AN0+AN5+H6）。只有所有步骤级记录都是 ok，才回落到目录级 manifest。
+    # 第一版把这段放在"找不到 manifest.json 时"才走，实测两种位置都返回 ok——因为真实 manifest 存在，
+    # glob 根本不会被走到。
+    man = None
+    for extra in sorted(d.glob("manifest.*.json")) if d.exists() else []:
+        cand = read_manifest(extra)
+        if cand and str(cand.get("state") or "ok") not in ("ok",):
+            man = cand
+            break
+        if cand and man is None:
+            man = cand
+    if not man:
+        man = read_manifest(d / "manifest.json")
     if not man:
         return "unavailable", "missing_manifest", None
     # 逐键比对标识（sample_id / analysis_id / 参考版本…），但**不**把 state 当准入条件：state 是这份

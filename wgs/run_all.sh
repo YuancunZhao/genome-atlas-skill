@@ -18,8 +18,11 @@ trap 'rc=$?; if [ -n "$_STEP_NAME" ]; then python3 "$S/_run_info.py" --step "$_S
 # Ancestry steps follow the switches validated from config.yaml (read_options, §7 AN0). A step that is
 # off writes a disabled manifest, so step 30 can tell "not configured" from "not run" instead of
 # silently reusing an older result. A failing step still stops the run.
+# 复审 AN0+AN5+H6：禁用记录原先写到 wgs/08、09、09b、16、17，而 30 检查的是 11_aadr、12_localanc、04_ancestry
+# ——写的和读的不是同一处，于是"本次禁用 AADR"根本不会被看见，旧结果照旧进报告。现在写到**消费者实际
+# 检查的目录**，文件名带步骤 id，避免同目录多步互相覆盖。
 skipped(){ echo -e "\n=== skip $1: $2 ==="; python3 $S/ancestry_data.py --disabled "$1" \
-  --out "$PROJ/wgs/$3/manifest.json" --sample "$SAMPLE" --reason "$2"; }
+  --out "$PROJ/wgs/$3/manifest.$1.json" --sample "$SAMPLE" --reason "$2"; }
 
 # 运行事实（H6）：第一步之前记录 run id / 代码修订 / 有效参数 / 工具与参考版本。
 # 事后回答不了「那次用的哪棵树、哪个参考、有没有未提交改动」是最常见的复现障碍。
@@ -33,7 +36,7 @@ step 04b nearest reference populations;                        python3 $S/04b_an
 if [ "${REGIONAL_ENABLED:-0}" = "1" ] && [ -n "${AXIS:-}" ]; then
   step 04c per-chromosome axis index;                            python3 $S/04c_axis_index.py
 else
-  skipped 04c-per-chromosome-axis regional_axis_not_configured 04c
+  skipped 04c-per-chromosome-axis regional_axis_not_configured 04_ancestry
 fi
 step 05 Y haplogroup on the YFull tree;                        python3 $S/05_y_haplogroup.py
 step 06 mtDNA haplogroup and heteroplasmy;                     python3 $S/06_mtdna.py
@@ -54,9 +57,9 @@ if [ "${AADR_ENABLED:-0}" = "1" ]; then
   step 09 ancient-DNA PCA and projection;                        bash  $S/09_aadr_pca.sh
   step 09b nearest present-day and ancient groups;               python3 $S/09b_aadr_summary.py
 else
-  skipped 08-aadr-extract aadr_not_configured 08
-  skipped 09-aadr-pca aadr_not_configured 09
-  skipped 09b-aadr-summary aadr_not_configured 09b
+  skipped 08-aadr-extract aadr_not_configured 11_aadr
+  skipped 09-aadr-pca aadr_not_configured 11_aadr
+  skipped 09b-aadr-summary aadr_not_configured 11_aadr
 fi
 # Lineage history (AN4): consumes 05/06 results and the normalised metadata; runs before 30 so the
 # report reads one file instead of re-deriving the paternal/maternal story from text.
@@ -77,10 +80,10 @@ if [ "${LOCAL_ENABLED:-0}" = "1" ]; then
   step 17 local-ancestry summary;                                python3 $S/17_local_ancestry_summary.py
   step 17b calibrated against held-out references;               python3 $S/17b_local_ancestry_calibrated.py
 else
-  skipped 16-local-ancestry local_ancestry_not_configured 16
-  skipped 16b-la-calibration local_ancestry_not_configured 16b
-  skipped 17-la-summary local_ancestry_not_configured 17
-  skipped 17b-la-calibrated local_ancestry_not_configured 17b
+  skipped 16-local-ancestry local_ancestry_not_configured 12_localanc
+  skipped 16b-la-calibration local_ancestry_not_configured 12_localanc
+  skipped 17-la-summary local_ancestry_not_configured 12_localanc
+  skipped 17b-la-calibrated local_ancestry_not_configured 12_localanc
 fi
 step 18 archaic introgressed segments;                         python3 $S/18_archaic.py
 step 19 genes covered by those segments;                       python3 $S/19_archaic_genes.py
