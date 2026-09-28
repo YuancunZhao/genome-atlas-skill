@@ -35,6 +35,19 @@ anno=pd.read_csv(ANNO,sep="\t",dtype=str,low_memory=False)
 anno.columns=[c.strip() for c in anno.columns]
 recs=ad.assign_kind(ad.normalize_metadata(anno.to_dict("records"),dataset="AADR",release=RELEASE),
                     ancient_prefixes=AADR_ANCIENT_PREFIX,modern_groups=AADR_MODERN)
+# 复审 AN1：同一个人可以有多种技术表示（不同 call 版本、重复记录）。之前只在测试里有去重，生产路径
+# 不去重，于是同一个人可能以两条记录各自计入分组与计数。这里接上：保留可用的那一条，被丢弃的带原因
+# 落盘供审计，而不是悄悄消失。
+_dd = ad.dedupe_by_master_id(recs)
+recs = _dd["kept"]
+if _dd["dropped"]:
+    pathlib.Path(f"{W}/dedup_dropped.tsv").write_text(
+        "record_id\tmaster_id\treason_code\tdetail\n" + "".join(
+            f"{d['record_id']}\t{d['master_id']}\t{d['reason_code']}\t{d['detail']}\n" for d in _dd["dropped"]),
+        encoding="utf-8")
+    print(f"dedupe: kept {len(recs)}, dropped {len(_dd['dropped'])} duplicate representation(s) "
+          f"-> {W}/dedup_dropped.tsv", file=sys.stderr)
+
 # .ind and .anno are both keyed by the Genetic ID (the .ind's own "pop" column is a patch artefact).
 by_record={r["record_id"]: r for r in recs}
 def _f(iid, field, default=None):
@@ -101,7 +114,10 @@ print(f"after call-rate filter: {len(keep2)} individuals",file=sys.stderr)
 # 用 pd.isna 同时覆盖 None 与 NaN —— 真实 AADR 的 GT 列本来就有缺失（女性和性别未知样本被标成 n/a）。
 _tgt=np.array([(-1 if pd.isna(v) else int(v)) for v in sel["dayu_a1"]],dtype=np.int8)
 allg=np.vstack([G,_tgt[None,:]])
-labels=list(keep2.label)+[f"{NAME_EN}"]; kinds=list(keep2.kind)+["target"]; iids=list(keep2.iid)+[f"{NAME_EN}"]
+# 复审 AN1：目标的 fid/iid 用**稳定的 sample_id**，不用显示名。显示名会随 name_en 配置改变，而下游按
+# 名字匹配——改一次显示名就等于把目标换成了另一个人（身份随文案漂移）。sample_id 是样本的标识。
+_TGT_ID = SAMPLE
+labels=list(keep2.label)+[_TGT_ID]; kinds=list(keep2.kind)+["target"]; iids=list(keep2.iid)+[_TGT_ID]
 code=np.select([allg==2,allg==1,allg==0],[0b00,0b10,0b11],default=0b01).astype(np.uint8)
 n=len(labels); pad=(4-n%4)%4
 with open(f"{W}/aadr.bed","wb") as f:
