@@ -30,7 +30,11 @@ done
 R1=hla_kir_R1.fq; R2=hla_kir_R2.fq
 if [ ! -s "$R1" ] || [ ! -s "$R2" ]; then
   [ -f "$CRAM" ] || { echo "input alignment not found: $CRAM" >&2; exit 1; }
-  samtools view -@ "$TH" -b "$CRAM" 6:29900000-33500000 19:59000000-64000000 6:162000000-171000000 > hla_kir.bam
+  # 区域按参考升序给出，且输出必须过一道 sort：多个区域交叉传给 samtools view 时输出
+  # 会出现"染色体块不连续"（实测 6:… 19:… 6:… 的顺序会让 6:162M 的读段排在 chr19 之后），
+  # samtools index 随即失败、整条链中断。sort 保证坐标连续，索引稳定建立。
+  samtools view -@ "$TH" -h "$CRAM" 6:29900000-33500000 6:162000000-171000000 19:59000000-64000000 \
+    | samtools sort -@ "$TH" -o hla_kir.bam -
   samtools index hla_kir.bam
   samtools fastq -@ "$TH" -1 "$R1" -2 "$R2" -0 /dev/null -s /dev/null hla_kir.bam
 fi
