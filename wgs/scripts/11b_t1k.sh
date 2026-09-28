@@ -2,16 +2,20 @@
 # HLA and KIR typing with T1K (H5): this product had no producer in the repository.
 #
 # The whole chain is recovered from the tool's own logs, which record every sub-command it ran
-# (06_pgx/t1k/t1k_hla.log and t1k_kir.log, run-t1k v1.0.10-r263):
+# (06_pgx/t1k/t1k_hla.log and t1k_kir.log, run-t1k v1.0.10-r263). The per-stage arguments are NOT
+# symmetric and are copied verbatim from those SYSTEM CALL lines:
 #
 #   HLA  fastq-extractor -t 8 -f hlaidx/hlaidx_dna_seq.fa -o dayu_candidate -s 0.97 -1 R1 -2 R2
-#        genotyper     -s 0.97 -o dayu -t 8 -f hlaidx/hlaidx_dna_seq.fa -1 dayu_candidate_1.fq -2 ...
-#        analyzer      -s 0.97 -o dayu -t 8 -f hlaidx/... -a dayu_allele.tsv -1 dayu_aligned_1.fa -2 ...
-#   KIR  the same three with -s 0.9 --relaxIntronAlign and kiridx/kiridx_dna_seq.fa, output prefix kir
+#        genotyper        -s 0.97 -o dayu -t 8 -f hlaidx/... -1 dayu_candidate_1.fq -2 ...
+#        analyzer         -s 0.97 -o dayu -t 8 -f hlaidx/... -a dayu_allele.tsv -1 dayu_aligned_1.fa ...
+#   KIR  fastq-extractor  (no extra arguments) -t 8 -f kiridx/kiridx_dna_seq.fa -o kir_candidate -1 R1 -2 R2
+#        genotyper        -s 0.9 --relaxIntronAlign -o kir -t 8 -f kiridx/...
+#        analyzer         -s 0.9 --relaxIntronAlign -o kir -t 8 -f kiridx/...
 #
-# Note the asymmetry, which is copied rather than smoothed over: HLA uses -s 0.97, KIR uses 0.9 with
-# --relaxIntronAlign. Those are the delivered parameters; "tidying" them into one value would change the
-# calls. The sample prefix in the delivered outputs is dayu.
+# An earlier draft generalized "-s 0.9 --relaxIntronAlign" onto the KIR extractor and dropped the
+# HLA extractor's -s 0.97: the HLA candidate set ballooned from the delivered 5.8 MB to 39.5 MB
+# and the KIR extractor returned zero candidates, leaving the genotyper nothing to type. The
+# delivered parameters are not "tidied" into symmetry: changing them changes the calls.
 set -euo pipefail
 source "$(dirname "$0")/env.sh"
 S=$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)
@@ -45,18 +49,18 @@ if [ ! -s "$R1" ] || [ ! -s "$R2" ]; then
 fi
 
 run_one(){
-  local tag=$1 idx=$2 score=$3 extra=$4
-  "$T1K/fastq-extractor" -t "$TH" -f "$T1K/$idx" -o "${tag}_candidate" $extra -1 "$R1" -2 "$R2"
-  "$T1K/genotyper" -s "$score" $extra -o "$tag" -t "$TH" -f "$T1K/$idx" \
+  local tag=$1 idx=$2 geno_args=$3 extract_args=$4
+  "$T1K/fastq-extractor" -t "$TH" -f "$T1K/$idx" -o "${tag}_candidate" $extract_args -1 "$R1" -2 "$R2"
+  "$T1K/genotyper" $geno_args -o "$tag" -t "$TH" -f "$T1K/$idx" \
       -1 "${tag}_candidate_1.fq" -2 "${tag}_candidate_2.fq"
-  "$T1K/analyzer" -s "$score" $extra -o "$tag" -t "$TH" -f "$T1K/$idx" \
+  "$T1K/analyzer" $geno_args -o "$tag" -t "$TH" -f "$T1K/$idx" \
       -a "${tag}_allele.tsv" -1 "${tag}_aligned_1.fa" -2 "${tag}_aligned_2.fa"
   echo "$tag: $(wc -l < "${tag}_genotype.tsv" 2>/dev/null || echo 0) genotype rows"
 }
 
-run_one "$PREFIX" hlaidx/hlaidx_dna_seq.fa 0.97 "" > "$WGS/logs/t1k_hla.log" 2>&1 || { cat "$WGS/logs/t1k_hla.log" >&2; exit 1; }
+run_one "$PREFIX" hlaidx/hlaidx_dna_seq.fa "-s 0.97" "-s 0.97" > "$WGS/logs/t1k_hla.log" 2>&1 || { cat "$WGS/logs/t1k_hla.log" >&2; exit 1; }
 echo "T1K_HLA_DONE"
-run_one kir       kiridx/kiridx_dna_seq.fa 0.9 "--relaxIntronAlign" > "$WGS/logs/t1k_kir.log" 2>&1 || { cat "$WGS/logs/t1k_kir.log" >&2; exit 1; }
+run_one kir kiridx/kiridx_dna_seq.fa "-s 0.9 --relaxIntronAlign" "" > "$WGS/logs/t1k_kir.log" 2>&1 || { cat "$WGS/logs/t1k_kir.log" >&2; exit 1; }
 echo "T1K_KIR_DONE"
 
 for f in "${PREFIX}_genotype.tsv" kir_genotype.tsv; do
