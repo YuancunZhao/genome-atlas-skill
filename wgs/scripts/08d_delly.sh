@@ -7,6 +7,10 @@
 # "sr" is the split-read plus paired-end caller, -h is the thread count, and the input is the main-contig
 # alignment produced by 08a -- see that script for why the unrestricted CRAM is not used.
 #
+# NOTE: the input is currently UNVERIFIED -- see the header of 08a_main_contigs.sh. Delly's own command
+# line is recovered verbatim, but the file it was pointed at cannot be reproduced from what remains,
+# so re-running this produces SV calls on a different input than the delivered ones.
+#
 # This step takes hours on a whole genome (the delivered run went 01:44 to 03:37), so it is wired into
 # run_all.sh but not part of any quick check. It fails loudly rather than leaving a stale bcf behind.
 set -euo pipefail
