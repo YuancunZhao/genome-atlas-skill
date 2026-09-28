@@ -30,7 +30,7 @@ done
 
 # HLA/KIR 读段：交付的 hla_kir_R{1,2}.fq 是 364 MB 一对，来自比对文件的区域提取。
 # 区域来源未在产物中留下记录；这里取 b37 上 MHC 与 KIR 两个位点的规范坐标（索引 FASTA 本身是
-# 等位基因命名，不含坐标）。坐标按交付读段抽样核验：交付 FASTQ 的读段全部落在 MHC(6:29.9-33.5M)
+# 等位基因命名，不含坐标）。坐标按交付读段抽样核验：交付 FASTQ 的读段全部落在 MHC(6:29.9-33.53M，右缘覆盖完整 HLA-G)
 # 与 KIR(19:54.0-55.4M)，而早期草稿里的 19:59-64M 与 6:162-171M 零命中/纯垃圾跨度，已弃用。
 R1=hla_kir_R1.fq; R2=hla_kir_R2.fq
 if [ ! -s "$R1" ] || [ ! -s "$R2" ]; then
@@ -38,7 +38,7 @@ if [ ! -s "$R1" ] || [ ! -s "$R2" ]; then
   # 区域按参考升序给出，且输出必须过一道 sort：多个区域交叉传给 samtools view 时输出
   # 会出现"染色体块不连续"（实测 6:… 19:… 6:… 的顺序会让 6:162M 的读段排在 chr19 之后），
   # samtools index 随即失败、整条链中断。sort 保证坐标连续，索引稳定建立。
-  samtools view -@ "$TH" -h "$CRAM" 6:29900000-33500000 19:54000000-55400000 \
+  samtools view -@ "$TH" -h "$CRAM" 6:29900000-33530000 19:54000000-55400000 \
     | samtools sort -@ "$TH" -o hla_kir.bam -
   samtools index hla_kir.bam
   # fastq 前必须 collate：samtools fastq 按相邻配对，坐标排序输入下不相邻的对会被当作单端
