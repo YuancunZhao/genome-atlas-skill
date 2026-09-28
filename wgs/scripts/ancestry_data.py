@@ -663,6 +663,22 @@ def a1_dosage(gt, ref, alt, a1):
 
 # ─────────────────────────────────────────── AN2: one eligible set, one grouping
 
+def coverage_from_smiss(imiss):
+    """plink2 .smiss 表 → n_called_snps / call_rate（09b 与 04b 共用的唯一口径）。
+
+    formats#smiss（并对照真实文件核过：OBS_CT == prune.prune.in 行数）：OBS_CT 是**分母**（总位
+    点数），MISSING_CT 才是缺失数。已调用数是两者之差；把 OBS_CT 当成已调用数会把缺失位点计入
+    n_called_snps，位点门槛随之失真。F_MISS = MISSING_CT/OBS_CT，故 call_rate = 1 - F_MISS 同口径。
+    输入是已按 IID 重命名好 iid 列（或保留 IID）的 DataFrame；返回同一张表附上两列。
+    """
+    imiss = imiss.copy()
+    if "IID" in imiss.columns and "iid" not in imiss.columns:
+        imiss = imiss.rename(columns={"IID": "iid"})
+    imiss["n_called_snps"] = imiss["OBS_CT"].astype(int) - imiss["MISSING_CT"].astype(int)
+    imiss["call_rate"] = 1.0 - imiss["F_MISS"].astype(float)
+    return imiss
+
+
 def _number_or_none(value):
     """pandas/numpy 的 NaN 与 inf 都算缺失：它们不能拿去比较，也不该被 int() 撞出异常。"""
     if value is None:
