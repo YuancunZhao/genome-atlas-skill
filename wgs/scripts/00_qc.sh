@@ -14,8 +14,10 @@ if [ -z "${VENDOR_VCF:-}" ] && [ ! -f "$SAMPLE.call.vcf.gz" ]; then
   bcftools mpileup -f "$REF" -a FORMAT/AD,FORMAT/DP -Ou "$SAMPLE.cram" | bcftools call -m -v -Oz -o "$SAMPLE.call.vcf.gz"
   tabix -f "$SAMPLE.call.vcf.gz"
 fi
-# 碱基质量阈值来自配置（min_base_quality）：写死的 20 会让"改配置生效"在深度统计上落空，
-# 而深度又喂给可调用区间与 CNV 归一化——改了配置却拿到旧阈值，偏差会一路传下去。
-mosdepth --no-per-base -t "$THREADS" -f "$REF" -Q "${MIN_BQ:?MIN_BQ not exported by env.sh}" --by 1000 --quantize 0:1:4:8:20:60: "$WGS/01_qc/depth" "$SAMPLE.cram"
+# 参数语义（`mosdepth --help` 原文）：`-Q --mapq <mapq>  mapping quality threshold. reads with a quality
+# less than this value are ignored`。所以这里接的是**比对质量** MIN_MQ，不是碱基质量——前一版接了
+# MIN_BQ：接错的后果是"改 callable_min_mapq 却不影响深度"，而深度喂给可调用区间与 CNV 归一化，
+# 偏差会一路传下去。mosdepth 没有 base-quality 阈值选项；MIN_BQ 用于 bcftools 的 -Q（02_recall_x_mt）。
+mosdepth --no-per-base -t "$THREADS" -f "$REF" -Q "${MIN_MQ:?MIN_MQ not exported by env.sh}" --by 1000 --quantize 0:1:4:8:20:60: "$WGS/01_qc/depth" "$SAMPLE.cram"
 tabix -f -p bed "$WGS/01_qc/depth.regions.bed.gz" || true
 echo "QC_DONE -> $WGS/01_qc/depth.quantized.bed.gz"

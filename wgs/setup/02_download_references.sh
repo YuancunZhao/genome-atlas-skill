@@ -32,8 +32,12 @@ fetch(){
 }
 
 verify(){
-  local f=$1
-  case "$f" in
+  local f=$1 kind=$1
+  # fetch() 传进来的必然是下载中的 .part 文件，而按后缀分派要看得懂它的真实类型：不剥掉 .part 时
+  # ".gz.part"/".json.part" 会落进 *) 兜底分支、只查非空——校验形同虚设（复审 P0）。剥的只是**判断
+  # 用的名字**，读取仍用原路径。
+  case "$kind" in *.part) kind="${kind%.part}" ;; esac
+  case "$kind" in
     *.gz|*.bgz) gzip -t "$f" 2>/dev/null || { echo "not a valid gzip stream: $f" >&2; return 1; } ;;
     *.json) python3 -c "import json,sys; json.load(open(sys.argv[1]))" "$f" 2>/dev/null               || { echo "not valid JSON: $f" >&2; return 1; } ;;
     *.txt|*.tsv|*.csv|*.ind|*.snp) [ -s "$f" ] || { echo "empty: $f" >&2; return 1; } ;;
@@ -67,7 +71,7 @@ for c in $(seq 1 22) X; do [ -f "imp/ALL.chr$c.vcf.gz" ] || fetch "$K/chr$c.1kg.
   fetch https://ftp.ncbi.nlm.nih.gov/pub/clinvar/vcf_GRCh37/clinvar.vcf.gz.tbi clinvar_grch37.vcf.gz.tbi 10000; }
 [ -f annot/Homo_sapiens.GRCh37.87.gff3.gz ] || fetch https://ftp.ensembl.org/pub/grch37/release-87/gff3/homo_sapiens/Homo_sapiens.GRCh37.87.gff3.gz annot/Homo_sapiens.GRCh37.87.gff3.gz 1000000
 [ -f annot/Homo_sapiens.GRCh37.87.gtf.gz ] || fetch https://ftp.ensembl.org/pub/grch37/release-87/gtf/homo_sapiens/Homo_sapiens.GRCh37.87.gtf.gz annot/Homo_sapiens.GRCh37.87.gtf.gz 1000000
-[ -f annot/gnomad.v2.1.1.lof_metrics.by_gene.txt.bgz ] || fetch https://storage.googleapis.com/gcp-public-data--gnomad/release/2.1.1/constraint/gnomad.v2.1.1.lof_metrics.by_gene.txt.bgz
+[ -f annot/gnomad.v2.1.1.lof_metrics.by_gene.txt.bgz ] || fetch https://storage.googleapis.com/gcp-public-data--gnomad/release/2.1.1/constraint/gnomad.v2.1.1.lof_metrics.by_gene.txt.bgz annot/gnomad.v2.1.1.lof_metrics.by_gene.txt.bgz 100000
 
 # Y tree (YFull) and the ybrowse SNP position index
 # 这三件决定 Y 单倍群走向：树坏了或 SNP 索引截断，调用结果会错得很安静，所以逐件校验
