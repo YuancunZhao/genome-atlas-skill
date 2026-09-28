@@ -332,10 +332,13 @@ def check_sections(D):
             fail(f"section {s.get('id')}: missing bilingual display name (renderSections reads it)")
 
 
-def check_sv_source(root, D):
+def check_sv_source(run_dir, D):
     """M4: every sv_gene_dels gene must come from 13's whole_gene_del column -- a gene the
-    event merely overlaps is not a whole-gene deletion, however low the read depth is."""
-    tsv = root / "work/wgs/08_sv/sv_filtered.tsv"
+    event merely overlaps is not a whole-gene deletion, however low the read depth is.
+    run_dir is the outputs root of the report being checked (the directory holding its
+    report_data.json), so a report built under a different work tree is checked against
+    its own sources, not this repository's."""
+    tsv = run_dir / "08_sv/sv_filtered.tsv"
     if not tsv.exists() or not (D.get("sv_gene_dels") or []):
         return
     import csv
@@ -350,21 +353,21 @@ def check_sv_source(root, D):
         fail(f"sv_gene_dels names genes absent from sv_filtered whole_gene_del (overlap-only?): {sorted(stray)[:5]}")
 
 
-def check_naming(root):
+def check_naming(run_dir):
     """Main chromosomes must use the reference naming (1..22,X,Y,MT); a chr-prefixed main
     contig silently breaks region queries everywhere downstream. Decoy/unplaced names in
-    vendor style (chrUn_*, *_random, GL*) are tolerated."""
+    vendor style (chrUn_*, *_random, GL*) are tolerated. run_dir follows the report being
+    checked, like check_sv_source."""
     import subprocess
     ok = {str(i) for i in range(1, 23)} | {"X", "Y", "MT"}
     bad_main = re.compile(r"^chr(?:[1-9][0-9]?|1[0-9]|2[0-2]|X|Y|M|MT)$")
     decoy = re.compile(r"(_random$|^chrUn|^GL0)", re.I)
-    run = root / "work/wgs"
     entries = []
-    vcf = run / "00_input/target.pass.vcf.gz"
+    vcf = run_dir / "00_input/target.pass.vcf.gz"
     if vcf.exists():
         out = subprocess.run(["bcftools", "index", "-s", str(vcf)], capture_output=True, text=True).stdout
         entries += [("target.pass.vcf.gz", l.split("\t")[0]) for l in out.splitlines()]
-    bed = run / "00_input/callable.bed"
+    bed = run_dir / "00_input/callable.bed"
     if bed.exists():
         entries += [("callable.bed", l.split("\t")[0]) for l in open(bed)]
     seen = set()
@@ -436,7 +439,12 @@ def check_runtime(html_path):
 
 def main():
     root = pathlib.Path(__file__).resolve().parents[1]
+    # The outputs root of the report being checked: report_data.json lives directly in it
+    # (work/wgs). Defaulting to this repository's own tree kept only the no-argument case
+    # honest -- a report passed from another work tree was still checked against this repo's
+    # sources, so the source checks passed or failed on the wrong data (AN7).
     json_path = pathlib.Path(sys.argv[1]) if len(sys.argv) > 1 else root / "work/wgs/report_data.json"
+    run_dir = json_path.parent
     html_path = pathlib.Path(sys.argv[2]) if len(sys.argv) > 2 else root / "work/report/report.html"
 
     check_constants(root)
@@ -446,13 +454,13 @@ def main():
         check_keys(root, D)
         check_shapes(D)
         check_sections(D)
-        check_sv_source(root, D)
+        check_sv_source(run_dir, D)
     else:
         fail(f"{json_path} not found")
     check_html(html_path)
     check_payload_escaping(html_path)
     check_print_and_narrow(html_path)
-    check_naming(root)
+    check_naming(run_dir)
     check_runtime(html_path)
 
     if FAIL:
