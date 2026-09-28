@@ -44,10 +44,13 @@ pd.set_option("display.width",250); pd.set_option("display.max_colwidth",70)
 print("\n== 基因家族的覆盖比例（该家族有多少比例的基因落在渗入片段里）")
 print(fdf.to_string(index=False))
 # background expectation: shuffle segments within chromosomes 200x, count genes hit
-# 仅在读不到任何 .fai 时使用；它只对 hg19/GRCh37 正确
+# 仅在读不到任何**同 build**索引时使用；它只对 hg19/GRCh37 正确。候选必须声明各自索引的 build：
+# b37 缺席的机器上顺着候选读到 hg38 的 .fai 是跨 build 错误，chromosome_lengths 会整条跳过它。
 _HG19=[249250621, 243199373, 198022430, 191154276, 180915260, 171115067, 159138663, 146364022, 141213431, 135534747, 135006516, 133851895, 115169878, 107349540, 102531392, 90354753, 81195210, 78077248, 59128983, 63025520, 48129895, 51304566]
-CHRL=_ad.chromosome_lengths([(CFG.get('reference_fai') or ''), REF/'b37/human_g1k_v37.fasta.fai',
-                       REF/'hg38/Homo_sapiens_assembly38.fasta.fai'],
+CHRL=_ad.chromosome_lengths([(CFG.get('reference_fai') or '', BUILD),
+                             (REF/'b37/human_g1k_v37.fasta.fai', 'GRCh37'),
+                             (REF/'hg38/Homo_sapiens_assembly38.fasta.fai', 'GRCh38')],
+                      build=BUILD,
                       fallback={str(i): l for i, l in zip(range(1, 23), _HG19)})
 random.seed(7)
 byc={c:sub.sort_values("start")[["start","end","gene"]].values for c,sub in g.groupby("chrom")}

@@ -57,5 +57,47 @@ class TestChromosomeLengths(unittest.TestCase):
         self.assertEqual(got, {"1": 100})
 
 
+class TestSameBuildOnly(unittest.TestCase):
+    """回归（09-28 复审）：GRCh37 任务在 b37 索引缺席的机器上顺着候选读到 hg38 的 .fai，
+    拿 GRCh38 长度算 GRCh37 百分比是跨 build 错误，不是回退。build 给出后错 build 整条跳过。"""
+
+    def _fai(self, rows):
+        d = tempfile.mkdtemp()
+        p = pathlib.Path(d) / "ref.fasta.fai"
+        p.write_text("".join(f"{n}\t{l}\t0\t60\t61\n" for n, l in rows), encoding="utf-8")
+        return str(p)
+
+    def test_wrong_build_index_is_skipped_not_used(self):
+        hg38 = self._fai([("1", 248956422)])          # 只有 hg38 的索引在场
+        said = []
+        got = ad.chromosome_lengths([(hg38, "GRCh38")], build="GRCh37",
+                                    fallback={"1": 249250621}, log=said.append)
+        self.assertEqual(got, {"1": 249250621})        # 回退到 GRCh37 内置表，而不是 hg38 的长度
+        self.assertTrue(any("cross-build" in m for m in said), said)
+
+    def test_same_build_alias_still_wins(self):
+        b37 = self._fai([("1", 249250621)])
+        hg38 = self._fai([("1", 248956422)])
+        got = ad.chromosome_lengths([(hg38, "hg38"), (b37, "b37")], build="GRCh37",
+                                    fallback=None, log=lambda *_: None)
+        self.assertEqual(got["1"], 249250621)          # 别名 b37 归一化后匹配，hg38 被跳过
+
+    def test_untagged_path_with_build_is_a_caller_bug(self):
+        p = self._fai([("1", 100)])
+        with self.assertRaises(TypeError):
+            ad.chromosome_lengths([p], build="GRCh37", fallback=None, log=lambda *_: None)
+
+    def test_non_grch37_build_never_receives_the_hg19_table(self):
+        hg38 = self._fai([("1", 248956422)])
+        said = []
+        got = ad.chromosome_lengths([(hg38, "GRCh38")], build="GRCh38",
+                                    fallback={"1": 249250621}, log=said.append)
+        self.assertEqual(got, {"1": 248956422})        # 自己 build 的索引照常用
+        said.clear()
+        got = ad.chromosome_lengths([], build="GRCh38", fallback={"1": 249250621}, log=said.append)
+        self.assertEqual(got, {})                      # 没有 GRCh38 索引时宁可空，不发 hg19 表
+        self.assertTrue(any("no lengths are returned" in m for m in said), said)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

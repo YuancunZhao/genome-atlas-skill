@@ -112,19 +112,39 @@ def _str(cfg, key, default=""):
     return "" if v is None else str(v)
 
 
-def chromosome_lengths(fai_candidates, fallback=None, log=print):
+def chromosome_lengths(candidates, fallback=None, log=print, build=None):
     """从 FASTA 索引（`.fai`）读染色体长度；读不到才用内置表，并**明确告警**。
 
     内置长度表只对 hg19/GRCh37 正确。换参考版本（例如 GRCh38）后，用 hg19 的长度去算百分比会
     静默给出偏大的数字——图上看着合理，含义全错。所以优先读索引，回退时开口说话。
     `.fai` 的键可能是 `1` 或 `chr1`，统一去掉 `chr` 前缀；副contig（含 `_`、随机/未定位序列）不收。
+
+    build（规范名，如 "GRCh37"）给出后按**同 build**约束候选：元素必须是 (path, build_tag) 对，
+    tag 归一化后不等于所需 build 的索引整条跳过并记 note——GRCh37 的任务读到 hg38 的长度是
+    跨 build 错误，不是回退；宁可落到"没有同 build 索引"的告警。此时传裸路径（忘了声明 tag）
+    直接抛 TypeError，逼调用方显式。不带 build 时维持旧语义（裸路径、先读到先得），供非生产
+    调用与既有测试使用。回退表同样只在 GRCh37 任务上发出：其他 build 没有同 build 索引时
+    返回空 dict（可见的缺），而不是发一张已知错误的表。
     """
-    for cand in fai_candidates:
-        if not cand:
+    wanted = BUILD_ALIASES.get(build, build) if build else None
+    for cand in candidates:
+        if wanted is not None:
+            if not (isinstance(cand, tuple) and len(cand) == 2):
+                raise TypeError(
+                    f"with build={build!r}, candidates must be (path, build_tag) pairs so an index "
+                    f"of another build cannot slip in; got {cand!r}")
+            path_s, tag = cand
+            if BUILD_ALIASES.get(tag, tag) != wanted:
+                if path_s:
+                    log(f"skipped {path_s}: {tag} index, this task needs {wanted} (cross-build lengths are never a fallback)")
+                continue
+        else:
+            path_s = cand
+        if not path_s:
             continue          # 配置未给出路径时这里是空串；Path('') 会变成 '.' 并触发假的"读不了"告警
         try:
             import pathlib as _pl
-            path = _pl.Path(cand)
+            path = _pl.Path(path_s)
             if not path.exists():
                 continue
             out = {}
@@ -138,14 +158,17 @@ def chromosome_lengths(fai_candidates, fallback=None, log=print):
                         continue
                     out[name] = int(f[1])
             if out:
-                log(f"chromosome lengths read from {path} ({len(out)} sequences)")
+                log(f"chromosome lengths read from {path} ({len(out)} sequences, build {wanted or 'unspecified'})")
                 return out
         except OSError as e:
-            log(f"warning: could not read {cand} ({e})")
+            log(f"warning: could not read {path_s} ({e})")
     if fallback:
-        log("warning: no FASTA index found; falling back to the built-in hg19/GRCh37 length table, "
-            "which is WRONG for any other reference build")
-        return dict(fallback)
+        if wanted is None or wanted == "GRCh37":
+            log("warning: no FASTA index found; falling back to the built-in hg19/GRCh37 length table, "
+                "which is WRONG for any other reference build")
+            return dict(fallback)
+        log(f"warning: no FASTA index of build {wanted} found; the built-in table is hg19/GRCh37 and "
+            f"would be wrong here, so no lengths are returned")
     return {}
 
 
