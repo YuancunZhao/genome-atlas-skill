@@ -63,6 +63,60 @@ class TestRunInfo(unittest.TestCase):
             self.assertIn(k, p, k)
         self.assertEqual(p["BUILD"], "GRCh37")
 
+    def test_param_keys_name_real_wgsconfig_exports(self):
+        """回归（H4/H6）：PARAM_KEYS 曾用 REF_SUPERPOP/REF_SUBPOPS/AXIS_POPS 这三个不存在的
+        导出名，每份记录的参数区都在静默记 None。现在逐键核验 hasattr，build() 也有硬守卫。"""
+        for k in ri.PARAM_KEYS:
+            self.assertTrue(hasattr(ri._c, k), f"PARAM_KEY {k} is not exported by wgsconfig")
+        for bogus in ("REF_SUPERPOP", "REF_SUBPOPS", "AXIS_POPS"):
+            self.assertNotIn(bogus, self.info["parameters"])
+        self.assertEqual(self.info["parameters"].get("SUPERPOP"), ri._c.SUPERPOP)
+
+    def test_build_raises_on_a_bogus_param_key(self):
+        old = ri.PARAM_KEYS[:]
+        ri.PARAM_KEYS = old + ["NOT_A_REAL_EXPORT"]
+        try:
+            with self.assertRaises(AttributeError):
+                ri.build(run_id="T-bogus")
+        finally:
+            ri.PARAM_KEYS = old
+
+    def test_tool_version_probes_the_configured_executable(self):
+        """配置指名的工具必须探配置路径那份，并把它记进版本串——PATH 上同名者不算数。"""
+        d = pathlib.Path(tempfile.mkdtemp())
+        fake = d / "plink2"
+        fake.write_text("#!/bin/sh\necho 'plink2 vTEST-configured'\n", encoding="utf-8")
+        fake.chmod(0o755)
+        old = ri._c.PLINK2
+        ri._c.PLINK2 = str(fake)
+        try:
+            v = ri._tool_versions()["plink2"]
+        finally:
+            ri._c.PLINK2 = old
+        self.assertIn("vTEST-configured", v)
+        self.assertIn(str(fake), v)
+
+    def test_missing_configured_tool_is_null_not_a_path_fallback(self):
+        """配置指向不存在时记 None，绝不回落到 PATH 的同名二进制——那等于把别的可执行文件的
+        版本安到本次运行头上。"""
+        import os
+        d = pathlib.Path(tempfile.mkdtemp())
+        shadow = d / "bin"
+        shadow.mkdir()
+        s = shadow / "plink2"
+        s.write_text("#!/bin/sh\necho WRONG-BINARY\n", encoding="utf-8")
+        s.chmod(0o755)
+        old, oldpath = ri._c.PLINK2, os.environ.get("PATH")
+        ri._c.PLINK2 = str(d / "absent" / "plink2")
+        os.environ["PATH"] = f"{shadow}:{oldpath}"
+        try:
+            v = ri._tool_versions()["plink2"]
+        finally:
+            ri._c.PLINK2 = old
+            if oldpath:
+                os.environ["PATH"] = oldpath
+        self.assertIsNone(v)
+
     def test_written_file_is_valid_json(self):
         out, info = ri.write(path=pathlib.Path(tempfile.mkdtemp()) / "ri.json", run_id="TEST-0002")
         self.assertTrue(out.exists())

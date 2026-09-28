@@ -19,15 +19,28 @@ from wgsconfig import *  # noqa: F401,F403 -- P, W, REF, TOOLS, SAMPLE, BUILD, M
 import wgsconfig as _c
 
 # 记录哪些参数：影响结果的取样口径与阈值。跑完再想不起来当时设了什么，是最常见的复现障碍。
+# 键名必须是 wgsconfig 真实导出的名字（SUPERPOP/SUBPOPS/AXIS）：曾用 REF_SUPERPOP/REF_SUBPOPS/
+# AXIS_POPS 这三个不存在的名字，getattr 默认 None，每份 run_info.json 都在参数区记假值。
+# build() 对此有硬守卫（名字不存在直接抛错），这里的测试同样逐键核验。
 PARAM_KEYS = [
     "SAMPLE", "BUILD", "SEX",
     "MIN_DP", "MIN_MQ", "MIN_BQ", "MIN_VQ", "MPILEUP_MAX_DP", "MT_MAX_DP",
     "THREADS",
     "REGIONAL_ENABLED", "AADR_ENABLED", "LOCAL_ENABLED",
-    "REF_SUPERPOP", "REF_SUBPOPS", "AXIS_POPS",
+    "SUPERPOP", "SUBPOPS", "AXIS",
     "LA_LABELS", "AADR_MODERN", "AADR_ANCIENT_PREFIX", "AADR_ANNOTATION",
 ]
-TOOL_KEYS = ["samtools", "bcftools", "tabix", "plink2", "mosdepth", "bwa", "fastp", "java", "node", "R"]
+# 键 -> wgsconfig 里指名道姓该工具的属性。配置过的工具必须探**配置的那份**：PATH 上另装一份同名
+# 工具时，记下的版本不是本次运行会调用的那个；配置指向的文件不存在时记 None，也不回落到 PATH
+# 的同名者——那等于把别的二进制的版本安到本次运行头上。值为 None 的键按名字走 PATH（与步骤
+# 脚本 `samtools`、`bcftools` 这类裸名调用方式一致）。
+TOOL_KEYS = {
+    "plink2": "PLINK2",
+    "haplogrep3": "HAPLOGREP3",
+    "java": "JAVA",
+    "samtools": None, "bcftools": None, "tabix": None, "mosdepth": None,
+    "bwa": None, "fastp": None, "node": None, "R": None,
+}
 
 
 def _run(cmd):
@@ -40,10 +53,15 @@ def _run(cmd):
 
 
 def _tool_versions():
-    """Probe the tools this run will actually use (PATH-resolved), not what is merely installed somewhere."""
+    """Probe the tools this run will actually use, not what is merely installed somewhere.
+
+    Configured tools (wgsconfig names an explicit executable) are probed at that path and
+    never fall back to a PATH binary of the same name; an absent configured tool is None.
+    Name-resolved tools follow PATH, the way the step scripts invoke them."""
     out = {}
-    for t in TOOL_KEYS:
-        exe = shutil.which(t)
+    for t, cfg_attr in TOOL_KEYS.items():
+        candidate = str(getattr(_c, cfg_attr)) if cfg_attr else t
+        exe = shutil.which(candidate)
         if not exe:
             out[t] = None
             continue
@@ -106,7 +124,15 @@ def _reference_info():
 
 
 def build(run_id=None, started=None):
-    values = {k: getattr(_c, k, None) for k in PARAM_KEYS}
+    values = {}
+    for k in PARAM_KEYS:
+        # 硬守卫：键名打错时 getattr(_c, k, None) 会把参数记成静默的 None，每份记录都在撒谎。
+        # 宁可当场抛错，也不要一份看起来完整的假配置。
+        if not hasattr(_c, k):
+            raise AttributeError(
+                f"_run_info.PARAM_KEYS names {k!r}, which wgsconfig does not export; "
+                "fix the key (wgsconfig exports e.g. SUPERPOP/SUBPOPS/AXIS), not the value")
+        values[k] = getattr(_c, k)
     return {
         "schema_version": 1,
         "run_id": run_id or datetime.datetime.now().strftime("%Y%m%d-%H%M%S"),
