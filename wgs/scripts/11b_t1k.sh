@@ -37,7 +37,11 @@ if [ ! -s "$R1" ] || [ ! -s "$R2" ]; then
   samtools view -@ "$TH" -h "$CRAM" 6:29900000-33500000 19:54000000-55400000 \
     | samtools sort -@ "$TH" -o hla_kir.bam -
   samtools index hla_kir.bam
-  samtools fastq -@ "$TH" -1 "$R1" -2 "$R2" -0 /dev/null -s /dev/null hla_kir.bam
+  # fastq 前必须 collate：samtools fastq 按相邻配对，坐标排序输入下不相邻的对会被当作单端
+  # 丢弃（实测 1,943,434 读段只剩 7,243 对，交付流程同样先 collate——见 HANDOFF §5 的
+  # "T1K 要求严格配对，曾用 collate→fastq"）。collate 后只剩真单端（配对另一半在区域外）。
+  samtools collate -@ "$TH" -O hla_kir.bam \
+    | samtools fastq -@ "$TH" -1 "$R1" -2 "$R2" -0 /dev/null -s /dev/null -
 fi
 
 run_one(){
