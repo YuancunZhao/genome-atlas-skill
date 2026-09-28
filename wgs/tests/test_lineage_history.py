@@ -185,12 +185,39 @@ class TestObservationsAndRoutes(unittest.TestCase):
                           "唯一一级就弱，且上面没有别的：保守落点为空而不是硬报它")
 
     def test_reviewed_call_beats_any_automatic_rule(self):
+        """复核记录优先于自动规则——但只在**它属于这个样本**时（复审 AN4）。
+
+        旧版本不带样本就返回结论，那会让一个样本的人工判断顺着支系名传播给所有同支系样本。
+        """
         hist = lh.load_history({"schema_version": 1, "reviewed_calls": {
-            "y:N-CTS4714": {"conservative_hg": "N-M1845", "reason": "1-5 sites per level below"}}})
-        self.assertEqual(lh.reviewed_call(hist, "y", "N-CTS4714"), ("N-M1845", "1-5 sites per level below"))
-        self.assertEqual(lh.reviewed_call(hist, "y", "N-CTS4714")[0], lh.reviewed_call(hist, "y", "y:N-CTS4714")[0])
-        self.assertEqual(lh.reviewed_call(hist, "mt", "A13"), (None, None), "别的支系不受影响")
-        self.assertEqual(lh.reviewed_call({}, "y", "N-CTS4714"), (None, None))
+            "y:N-CTS4714": {"conservative_hg": "N-M1845", "reason": "1-5 sites per level below",
+                            "sample_id": "S1"}}})
+        self.assertEqual(lh.reviewed_call(hist, "y", "N-CTS4714", sample_id="S1"),
+                         ("N-M1845", "1-5 sites per level below"))
+        self.assertEqual(lh.reviewed_call(hist, "y", "N-CTS4714", sample_id="S1")[0],
+                         lh.reviewed_call(hist, "y", "y:N-CTS4714", sample_id="S1")[0],
+                         "带/不带 kind 前缀的键等价")
+        self.assertEqual(lh.reviewed_call(hist, "mt", "A13", sample_id="S1"), (None, None), "别的支系不受影响")
+        self.assertEqual(lh.reviewed_call({}, "y", "N-CTS4714", sample_id="S1"), (None, None))
+
+    def test_a_review_belongs_to_one_sample_not_to_the_branch(self):
+        """同支系的**另一个**样本不得继承本样本的复核结论——这是 AN4 的核心。"""
+        hist = lh.load_history({"schema_version": 1, "reviewed_calls": {
+            "y:N-CTS4714": {"conservative_hg": "N-M1845", "reason": "reviewed for S1", "sample_id": "S1"}}})
+        said = []
+        got = lh.reviewed_call(hist, "y", "N-CTS4714", sample_id="S2", log=said.append)
+        self.assertEqual(got, (None, None), "S2 调出同一支系也不得套用 S1 的结论")
+        self.assertTrue(any("belongs to S1" in m for m in said), said)
+        self.assertEqual(lh.reviewed_call(hist, "y", "N-CTS4714", sample_id=None), (None, None),
+                         "未指明样本时不套用")
+
+    def test_an_unmarked_review_is_not_a_generic_rule(self):
+        """没有 sample_id 的旧记录不得被当成通用规则——它无法与"通用规则"区分，而正是这种混同要修。"""
+        hist = lh.load_history({"schema_version": 1, "reviewed_calls": {
+            "y:N-CTS4714": {"conservative_hg": "N-M1845", "reason": "no owner recorded"}}})
+        said = []
+        self.assertEqual(lh.reviewed_call(hist, "y", "N-CTS4714", sample_id="S1", log=said.append), (None, None))
+        self.assertTrue(any("no sample_id" in m for m in said), said)
 
     def test_no_routes_without_evidence(self):
         hist = lh.load_history({"schema_version": 1, "tree_source": "YFull", "tree_version": "v14.0",
