@@ -63,10 +63,13 @@ ARTIFACTS = {
     },
     "pharmcat_summary": {
         "path": "06_pgx/pharmcat",
-        "producer": None,
-        "produced_by_hand": True,
+        "producer": "10_pharmcat.sh",
+        "produced_by_hand": False,
         "consumers": ["11_pgx_extra", "30_build_report_data"],
-        "note": "PharmCAT report and diplotypes",
+        "note": "PharmCAT report and diplotypes; 10_pharmcat.sh builds the GRCh37 fill, lifts to GRCh38, "
+                "runs PharmCAT with Cyrius' CYP2D6 call as an outside call, and is wired into run_all.sh. "
+                "Audited as hand-made at first: wrong -- the step exists, and only the rerun log in the "
+                "work tree shows that a previous attempt had to be finished by hand.",
     },
 }
 
