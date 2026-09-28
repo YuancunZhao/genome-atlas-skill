@@ -28,6 +28,11 @@ tstv = [l for l in open(sp) if l.startswith("TSTV")][0].split("\t")
 psc = [l for l in open(sp) if l.startswith("PSC")][0].split("\t")
 call_bp = sum(int(l.split()[2]) - int(l.split()[1]) for l in open(W/"00_input/callable.bed"))
 _w_a = ms[ms.chrom.isin([str(i) for i in range(1, 23)])]
+# H6 记了一处"13/21 用 bin 均值、30 用长度加权"的口径差异。实测两者相等（49.7147 vs 49.7148，差 0.00%）：
+# mosdepth --by 1000 产出严格等长 bin（2881044 bin / 2881033286 bp，平均 999.997 bp），等长时简单平均
+# 与长度加权是同一个数。因此这里不改那两个脚本，也不在此处加断言——我第一版写过一个"两者应一致"的
+# 检查，拿染色体级的 bases/len 去比 bin 级的量，立刻误报 100%，已删除。真要长期守住这条等价性，
+# 应该在读取 regions.bed 的地方比（2.88M 行，值得单独一步），而不是在这里用错粒度假装检查过。
 D["kpi"] = {"depth_auto": round(_w_a["bases"].sum() / _w_a["length"].sum(), 1), "depth_x": round(dep["X"], 1), "depth_y": round(dep["Y"], 1), "depth_mt": int(dep["MT"]),
             "callable_gb": round(call_bp/1e9, 2), "pass_records": sn(sp, "number of records"), "snv": sn(sp, "number of SNPs"), "indel": sn(sp, "number of indels"),
             "titv": float(tstv[4]), "het": int(psc[5]), "homalt": int(psc[4]), "all_records": sn(W/"01_qc/stats.norm.txt", "number of records"),
