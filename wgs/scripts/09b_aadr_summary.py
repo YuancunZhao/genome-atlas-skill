@@ -60,12 +60,22 @@ s["distance_to_target"] = np.sqrt(((s[present].values - D) ** 2).sum(1))
 # n_called_snps / call_rate must be measured on the final pruned site set, not on the extraction-stage
 # prefilter: the old code compared a 30%-filter call rate against the 50% ancient gate, which are
 # different denominators. plink2 --missing over aadr.bed gives the real per-individual counts.
-_MISS = pathlib.Path(f"{W}/aadr.smiss")   # plink2 writes .smiss/.vmiss; plink1 would write .imiss
+# 复审 AN2：缺失率必须按**实际用于投影的位点**算。09_aadr_pca.sh 先 --indep-pairwise 出 prune.prune.in
+# 再拿它做 PCA，而这里原先只给 --bfile aadr，等于用全部位点的缺失率去描述一个只用修剪集算出来的结果——
+# 两个分母不同，"call_rate 0.70" 之类的数字与它要解释的对象对不上。
+# 输出名换成 aadr.pruned：旧的 aadr.smiss 是未修剪口径，命中缓存就等于问题一直在。
+_MISS = pathlib.Path(f"{W}/aadr.pruned.smiss")
+_PRUNE = pathlib.Path(f"{W}/prune.prune.in")
 if not _MISS.exists():
     if not pathlib.Path(f"{W}/aadr.bed").exists():
         _state("unavailable", "missing_panel", f"{W}/aadr.bed not found; run 08 first")
+    if not _PRUNE.exists():
+        _state("unavailable", "missing_prune_set",
+               f"{_PRUNE} not found; the missingness must be computed over the same sites the PCA used, "
+               f"which come from 09_aadr_pca.sh -- run it first")
     import subprocess
-    r = subprocess.run([PLINK2, "--bfile", f"{W}/aadr", "--missing", "--out", f"{W}/aadr",
+    r = subprocess.run([PLINK2, "--bfile", f"{W}/aadr", "--extract", str(_PRUNE), "--missing",
+                        "--out", f"{W}/aadr.pruned",
                         "--threads", str(THREADS), "--memory", str(int(float(MEM_GB) * 1000))],
                        capture_output=True, text=True)
     if r.returncode != 0 or not _MISS.exists():
