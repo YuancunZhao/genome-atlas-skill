@@ -566,39 +566,26 @@ function ageInRange(rec, loBP, hiBP) {
   return null;                       // 年代未知
 }
 
+/* AN6 复审：地图行的选取提成纯函数，卡片与回归测试共用同一份（不再各写一套）。
+   - 只画合格记录：eligible===false 是 09b/04b 的唯一门槛判定，地图不自行放宽。
+   - "全部"范围也显示年代未知的记录：现代参考个体普遍无年代，不能被古代时间轴藏起来；
+     具体年代范围内，未知的仍既不算命中也不算排除。 */
+function geomapRows(records, loBP, hiBP) {
+  const okRows = (records || []).filter(r => r.eligible !== false);
+  const inRange = [], outRange = [], noDate = [];
+  const isAll = (loBP <= 0 && hiBP >= 1000000);
+  okRows.forEach(r => {
+    const hit = ageInRange(r, loBP, hiBP);
+    if (hit === null) (isAll ? inRange : noDate).push(r);
+    else if (hit) inRange.push(r); else outRange.push(r);
+  });
+  return { inRange, outRange, noDate };
+}
+
 /* 共用地图：底图 + 点 + 选择联动。现代图与古代图只是传入的 locations 不同——同一段绘制逻辑，
    避免两个视图对"精度""无坐标"给出不一致的处理。返回 { placed, unplaced } 计数。 */
-function drawGeoMap(svg, locations, selectedId, onSelect, opts) {
-  const o = opts || {}, Z = zh();
-  const rows = Array.isArray(locations) ? locations : [];
-  const placed = rows.filter(r => geoValid(r.latitude, r.longitude));
-  const unplaced = rows.length - placed.length;
-  // 底图：内嵌的 <symbol id="world_land">；没有它也能画点（只是没有轮廓）
-  el(svg, 'use', { href: '#world_land', class: 'landlayer', x: 0, y: 0 });
-  const maxD = Math.max(1e-9, ...placed.map(r => Number(r.distance_mean) || 0));
-  placed.forEach((r, i) => {
-    const p = geoXY(r.latitude, r.longitude);
-    const isSite = (r.precision || 'site') === 'site';
-    const sel = String(r.id) === String(selectedId);
-    // 精度不同形状不同：地区级坐标不能画得像一个已知遗址。
-    const node = isSite
-      ? el(svg, 'circle', { cx: p.x, cy: p.y, r: sel ? 3.2 : 2.2, class: 'mapdot', 'data-id': r.id })
-      : el(svg, 'rect', { x: p.x - 2.4, y: p.y - 2.4, width: 4.8, height: 4.8, rx: .6, class: 'mapregion', 'data-id': r.id });
-    // 距离用单色阶（不是尺寸）：大样本数不该看起来像更大的祖源份额。
-    const t = maxD > 0 ? Math.min(1, (Number(r.distance_mean) || 0) / maxD) : 0;
-    node.setAttribute('fill-opacity', (sel ? 1 : 0.35 + 0.6 * (1 - t)).toFixed(2));
-    if (sel) node.setAttribute('stroke-width', '1.2');
-    node.setAttribute('tabindex', '0');           // 键盘可达
-    node.setAttribute('role', 'button');
-    tip(node, `${r.label || r.id}${r.n ? ' · n=' + r.n : ''}` +
-             (Number.isFinite(Number(r.distance_mean)) ? ` · d=${Number(r.distance_mean).toFixed(4)}` : ''));
-    const pick = () => { if (typeof onSelect === 'function') onSelect(String(r.id)); };
-    node.addEventListener('click', pick);
-    node.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(); } });
-    node.addEventListener('focus', pick);
-  });
-  return { placed: placed.length, unplaced: unplaced };
-}
+/* AN6 复审：drawGeoMap 自引入以来没有任何调用方（geomap 卡片自绘），却留着一套与卡片不同的
+   精度/距离处理——"辅助函数留着、实际渲染另写一套"正是复审点名的问题。删除；卡片即唯一实现。 */
 
 /* ── AN6 地理分布：把合格记录按采样/发现地点画在世界底图上，并可按年代范围查看 ─────────
    位置是**参考样本的来源地**，不是把目标样本投成某个坐标（§7）。筛选只是换一个查看已算好的
@@ -609,7 +596,6 @@ reveal('geomap',(s,c)=>{
   const A=(D.ancestry&&D.ancestry.analyses)||[], Z=zh();
   const _defId=(D.ancestry&&D.ancestry.default_analysis_id)||'';
   const a=(_defId&&A.find(x=>String(x.analysis_id)===String(_defId)))|| (_defId?null:A[0]) || {};
-  const all=(a.records||[]);
   const groups=(Array.isArray(a.groups)?a.groups:((a.groups||{}).ancient||[]));
   const ranked=groups.filter(g=>g.rank&&!g.small_group).sort((x,y)=>x.rank-y.rank);
   const top5=ranked.slice(0,5).map(g=>String(g.label));
@@ -628,11 +614,9 @@ reveal('geomap',(s,c)=>{
   const draw=()=>{
     clearEl(s);
     const R=RANGES[cur];
-    const inRange=[], outRange=[], noDate=[];
-    all.forEach(r=>{
-      const hit=ageInRange(r,R.l,R.h);
-      if(hit===null) noDate.push(r); else if(hit) inRange.push(r); else outRange.push(r);
-    });
+    // 选取走 geomapRows（与测试同一份纯函数）：不合格记录不进视图；"全部"下无年代者也显示
+    // ——现代参考个体普遍没有年代，不能被古代时间轴藏起来。
+    const { inRange, outRange, noDate } = geomapRows(a.records, R.l, R.h);
     const unplaced=inRange.filter(r=>!geoValid(r.latitude,r.longitude)).length;
     const placed=inRange.filter(r=>geoValid(r.latitude,r.longitude));
     el(s,'use',{href:'#world_land',x:ox,y:oy,width:360*sc,height:180*sc,fill:c.grid,'fill-opacity':.55,stroke:'none'});
@@ -641,22 +625,30 @@ reveal('geomap',(s,c)=>{
     placed.forEach(r=>{
       const p=P(r), lab=String(r.source_population_id||r.label||''), rid=String(r.record_id||'');
       const isSel=sel&&String(r.record_id||'')===sel;
-      const isTop=top5.includes(lab)||isSel, site=(r.location_precision||'site')==='site';
+      const isTop=top5.includes(lab)||isSel;
+      // 精度未知不冒充遗址级（AN6）：site/region 是元数据给的判定，缺了就是未知——形状仍可画，
+      // 但提示与图例如实说"未知"，不因"有坐标"就当成 site。
+      const prec=r.location_precision, site=prec==='site', region=prec==='region';
+      const precTxt=site?(Z?'遗址级':'site'):(region?(Z?'地区级':'region'):(Z?'精度未知':'precision unknown'));
       const t=dmax>0&&Number.isFinite(Number(r.distance_to_target))?Math.min(1,Number(r.distance_to_target)/dmax):1;
       const op=isSel?1:(isTop?1:(0.18+0.5*(1-t)));
-      const n=site?el(s,'circle',{cx:p.x,cy:p.y,r:isTop?4:2.1,fill:isTop?c.hero:c.data,'fill-opacity':op,stroke:c.bg,'stroke-width':isTop?.8:.4,class:'pop'})
-                  :el(s,'rect',{x:p.x-(isTop?3.4:2),y:p.y-(isTop?3.4:2),width:isTop?6.8:4,height:isTop?6.8:4,rx:1,fill:isTop?c.hero:c.data,'fill-opacity':op,stroke:c.bg,'stroke-width':.4,class:'pop'});
+      const n=region?el(s,'rect',{x:p.x-(isTop?3.4:2),y:p.y-(isTop?3.4:2),width:isTop?6.8:4,height:isTop?6.8:4,rx:1,fill:isTop?c.hero:c.data,'fill-opacity':op,stroke:c.bg,'stroke-width':.4,class:'pop'})
+                  :el(s,'circle',{cx:p.x,cy:p.y,r:isTop?4:2.1,fill:isTop?c.hero:c.data,'fill-opacity':op,stroke:c.bg,'stroke-width':.4,class:'pop'});
       n.setAttribute('tabindex','0'); n.setAttribute('role','button');
       const pick=()=>{ sel=(sel===rid)?null:rid; draw(); };
       n.addEventListener('click',pick);
       n.addEventListener('keydown',(e)=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();pick()}});
-      tip(n,`${lab||r.record_id} · ${r.locality||''} ${site?(Z?'遗址级':'site'):(Z?'地区级':'region')}`+
+      tip(n,`${lab||r.record_id} · ${r.locality||''} ${precTxt}`+
             (Number.isFinite(Number(r.date_mean_bp))?` · ${fmt(Math.round(r.date_mean_bp))} BP`:'')+
             (Number.isFinite(Number(r.distance_to_target))?` · d=${Number(r.distance_to_target).toFixed(4)}`:''));
     });
-    // 前五名标注
+    // 前五名标注：按 member_ids+location_id 找代表点（AN6）——同组多遗址时按 label 找"首个点"
+    // 会标到别的遗址上；member_ids 缺席的旧数据才退回 label 匹配。
     ranked.slice(0,5).forEach((g,i)=>{
-      const hit=placed.find(r=>String(r.source_population_id)===String(g.label));
+      const ids=new Set((g.member_ids||[]).map(String));
+      const hit=placed.find(r=>ids.has(String(r.record_id))&&String(r.location_id||'')===String(g.location_id||''))
+             || placed.find(r=>ids.has(String(r.record_id)))
+             || placed.find(r=>String(r.source_population_id)===String(g.label));
       if(!hit) return;
       const p=P(hit);
       txt(s,{x:p.x+6,y:p.y-3-i*9,'font-size':8,'font-weight':700,fill:c.ink,stroke:c.bg,'stroke-width':2.2,'paint-order':'stroke'},
@@ -671,10 +663,12 @@ reveal('geomap',(s,c)=>{
     [0,2000,4000,6000,8000].forEach(v=>{
       el(s,'line',{x1:X(v),y1:by-4,x2:X(v),y2:by+4,stroke:c.faint,'stroke-width':.8});
       // BP → 公元：1950 - BP（BP 以 1950 为基准，2000 BP 是公元前 50 年，不是公元 50 年）。
-      // 两套基准写错方向就会把"前 2050 年"说成"公元 2050 年"。
+      // 两套基准写错方向就会把"前 2050 年"说成"公元 2050 年"。0 BP 就是 1950 年本身——
+      // 标成"今"会把基准年当成当前年份（AN6）。
       const ce=1950-v;
       txt(s,{x:X(v),y:by+15,'text-anchor':'middle','font-size':7.5,fill:c.faint},
-          v===0?(Z?'今':'now'):`${fmt(v)} BP`+(ce<=0?`（${Z?'约前':'≈'}${fmt(-ce)}${Z?' 年':''}）`:`（${Z?'约':'≈'}${fmt(ce)}${Z?' 年':' CE'}）`));
+          v===0?(Z?'1950（BP 基准）':'1950 (BP base)')
+               :`${fmt(v)} BP`+(ce<=0?`（${Z?'约前':'≈'}${fmt(-ce)}${Z?' 年':''}）`:`（${Z?'约':'≈'}${fmt(ce)}${Z?' 年':' CE'}）`));
     });
     txt(s,{x:bx0-6,y:by+4,'text-anchor':'end','font-size':7.5,'font-weight':700,fill:c.muted},Z?'古老':'older');
     txt(s,{x:bx1+6,y:by+4,'font-size':7.5,'font-weight':700,fill:c.muted},Z?'现代':'recent');
@@ -694,8 +688,13 @@ reveal('geomap',(s,c)=>{
     if(LBOX){
       LBOX.textContent='';
       ranked.slice(0,12).forEach(g=>{
-        const hit=placed.filter(r=>String(r.source_population_id)===String(g.label));
-        const rid=hit.length?String(hit[0].record_id||''):'';
+        // 与地图共用同一个 sel（稳定 ID），两边互选；行的定位点按 member_ids+location_id 找
+        // （AN6）——同组多遗址时按 label 取首个会把选中带到别的遗址。member_ids 缺席才退回 label。
+        const ids=new Set((g.member_ids||[]).map(String));
+        const hits=placed.filter(r=>ids.has(String(r.record_id))&&String(r.location_id||'')===String(g.location_id||''));
+        const fallback=!hits.length?placed.filter(r=>String(r.source_population_id)===String(g.label)):[];
+        const cand=hits.length?hits:fallback;
+        const rid=cand.length?String(cand[0].record_id||''):'';
         const row=document.createElement('div');
         row.tabIndex=0; row.setAttribute('role','button');
         row.style.cssText='cursor:pointer;padding:1px 3px;border-radius:3px'+(rid&&rid===sel?';background:currentColor;opacity:.14':'');
@@ -707,11 +706,11 @@ reveal('geomap',(s,c)=>{
         LBOX.appendChild(row);
       });
     }
-    // 计数：分别说明"范围外"与"年代未知"，后者既不算命中也不算排除
+    // 计数：分别说明"范围外"与"年代未知"，后者既不算命中也不算排除；"全部"下无年代者照常显示
     const note=document.getElementById('geomap_note');
     if(note) note.textContent=(Z
-      ? `当前范围：${R.zh} · 命中 ${inRange.length} 条（其中 ${placed.length} 条已定位、${unplaced} 条缺坐标不落点）· 范围外 ${outRange.length} 条 · **年代未知 ${noDate.length} 条（不计入筛选）** · 深色 = 距离最近的前五名 · 圆点 = 遗址级，方框 = 地区级 · 底图 Natural Earth 1:110m（public domain）`
-      : `range: ${R.en} · ${inRange.length} records (${placed.length} placed, ${unplaced} without coordinates) · ${outRange.length} outside · ${noDate.length} with an unknown date (excluded from filtering) · emphasised = five closest · circles = site-level, squares = region-level · base map Natural Earth 1:110m (public domain)`)
+      ? `当前范围：${R.zh} · 命中 ${inRange.length} 条（其中 ${placed.length} 条已定位、${unplaced} 条缺坐标不落点）· 范围外 ${outRange.length} 条 · 年代未知 ${noDate.length} 条（"全部"下照常显示，其余范围不计入筛选）· 深色 = 距离最近的前五名 · 圆点 = 遗址级或精度未知，方框 = 地区级 · 底图 Natural Earth 1:110m（public domain）`
+      : `range: ${R.en} · ${inRange.length} records (${placed.length} placed, ${unplaced} without coordinates) · ${outRange.length} outside · ${noDate.length} with an unknown date (shown under "all", excluded from ranged filtering) · emphasised = five closest · circles = site or unknown precision, squares = region-level · base map Natural Earth 1:110m (public domain)`)
       .replace(/\*\*/g,'');
     foot(s,c,VB.w,VB.h-6,Z?'筛选只是换个范围查看已算好的结果，不重建 PCA、也不重算排名 · 离线底图，无外部请求'
                           :'filtering only changes which computed records are shown; no PCA rebuild, no re-ranking · offline base map, no external requests');

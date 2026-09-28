@@ -15,6 +15,7 @@ const grab = (re) => { const m = src.match(re); if (!m) throw new Error('pattern
 const code = [
   grab(/function overlapsAge[\s\S]*?\n}/),
   grab(/function ageInRange[\s\S]*?\n}/),
+  grab(/function geomapRows[\s\S]*?\n}/),
   grab(/const GEO_VB[\s\S]*?Math\.abs\(b\) <= 180;\n};/),
 ].join('\n').replace(/\bconst /g, 'var ');   // const 在 eval 里是块作用域，取不出来
 eval(code);
@@ -45,6 +46,21 @@ const bp2ce = (v) => 1950 - v;
 ok(bp2ce(2000) === -50, '2000 BP is 50 BCE, not 50 CE');
 ok(bp2ce(4000) === -2050 && bp2ce(8000) === -6050, 'older dates are BCE');
 ok(bp2ce(1950) === 0 && bp2ce(1000) === 950, 'the 1950 baseline and recent dates are CE');
+// —— AN6：地图行选取（geomapRows）
+const recs = [
+  { record_id: 'ok',   eligible: true,  date_mean_bp: 3000 },
+  { record_id: 'bad',  eligible: false, date_mean_bp: 3000 },   // 覆盖不合格：不进任何视图
+  { record_id: 'und',  eligible: true },                          // 无年代（典型现代参考个体）
+  { record_id: 'young',eligible: true,  date_mean_bp: 500 },
+];
+let g = geomapRows(recs, 0, 1000000);                            // "全部"
+ok(g.inRange.map(r => r.record_id).join(',') === 'ok,und,young', 'all range shows undated records and hides ineligible ones');
+ok(g.outRange.length === 0 && g.noDate.length === 0, 'all range neither excludes nor quarantines');
+g = geomapRows(recs, 1500, 5000);                                // 具体年代范围
+ok(g.inRange.map(r => r.record_id).join(',') === 'ok', 'ranged filter keeps only the in-range eligible record');
+ok(g.outRange.map(r => r.record_id).join(',') === 'young', 'out-of-range lands outside');
+ok(g.noDate.map(r => r.record_id).join(',') === 'und', 'undated is quarantined outside the all range');
+ok(!JSON.stringify(g).includes('"bad"'), 'an ineligible record never reaches the map at all');
 if (FAIL.length) { console.error('FAILED:\n  ' + FAIL.join('\n  ')); process.exit(1); }
 console.log('geo assertions passed');
 """
