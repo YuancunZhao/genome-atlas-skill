@@ -325,6 +325,8 @@ def _cli(argv=None):
     ap.add_argument("--out", required=True, help="where to write lineage_history.json")
     ap.add_argument("--sample", default="")
     ap.add_argument("--ytree", default="", help="YFull current_tree.json, for node-membership checks")
+    ap.add_argument("--rows", default="", help="JSON with the AADR records (11_aadr/summary.json); "
+                                              "their y_hg_raw/mt_hg_raw are what the observations are built from")
     a = ap.parse_args(argv)
 
     hist = load_history(json.loads(pathlib.Path(a.history).read_text(encoding="utf-8"))
@@ -334,6 +336,23 @@ def _cli(argv=None):
     stats = {}
     if nodes:
         print(f"tree nodes loaded: {len(nodes)}")
+    # 复审 AN4-P1：observations 此前恒为空列表（history_view(key, hist, [], parents)），于是报告里的
+    # "已发表发现记录 / 迁移路线"永远是空占位——不是"没有记录"，而是**从来没查过**。这里读入 AADR 的
+    # 记录（含 y_hg_raw/mt_hg_raw），交给 lineage_observations 去筛。查不到就如实报 0，并把原因带上。
+    rows = []
+    # 缺省指向 11_aadr 的结果：单独运行本步时也不必记住路径，而它正是观测的来源。
+    _rows_path = a.rows or str(pathlib.Path(a.yard).parent / "11_aadr" / "summary.json")
+    if _rows_path:
+        _rp = pathlib.Path(_rows_path)
+        if _rp.exists():
+            try:
+                _doc = json.loads(_rp.read_text(encoding="utf-8"))
+                rows = _doc.get("records") or []
+                print(f"observation source: {_rp.name}, {len(rows)} record(s)")
+            except (json.JSONDecodeError, OSError) as e:
+                print(f"WARNING: could not read {_rp}: {e}; observations will be empty", file=sys.stderr)
+        else:
+            print(f"WARNING: {_rp} not found; observations will be empty (has 09b run?)", file=sys.stderr)
     out = {"y": None, "mt": None}
     for kind in ("y", "mt"):
         p = pathlib.Path(a.yard) / f"{kind}_result.json"
@@ -348,7 +367,9 @@ def _cli(argv=None):
         s = lineage_summary(raw)
         node = s.get("terminal") or s.get("reported_hg")
         key = node if (node and ":" in str(node)) else (f"{kind}:{node}" if node else "")
-        _hist = history_view(key, hist, [], parents)
+        _obs = lineage_observations(rows, key, parents, kind, history=hist, known_nodes=nodes, stats=stats) \
+            if (rows and key) else []
+        _hist = history_view(key, hist, _obs, parents)
         if stats:
             _hist["label_notes"] = dict(stats)
         out[kind] = dict(s, history=_hist)

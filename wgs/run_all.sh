@@ -63,7 +63,7 @@ else
 fi
 # Lineage history (AN4): consumes 05/06 results and the normalised metadata; runs before 30 so the
 # report reads one file instead of re-deriving the paternal/maternal story from text.
-step 09d lineage history and evidence;                        python3 $S/lineage_history.py --history panel/lineage_history.json --yard $WGS/03_haplo --out $WGS/03_haplo/lineage_history.json --sample "$SAMPLE"
+step 09d lineage history and evidence;                        python3 $S/lineage_history.py --history panel/lineage_history.json --rows $WGS/11_aadr/summary.json --yard $WGS/03_haplo --out $WGS/03_haplo/lineage_history.json --sample "$SAMPLE"
 
 step 10b CYP2D6 star alleles;                                bash  $S/10b_cyrius.sh
 step 10 PharmCAT star alleles, CYP2D6, HLA;                    bash  $S/10_pharmcat.sh
