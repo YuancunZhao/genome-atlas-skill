@@ -43,8 +43,10 @@ step 07b pathogenic and loss-of-function tables;               python3 $S/07b_cl
 step 07c gnomAD frequencies for the candidates;                python3 $S/07c_gnomad_lookup.py
 if [ "${AADR_ENABLED:-0}" = "1" ]; then
   step 08 extract the ancient-DNA panel;                         python3 $S/08_aadr_extract.py
+step 08a main-contig alignment for SV calling;              bash  $S/08a_main_contigs.sh
 step 08b repeat expansions;                                  bash  $S/08b_expansionhunter.sh
 step 08c SMN1/SMN2 copy number;                            bash  $S/08c_smn.sh
+step 08d structural variants via Delly, takes hours;          bash  $S/08d_delly.sh
   step 09 ancient-DNA PCA and projection;                        bash  $S/09_aadr_pca.sh
   step 09b nearest present-day and ancient groups;               python3 $S/09b_aadr_summary.py
 step 09c runs of homozygosity;                                bash  $S/09c_roh.sh
