@@ -25,6 +25,13 @@ echo "pruned SNPs: $(wc -l < prune.prune.in)"; head -2 target.proj.sscore
 SCOPE=regional
 { printf '#FID\tIID\n'; awk -v sp="$SUPERPOP" 'NR>1 && $4==sp{print $1"\t"$2}' $R.psam; } > $SCOPE.ids
 $PLINK2 --pfile kg.common --keep $SCOPE.ids --maf 0.05 --bp-space 2000 --indep-pairwise 200 50 0.2 --out prune.$SCOPE --threads $THREADS --memory $MEM_MB >/dev/null
+# plink2 不把缺 ID（'.'）当重复 ID，--rm-dup 排不掉它们；regional 的剪枝集一旦含进一个以上 '.',
+# 后面所有按 ID 连接的步骤（--extract/--read-freq/--score）都会以 "variant ID '.' appears multiple
+# times" 中止（全局剪枝集恰好没含 '.'，所以只有 regional 踩中）。无 ID 的变异本来就无法与目标按 ID
+# 匹配，就地从剪枝集里剔除；下游 freq/pca/投影与 30 的位点计数都用同一份过滤后的集合。
+_ndot=$(grep -c "^\.$" prune.$SCOPE.prune.in || true)
+awk '$0!="."{print}' prune.$SCOPE.prune.in > prune.$SCOPE.prune.in.tmp && mv prune.$SCOPE.prune.in.tmp prune.$SCOPE.prune.in
+echo "$SCOPE: dropped $(( _ndot )) no-ID variant(s) from the pruned set"
 $PLINK2 --pfile kg.common --keep $SCOPE.ids --extract prune.$SCOPE.prune.in --freq --pca 10 allele-wts --out $SCOPE.pca --threads $THREADS --memory $MEM_MB >/dev/null
 $PLINK2 --pfile kg.common --keep $SCOPE.ids --extract prune.$SCOPE.prune.in --read-freq $SCOPE.pca.afreq --score $SCOPE.pca.eigenvec.allele 2 5 header-read no-mean-imputation variance-standardize --score-col-nums 6-15 --out $SCOPE.proj --threads $THREADS --memory $MEM_MB >/dev/null
 $PLINK2 --pfile $WGS/02_complete/$SAMPLE.1kg --extract prune.$SCOPE.prune.in --read-freq $SCOPE.pca.afreq --score $SCOPE.pca.eigenvec.allele 2 5 header-read no-mean-imputation variance-standardize --score-col-nums 6-15 --out $SCOPE.target.proj --threads $THREADS --memory $MEM_MB >/dev/null
