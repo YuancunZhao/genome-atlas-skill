@@ -91,5 +91,35 @@ class TestCoverageCaliber(unittest.TestCase):
                              "零缺失时 n_called 才等于 OBS_CT")
 
 
+@unittest.skipIf(_SKIP, _SKIP)
+class TestTargetGate(unittest.TestCase):
+    """目标不过覆盖门槛就没有排名：合成"旧有限投影 + 目标在最终位点集上全缺失"不能再 state=ok。"""
+
+    def test_fully_missing_target_yields_no_ranking(self):
+        with tempfile.TemporaryDirectory() as td:
+            cfg = _write_config(td)
+            w = _write_panel(td, {
+                "TESTSAMPLE": (130000, 130000),        # 目标在剪枝集上 100% 缺失
+                "HAN1": (0, 130000), "HAN2": (650, 130000),
+                "AM1": (30000, 130000),
+            })
+            r = _run_09b(cfg)
+            self.assertNotEqual(r.returncode, 0)
+            self.assertIn("target_below_coverage_gate", r.stderr + r.stdout)
+            self.assertFalse((w / "summary.json").exists(), "不过门槛不得写出带排名的 summary")
+            self.assertFalse((w / "near_modern.tsv").exists())
+
+    def test_target_absent_from_smiss_fails_the_gate(self):
+        """目标不在缺失率文件里 → 覆盖未知，按不过门槛处理，而不是默认通过。"""
+        with tempfile.TemporaryDirectory() as td:
+            cfg = _write_config(td)
+            w = _write_panel(td, {                   # smiss 里没有 TESTSAMPLE 这一行
+                "HAN1": (0, 130000), "HAN2": (650, 130000), "AM1": (30000, 130000),
+            })
+            r = _run_09b(cfg)
+            self.assertNotEqual(r.returncode, 0)
+            self.assertIn("target_below_coverage_gate", r.stderr + r.stdout)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

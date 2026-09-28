@@ -13,7 +13,7 @@ reference group may legitimately share the sample's display name.
 import sys, pathlib, json
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from wgsconfig import *  # noqa: F401,F403 -- P, W, REF, TOOLS, SAMPLE, THREADS ...
-from wgsconfig import (SAMPLE, AADR, AADR_ANNOTATION, MIN_CR_ANCIENT, MIN_CR_MODERN,
+from wgsconfig import (SAMPLE, AADR, AADR_ANNOTATION, MIN_CR_ANCIENT, MIN_CR_MODERN, MIN_CR_TARGET,
                        MIN_PROJECTION_SNPS, MIN_GROUP_N, AADR_ANCIENT_PREFIX, AADR_MODERN)
 
 import pandas as pd, numpy as np
@@ -92,6 +92,16 @@ s = s.drop(columns=[c for c in ("n_called_snps", "call_rate") if c in s.columns]
 if s["call_rate"].isna().any():
     # A record in proj.sscore that is not in the panel: keep it, but it cannot pass a coverage gate.
     s["call_rate"] = s["call_rate"].fillna(-1.0)
+# 目标门槛：投影坐标取自旧文件也能算距离，目标的**覆盖**要等 smiss 并进来才有值。这里不过门槛
+# 就不产任何排名——"旧有限投影 + 目标在最终位点集上 100% 缺失"的合成输入不再以 state=ok 交出
+# 榜单。NaN（目标不在 smiss 里）按 -1 处理：缺证据就是不过门槛，不是默认通过。
+_t = s.loc[s["kind"] == "target"].iloc[0]
+_t_rate = float(_t["call_rate"]) if pd.notna(_t["call_rate"]) else -1.0
+_t_n = float(_t["n_called_snps"]) if pd.notna(_t["n_called_snps"]) else -1.0
+if _t_rate < float(MIN_CR_TARGET) or _t_n < float(MIN_PROJECTION_SNPS):
+    _state("unavailable", "target_below_coverage_gate",
+           f"target call_rate={_t_rate:.4f} (min {MIN_CR_TARGET}), n_called={_t_n:.0f} "
+           f"(min {MIN_PROJECTION_SNPS}) on the final pruned sites")
 say = print
 if "source_population_id" not in s.columns:
     s["source_population_id"] = s.get("sample_label", s.get("label"))
