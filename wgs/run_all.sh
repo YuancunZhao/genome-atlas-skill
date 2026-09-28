@@ -41,15 +41,18 @@ step 06b mtDNA disease screen;                                 python3 $S/06b_mt
 step 07 annotate with ClinVar, consequences, frequencies;      bash  $S/07_annotate.sh
 step 07b pathogenic and loss-of-function tables;               python3 $S/07b_clinvar_tables.py
 step 07c gnomAD frequencies for the candidates;                python3 $S/07c_gnomad_lookup.py
-if [ "${AADR_ENABLED:-0}" = "1" ]; then
-  step 08 extract the ancient-DNA panel;                         python3 $S/08_aadr_extract.py
+# 医学与结构变异步骤（08a–08d、ROH）**不依赖祖源开关**：STR/SMN/SV/ROH 是报告医学结论的来源，
+# 把它们放进 AADR 条件块意味着 AADR=0（默认）时这些结论整块不产出——曾如此，已移出。
 step 08a main-contig alignment for SV calling;              bash  $S/08a_main_contigs.sh
 step 08b repeat expansions;                                  bash  $S/08b_expansionhunter.sh
 step 08c SMN1/SMN2 copy number;                            bash  $S/08c_smn.sh
 step 08d structural variants via Delly, takes hours;          bash  $S/08d_delly.sh
+step 09c runs of homozygosity;                                bash  $S/09c_roh.sh
+
+if [ "${AADR_ENABLED:-0}" = "1" ]; then
+  step 08 extract the ancient-DNA panel;                         python3 $S/08_aadr_extract.py
   step 09 ancient-DNA PCA and projection;                        bash  $S/09_aadr_pca.sh
   step 09b nearest present-day and ancient groups;               python3 $S/09b_aadr_summary.py
-step 09c runs of homozygosity;                                bash  $S/09c_roh.sh
 else
   skipped 08-aadr-extract aadr_not_configured 08
   skipped 09-aadr-pca aadr_not_configured 09
@@ -57,7 +60,7 @@ else
 fi
 # Lineage history (AN4): consumes 05/06 results and the normalised metadata; runs before 30 so the
 # report reads one file instead of re-deriving the paternal/maternal story from text.
-step 09c lineage history and evidence;                        python3 $S/lineage_history.py --history panel/lineage_history.json --yard $WGS/03_haplo --out $WGS/03_haplo/lineage_history.json --sample "$SAMPLE"
+step 09d lineage history and evidence;                        python3 $S/lineage_history.py --history panel/lineage_history.json --yard $WGS/03_haplo --out $WGS/03_haplo/lineage_history.json --sample "$SAMPLE"
 
 step 10b CYP2D6 star alleles;                                bash  $S/10b_cyrius.sh
 step 10 PharmCAT star alleles, CYP2D6, HLA;                    bash  $S/10_pharmcat.sh
