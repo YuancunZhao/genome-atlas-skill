@@ -99,9 +99,20 @@ het = pd.read_csv(W/"03_haplo/mt_heteroplasmy.tsv", sep="\t"); D["mt_het"] = het
 ps = pd.read_csv(P/"data/ref/all_phase3.psam", sep="\t").rename(columns={"#IID": "IID"})
 kg = pd.read_csv(W/"04_ancestry/kg.proj.sscore", sep="\t"); me = pd.read_csv(W/"04_ancestry/target.proj.sscore", sep="\t")
 D["pca_global"] = {"pts": [[r.SuperPop, r.Population, round(r.PC1_AVG, 4), round(r.PC2_AVG, 4)] for r in kg.itertuples()], "me": [round(me.PC1_AVG[0], 4), round(me.PC2_AVG[0], 4)]}
-ke = pd.read_csv(W/"04_ancestry/eas.proj.sscore", sep="\t"); mee = pd.read_csv(W/"04_ancestry/eas.target.proj.sscore", sep="\t")
-D["pca_eas"] = {"pts": [[r.Population, round(r.PC1_AVG, 4), round(r.PC2_AVG, 4)] for r in ke.itertuples()], "me": [round(mee.PC1_AVG[0], 4), round(mee.PC2_AVG[0], 4)]}
-D["anc"] = {"n_global": sum(1 for _ in open(W/"04_ancestry/prune.prune.in")), "n_eas": sum(1 for _ in open(W/"04_ancestry/prune.eas.prune.in")), "summary": open(W/"04_ancestry/summary.txt").read()}
+# 复审 P0：生产端 04 用 SCOPE=regional 写 regional.*，这里原先读 eas.* —— 新跑的产物根本不会被读到，
+# 而旧命名只存在于早先的交付树里（那次 SCOPE=eas）。统一到 regional；若只找到旧的 eas.*，明确说清楚
+# 这是历史命名、需要重跑 04，而不是悄悄用旧文件当成新结果。
+_REG = W / "04_ancestry" / "regional.proj.sscore"
+_OLD = W / "04_ancestry" / "eas.proj.sscore"
+if not _REG.exists() and _OLD.exists():
+    print(f"ERROR: found the legacy {_OLD.name} but not {_REG.name}. Step 04 now writes the regional.* "
+          f"names, so these eas.* files are from an earlier run and must not stand in for a fresh result. "
+          f"Re-run 04_ancestry_pca.sh, or set ref_superpop to the scope that produced them.",
+          file=sys.stderr)
+    raise SystemExit(2)
+ke = pd.read_csv(_REG, sep="\t"); mee = pd.read_csv(W/"04_ancestry/regional.target.proj.sscore", sep="\t")
+D["pca_eas"]   # 键名是 D 契约的一部分（report_script.js 读 D.pca_eas），与文件名的地域命名无关 = {"pts": [[r.Population, round(r.PC1_AVG, 4), round(r.PC2_AVG, 4)] for r in ke.itertuples()], "me": [round(mee.PC1_AVG[0], 4), round(mee.PC2_AVG[0], 4)]}
+D["anc"] = {"n_global": sum(1 for _ in open(W/"04_ancestry/prune.prune.in")), "n_eas": sum(1 for _ in open(W/"04_ancestry/prune.regional.prune.in")), "summary": open(W/"04_ancestry/summary.txt").read()}
 D["pop"] = {"n_super": int((ps.SuperPop == "EAS").sum()), "n_sub": int(ps.Population.isin(["CHS", "CHB"]).sum())}  # sizes the percentile captions quote
 # PAR heterozygous sites in the re-called X VCF (GRCh37 PAR1/PAR2); the misc caption quotes this
 _par_vcf = W/"00_input/X.recall.vcf.gz"
