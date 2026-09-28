@@ -23,6 +23,20 @@ DELLY=${DELLY:-$TOOLS/delly}
 [ -x "$DELLY" ] || { echo "delly not executable: $DELLY" >&2; exit 1; }
 [ -f "$IN" ] || { echo "main-contig alignment not found: $IN (run 08a_main_contigs.sh first)" >&2; exit 1; }
 
+# 复审 P0：不要默认在未验证的输入上产出一份"看起来像交付"的 SV 调用集。08a 生成的文件带 provenance
+# 标记；看到 verified_against_delivered=false 就停下来，除非调用者明确接受这个差别。
+if [ -f "$IN.provenance.json" ]; then
+  if grep -q '"verified_against_delivered": *false' "$IN.provenance.json" 2>/dev/null; then
+    if [ "${ALLOW_UNVERIFIED_INPUT:-0}" != "1" ]; then
+      echo "ERROR: $IN was produced by an unverified reconstruction (see $IN.provenance.json)." >&2
+      echo "Running Delly on it yields structural variants that are NOT the delivered ones." >&2
+      echo "Set ALLOW_UNVERIFIED_INPUT=1 if that is understood and intended." >&2
+      exit 2
+    fi
+    echo "WARNING: running on an unverified input (ALLOW_UNVERIFIED_INPUT=1); output is not the delivered SV set" >&2
+  fi
+fi
+
 "$DELLY" sr -g "$REF" -o target.sv.bcf -h "${THREADS:-8}" "$IN" > "$WGS/logs/delly.log" 2>&1
 [ -s target.sv.bcf ] || { echo "delly produced no target.sv.bcf (see logs/delly.log)" >&2; exit 1; }
 bcftools index -f target.sv.bcf 2>/dev/null || true

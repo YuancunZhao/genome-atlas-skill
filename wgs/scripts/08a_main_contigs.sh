@@ -39,8 +39,30 @@ n=$(wc -l < main_contigs.bed)
 # -F 4 排除未比对的读段：-L 是"与区域重叠即取"，未比对的读段没有坐标、会因重叠判断被一并带出，
 # 实测使输出达到交付件的 5 倍（6.2 GB vs 1.24 GB）。主 contig 提取的目的是让坐标与参考一致，
 # 而未比对的读段不带坐标，对 SV 调用没有贡献。
+# 覆盖保护（复审 P0）：本脚本的生成方法**未经与交付件比对**，所以它绝不去覆盖一份没有 provenance
+# 标记的 norm.main.cram —— 那多半就是交付流程留下的原始文件，而且是这一步仅存的证据。上一次调查中
+# 原件已被重跑覆盖过（大小从 1.24 GB 变成 29 GB），恢复不了；这里让"覆盖"必须由人明确要求。
+if [ -s norm.main.cram ] && [ ! -f norm.main.cram.provenance.json ]; then
+  echo "refusing to overwrite the existing norm.main.cram: it carries no provenance marker, so it is" >&2
+  echo "most likely the delivered file and this script's method is not verified against it." >&2
+  echo "To replace it deliberately: rm norm.main.cram && re-run, or set REBUILD_MAIN_CRAM=1." >&2
+  [ "${REBUILD_MAIN_CRAM:-0}" = "1" ] || exit 0
+  echo "REBUILD_MAIN_CRAM=1: overwriting anyway" >&2
+fi
+
 samtools view -T "$REF" -@ "${THREADS:-8}" -O cram,embed_ref=2 -F 4 -L main_contigs.bed \
   -o norm.main.cram "$CRAM" 2> "$WGS/logs/main_contigs.log"
+
+# 产出即打标：下游据此知道这份输入**没有**与交付件比对过。
+cat > norm.main.cram.provenance.json <<JSON
+{
+  "producer": "08a_main_contigs.sh",
+  "verified_against_delivered": false,
+  "note": "The delivered norm.main.cram could not be reproduced (see this script's header). This file was produced by the documented reading of the step and has NOT been shown equivalent to the delivered one; SV calls computed on it are not the delivered SV calls.",
+  "cram": "$CRAM",
+  "bed": "main_contigs.bed"
+}
+JSON
 samtools index norm.main.cram
 [ -s norm.main.cram ] || { echo "no output written" >&2; exit 1; }
 echo "MAIN_CONTIGS_DONE -> $W/norm.main.cram ($n contigs)"
