@@ -97,7 +97,9 @@ print(f"after call-rate filter: {len(keep2)} individuals",file=sys.stderr)
 
 # --- write plink1 bed (SNP-major): 00=hom a1a1? plink codes: 00 hom A1, 01 missing, 10 het, 11 hom A2
 # We set A1 = eigen a1 (counted allele). geno value g = count of a1. plink 2-bit: g==2 -> 00, g==1 -> 10, g==0 -> 11, missing -> 01
-_tgt=np.array([(-1 if v is None else int(v)) for v in sel["dayu_a1"]],dtype=np.int8)
+# pandas 把缺失值读成 NaN，`v is None` 对 NaN 为 False，随后 int(nan) 抛 ValueError 带走整步。
+# 用 pd.isna 同时覆盖 None 与 NaN —— 真实 AADR 的 GT 列本来就有缺失（女性和性别未知样本被标成 n/a）。
+_tgt=np.array([(-1 if pd.isna(v) else int(v)) for v in sel["dayu_a1"]],dtype=np.int8)
 allg=np.vstack([G,_tgt[None,:]])
 labels=list(keep2.label)+[f"{NAME_EN}"]; kinds=list(keep2.kind)+["target"]; iids=list(keep2.iid)+[f"{NAME_EN}"]
 code=np.select([allg==2,allg==1,allg==0],[0b00,0b10,0b11],default=0b01).astype(np.uint8)
