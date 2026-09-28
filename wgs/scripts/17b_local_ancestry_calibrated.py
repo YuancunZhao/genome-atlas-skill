@@ -59,36 +59,76 @@ for f in glob.glob(f"{W}/calib.*.global.anc.gz"):
     d=pd.read_csv(f,sep="\t"); d["chrom"]=c; cal.append(d)
 if cal:
     cd=pd.concat(cal).merge(ps[["SAMPLE","Population"]],on="SAMPLE"); cd["w"]=cd.chrom.map(LEN)
-    print(f"\ncalibration on chromosomes {sorted(set(cd.chrom))} (held-out reference individuals):")
-    out=[]
-    for pop,g in cd.groupby("Population"):
-        per=g.groupby("SAMPLE").apply(lambda x: pd.Series({a:np.average(x[a],weights=x.w) for a in anc}),include_groups=False)
-        out.append((pop, len(per), per[A_COL].mean(), per[A_COL].std(), per[B_COL].mean(), per[B_COL].std()))
-        print(f"  {pop}: n={len(per)}  {A_COL} {per[anc[0]].mean()*100:.1f}% (sd {per[anc[0]].std()*100:.1f})  {B_COL} {per[B_COL].mean()*100:.1f}% (sd {per[B_COL].std()*100:.1f})")
-    # {NAME_EN} restricted to the same chromosomes for a fair comparison
-    same=dy[dy.chrom.isin(set(cd.chrom))]
-    dn=np.average(same[A_COL],weights=same.w); ds=np.average(same[B_COL],weights=same.w)
-    print(f"  {NAME_EN} (same chromosomes): {A_COL} {dn*100:.1f}%  {B_COL} {ds*100:.1f}%")
-    for pop,n,m,s,ms,ss in out:
-        print(f"    vs {pop}: {NAME_EN} is {(dn-m)/s:+.1f} sd on {A_COL}")
-    pd.DataFrame(out,columns=["pop","n","north_mean","north_sd","south_mean","south_sd"]).to_csv(f"{W}/calibration.tsv",sep="\t",index=False)
-    # §7/AN6：把校准结果写回结构化结果，报告才能用**真实的**群体、人数与染色体，而不是写死 CHB/CHS
-    # 与 1/2/6/22。这里同时记下实际参与汇总的染色体集合。
-    import json as _json
-    _lj = pathlib.Path(f"{W}/local_ancestry.json")
-    if _lj.exists():
-        try:
-            _d = _json.loads(_lj.read_text(encoding="utf-8"))
-            _d["calibration"] = [{"population": p, "n": n, "north_mean": m, "north_sd": sd,
-                                  "south_mean": ms, "south_sd": ss} for p, n, m, sd, ms, ss in out]
-            _d["calibration_state"] = "ok"
-            _d["calibration_chroms"] = sorted(set(str(c) for c in cd.chrom), key=lambda x: int(x))
-            _d["calibration_panels"] = [A_COL, B_COL]   # 参与比较的两个来源面板（来自配置）
-            _lj.write_text(_json.dumps(_d, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
-            print(f"wrote calibration for {len(out)} population(s) over chromosomes "
-                  f"{_d['calibration_chroms']} into local_ancestry.json")
-        except (OSError, _json.JSONDecodeError) as e:
-            print(f"warning: could not attach calibration to local_ancestry.json ({e})", file=sys.stderr)
+    # 统一有效染色体集合（AN3 复审）：均值与 sd 只有在同一分母上才可比。某个 holdout 个体缺一条
+    # 染色体时它个人的平均用了更小的集合——取所有校准个体**与目标**都有的染色体交集，校准与目标
+    # 都在这个集合上平均；交集为空则明确说不可比，而不是拿不同分母硬比。
+    _sets = cd.groupby("SAMPLE")["chrom"].apply(lambda s: set(s))
+    _common = set.intersection(*_sets.tolist()) if len(_sets) else set()
+    _common &= set(dy.chrom)
+    if _common:
+        cd = cd[cd["chrom"].isin(_common)]
+        print(f"\ncalibration on chromosomes {sorted(_common, key=int)} "
+              f"(common to every held-out individual and the target):")
+        out=[]
+        for pop,g in cd.groupby("Population"):
+            per=g.groupby("SAMPLE").apply(lambda x: pd.Series({a:np.average(x[a],weights=x.w) for a in anc}),include_groups=False)
+            out.append((pop, len(per), per[A_COL].mean(), per[A_COL].std(), per[B_COL].mean(), per[B_COL].std()))
+            # 第一面板按 A_COL 打印：此前误用 anc[0]，FLARE 列序一换就把别的面板当成了来源面板
+            print(f"  {pop}: n={len(per)}  {A_COL} {per[A_COL].mean()*100:.1f}% (sd {per[A_COL].std()*100:.1f})"
+                  f"  {B_COL} {per[B_COL].mean()*100:.1f}% (sd {per[B_COL].std()*100:.1f})")
+        # {NAME_EN} restricted to the same chromosomes for a fair comparison
+        same=dy[dy.chrom.isin(_common)]
+        dn=np.average(same[A_COL],weights=same.w); ds=np.average(same[B_COL],weights=same.w)
+        print(f"  {NAME_EN} (same chromosomes): {A_COL} {dn*100:.1f}%  {B_COL} {ds*100:.1f}%")
+        for pop,n,m,s,ms,ss in out:
+            # SD=0 或未定义不给 z 分数（AN3）：除以 0 得 ±inf、单个体 std 为 NaN，那是"不可比"，
+            # 不是"极显著"。均值差照常给出，读者自己判断。
+            if s is None or not np.isfinite(s) or s == 0:
+                print(f"    vs {pop}: sd of {A_COL} is 0 or undefined; no z-score (mean difference {dn-m:+.4f})")
+            else:
+                print(f"    vs {pop}: {NAME_EN} is {(dn-m)/s:+.1f} sd on {A_COL}")
+        pd.DataFrame(out,columns=["pop","n","north_mean","north_sd","south_mean","south_sd"]).to_csv(f"{W}/calibration.tsv",sep="\t",index=False)
+        # §7/AN6：把校准结果写回结构化结果，报告才能用**真实的**群体、人数与染色体，而不是写死 CHB/CHS
+        # 与 1/2/6/22。AN3 复审：同时写回目标在同一染色体集合上的值（与校准同口径），并把 17b 自己的
+        # 全局口径声明出来——17 的 global 是 marker 计数，这里是 FLARE posterior 的长度加权，图表比较
+        # 必须取同口径的一对，不能拿 marker 计数对 posterior 均值。
+        import json as _json
+        _lj = pathlib.Path(f"{W}/local_ancestry.json")
+        if _lj.exists():
+            try:
+                _f = lambda v: float(v) if (v is not None and np.isfinite(v)) else None
+                _d = _json.loads(_lj.read_text(encoding="utf-8"))
+                _d["calibration"] = [{"population": p, "n": n,
+                                      "north_mean": _f(m), "north_sd": _f(sd),
+                                      "south_mean": _f(ms), "south_sd": _f(ss),
+                                      "panels": [A_COL, B_COL],
+                                      "target_north": _f(dn), "target_south": _f(ds)}
+                                     for p, n, m, sd, ms, ss in out]
+                _d["calibration_state"] = "ok"
+                _d["calibration_chroms"] = sorted((str(c) for c in _common), key=lambda x: int(x))
+                _d["calibration_panels"] = [A_COL, B_COL]   # 参与比较的两个来源面板（来自配置）
+                _d["calibrated_global"] = [{"panel_id": a, "value": float(gw[a])} for a in anc]
+                _d["calibrated_global_caliber"] = "flare_posterior_length_weighted"
+                _lj.write_text(_json.dumps(_d, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+                print(f"wrote calibration for {len(out)} population(s) over chromosomes "
+                      f"{_d['calibration_chroms']} into local_ancestry.json")
+            except (OSError, _json.JSONDecodeError) as e:
+                print(f"warning: could not attach calibration to local_ancestry.json ({e})", file=sys.stderr)
+    else:
+        print("warning: no chromosome is shared by every calibration individual and the target; "
+              "the calibration comparison is not on a common denominator and is skipped", file=sys.stderr)
+        import json as _json
+        _lj = pathlib.Path(f"{W}/local_ancestry.json")
+        if _lj.exists():
+            try:
+                _d = _json.loads(_lj.read_text(encoding="utf-8"))
+                _d["calibration"] = []
+                _d["calibration_state"] = "no_common_chroms"
+                _d["calibration_reason"] = ("no chromosome is present for every calibration individual "
+                                            "and the target; means would not share a denominator")
+                _lj.write_text(_json.dumps(_d, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+            except (OSError, _json.JSONDecodeError) as e:
+                print(f"warning: could not record the no-common-chromosomes state ({e})", file=sys.stderr)
 else:
     # 无校准也要独立交付（AN3）：原始 LA 的 posterior 全局值照常写盘。17 留下的空 calibration 列表
     # 分不清"没跑校准"与"跑了没写"——这里把状态明确记为 not_run，报告据此分开呈现原始与校准结果。
