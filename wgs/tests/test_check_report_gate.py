@@ -73,5 +73,18 @@ class TestSourceChecksFollowTheReport(unittest.TestCase):
         self.assertFalse(chk.FAIL)
 
 
+class TestNodeGate(unittest.TestCase):
+    def test_missing_node_fails_instead_of_passing(self):
+        chk.FAIL.clear()
+        real_which = chk.shutil.which
+        chk.shutil.which = lambda name: None          # simulate a machine without node
+        try:
+            chk.check_runtime(None)
+        finally:
+            chk.shutil.which = real_which
+        self.assertTrue(any("node is not installed" in f for f in chk.FAIL),
+                        "a skipped runtime check must not count as passed")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -388,11 +388,12 @@ def check_runtime(html_path):
     X-chromosome gene deletion shipped past all of them. Nor can they see a failure that
     only happens in one language: the copy is indexed as UI[key][zh ? 0 : 1], so a malformed
     English entry throws inside t() and blanks the page in English alone. Run both.
-    Skipped, with a note, when node is unavailable.
+    A missing node is a failure, not a skip: "跳过不可计通过" -- exiting 0 here let a
+    machine without node hand over reports whose figures had never executed anywhere.
     """
     node = shutil.which("node")
     if not node:
-        print("note: node was not found; the runtime figure check was skipped")
+        fail("node is not installed; the runtime figure check cannot run, and a skipped check must not count as passed")
         return
     if html_path is None or not html_path.exists():
         fail("report.html not found for the runtime check")
