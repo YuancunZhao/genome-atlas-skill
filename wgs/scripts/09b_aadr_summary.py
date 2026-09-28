@@ -81,8 +81,11 @@ if not _MISS.exists():
     if r.returncode != 0 or not _MISS.exists():
         _state("unavailable", "missingness_failed", (r.stderr or r.stdout or "")[-400:])
 imiss = pd.read_csv(_MISS, sep=r"\s+").rename(columns={"#FID": "label", "IID": "iid"})
-# plink2 sample-missing report: OBS_CT = non-missing sites, MISSING_CT = missing ones, F_MISS = ratio.
-imiss["n_called_snps"] = imiss["OBS_CT"].astype(int)
+# plink2 sample-missing report（formats#smiss，并对照真实文件核过：OBS_CT == prune.prune.in 行数）：
+# OBS_CT 是**分母**（总位点数），MISSING_CT 才是缺失数。已调用数是两者之差；把 OBS_CT 当成已调用
+# 数会把缺失位点计入 n_called_snps，MIN_PROJECTION_SNPS 门槛随之失真。F_MISS = MISSING_CT/OBS_CT，
+# 所以 call_rate = 1 - F_MISS 与上面的差同口径。
+imiss["n_called_snps"] = imiss["OBS_CT"].astype(int) - imiss["MISSING_CT"].astype(int)
 imiss["call_rate"] = 1.0 - imiss["F_MISS"].astype(float)
 s = s.drop(columns=[c for c in ("n_called_snps", "call_rate") if c in s.columns]) \
      .merge(imiss[["iid", "n_called_snps", "call_rate"]], on="iid", how="left")
