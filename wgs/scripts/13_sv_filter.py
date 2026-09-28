@@ -19,15 +19,18 @@ _auto = subprocess.run(f"zcat {PROJ}/wgs/01_qc/depth.regions.bed.gz | awk '$1 ~ 
 MEAN_DP = float(_auto) if _auto else None
 if MEAN_DP is None:
     print("WARNING: autosomal mean depth unreadable from 01_qc/depth.regions.bed.gz -- DEL/DUP read-depth check will be reported as n/a", file=sys.stderr)
-# No step of this repository runs Delly; without an externally produced target.sv.bcf there is
-# nothing to filter, so write an empty table and let the pipeline continue instead of dying.
+# This used to write an empty table and exit 0, because no step of this repository ran Delly: a tree
+# built purely from the repo had nothing to filter. That precondition no longer holds -- 08d_delly.sh
+# produces target.sv.bcf -- so absence now means the step never ran, and continuing would fold
+# "not computed" into "no structural variants found". That is the silent degradation section 7 and H6
+# forbid, and in a report it reads as a negative finding about the sample.
 import os as _os
 if not _os.path.exists(f"{W}/delly/target.sv.bcf"):
     _os.makedirs(W, exist_ok=True)
-    _cols = "chrom pos end svtype svlen precise pe sr mapq chr2 pos2 geno gq rc rcl rcr dr dv rr rv size dp_ratio depth_check geno_dp genes cds_overlap whole_gene_del".split()
-    pd.DataFrame(columns=_cols).to_csv(f"{W}/sv_filtered.tsv", sep="\t", index=False)
-    print("WARNING: 08_sv/delly/target.sv.bcf not found (no step runs Delly) -- empty sv_filtered.tsv written", file=sys.stderr)
-    sys.exit(0)
+    print("ERROR: 08_sv/delly/target.sv.bcf is missing. It is produced by step 08d (08d_delly.sh), which "
+          "needs 08a_main_contigs.sh to have run first. Refusing to emit an empty SV table, because an "
+          "empty table is indistinguishable from a sample with no structural variants.", file=sys.stderr)
+    raise SystemExit(2)
 q = subprocess.run(["bcftools", "query", "-i", 'FILTER="PASS" && GT="alt"', "-f",
     "%CHROM\t%POS\t%INFO/END\t%INFO/SVTYPE\t%INFO/SVLEN\t%INFO/PRECISE\t%INFO/PE\t%INFO/SR\t%INFO/MAPQ\t%INFO/CHR2\t%INFO/POS2\t[%GT\t%GQ\t%RC\t%RCL\t%RCR\t%DR\t%DV\t%RR\t%RV]\n",
     f"{W}/delly/target.sv.bcf"], capture_output=True, text=True, check=True).stdout
