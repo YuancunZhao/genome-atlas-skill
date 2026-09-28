@@ -44,6 +44,7 @@ step 07c gnomAD frequencies for the candidates;                python3 $S/07c_gn
 if [ "${AADR_ENABLED:-0}" = "1" ]; then
   step 08 extract the ancient-DNA panel;                         python3 $S/08_aadr_extract.py
 step 08b repeat expansions;                                  bash  $S/08b_expansionhunter.sh
+step 08c SMN1/SMN2 copy number;                            bash  $S/08c_smn.sh
   step 09 ancient-DNA PCA and projection;                        bash  $S/09_aadr_pca.sh
   step 09b nearest present-day and ancient groups;               python3 $S/09b_aadr_summary.py
 step 09c runs of homozygosity;                                bash  $S/09c_roh.sh
@@ -57,6 +58,7 @@ fi
 step 09c lineage history and evidence;                        python3 $S/lineage_history.py --history panel/lineage_history.json --yard $WGS/03_haplo --out $WGS/03_haplo/lineage_history.json --sample "$SAMPLE"
 
 step 10 PharmCAT star alleles, CYP2D6, HLA;                    bash  $S/10_pharmcat.sh
+step 10b CYP2D6 star alleles;                                bash  $S/10b_cyrius.sh
 step 11 extended pharmacogenomic markers;                      python3 $S/11_pgx_extra.py
 step 12 polygenic scores;                                      python3 $S/12_prs.py
 step 13 structural variants and copy number;                   python3 $S/13_sv_filter.py
