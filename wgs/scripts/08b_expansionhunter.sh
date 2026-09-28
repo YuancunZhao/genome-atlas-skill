@@ -45,12 +45,16 @@ fi
 if [ -n "${EXPANSIONHUNTER_SEX:-}" ]; then
   SEXARG=$EXPANSIONHUNTER_SEX          # 复现旧行为的逃生口，见上面的说明
 else
+  # 证据（Y/常染色体深度）决定 --sex：它反映样本性染色体的实际构成，在核型与生理性别不一致
+  # （DSD）或样本混淆时仍能把 X 连锁位点的期望拷贝数带对；config 声明（env.sh 的 SEX，来自
+  # config.yaml）由 evidence_sex 内部做一致性核对——证据缺失时回退声明、证据与声明冲突时告警。
+  # 告警走 stderr（不污染 $(...) 捕获值），随步骤日志留痕。
   SEXARG=$(python3 -c "
 import sys; sys.path.insert(0, '$S')
 import _sex_evidence as se
-print(se.evidence_sex(log=lambda *a: None)[0])" 2>/dev/null || echo "${SEX:-female}")
+print(se.evidence_sex(log=lambda *a: print(*a, file=sys.stderr))[0])" 2>/dev/null || echo "${SEX:-female}")
 fi
-echo "ExpansionHunter --sex $SEXARG"
+echo "ExpansionHunter --sex $SEXARG (config declares ${SEX:-<unset>})"
 
 "$EH" --reference "$REF" --variant-catalog "$CAT" --reads eh_regions.bam \
   --output-prefix target --sex "$SEXARG" --analysis-mode seeking \
