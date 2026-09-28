@@ -7,18 +7,38 @@ cd $WGS/00_input
 # X 的倍性按**证据**决定，而不是按配置声明（H4）：配置说的是样本被声明成什么，它说不出这份 CRAM
 # 里到底有没有 Y、X 是否真的测到了两条。判定依据由 _sex_evidence.py 从比对索引算出并留下记录；
 # 证据不可用时回退到声明值，但明确告警——回退可以选择，沉默不可以。
+# 复用的前提不只是"文件在"：它必须是**本样本**的证据。上一个样本留下的旧 sex_evidence.json
+# 会把 chrX 倍性整整定错一轮，所以先校验 sample_id，不匹配就重算；SM 块里再校验一次，重算
+# 失败也读不到别人的证据，而是按声明回退并留话。
 _ev="$WGS/sex_evidence.json"
-if [ ! -f "$_ev" ]; then
+if [ -f "$_ev" ]; then
+  _ev_sid=$(python3 -c "import json;print(json.load(open('$_ev')).get('sample_id',''))" 2>/dev/null || true)
+  if [ "$_ev_sid" != "$SAMPLE" ]; then
+    echo "note: $_ev does not carry this sample's id (found '${_ev_sid:-unreadable}', want '$SAMPLE'); recomputing" >&2
+    python3 "$S/_sex_evidence.py" >/dev/null 2>&1 || true
+  fi
+else
   python3 "$S/_sex_evidence.py" >/dev/null 2>&1 || true
 fi
-SM=$(python3 - "$_ev" "${SEX:-male}" <<'PY'
+SM=$(python3 - "$_ev" "${SEX:-male}" "$SAMPLE" <<'PY'
 import json, sys
+fallback = sys.argv[2][:1].upper() or "M"
 try:
     d = json.load(open(sys.argv[1]))
 except Exception:
-    print(sys.argv[2][:1].upper() or "M", end=""); sys.exit(0)
+    print(fallback, end=""); sys.exit(0)
+if d.get("sample_id") not in (None, sys.argv[3]):
+    print(fallback, end="")
+    print(f"sex_evidence.json carries sample_id {d.get('sample_id')!r}, not this sample; "
+          f"chrX ploidy taken from the declared sex ({sys.argv[2]})", file=sys.stderr)
+    sys.exit(0)
+if d.get("x_conflict"):
+    print(fallback, end="")
+    print(f"X and Y evidence conflict ({d.get('why')}); chrX ploidy taken from the declared sex "
+          f"({sys.argv[2]})", file=sys.stderr)
+    sys.exit(0)
 inf = d.get("inferred")
-print({"has_y": "M", "no_y": "F"}.get(inf, (sys.argv[2][:1].upper() or "M")), end="")
+print({"has_y": "M", "no_y": "F"}.get(inf, fallback), end="")
 if inf not in ("has_y", "no_y"):
     print(f"chrX ploidy taken from the declared sex ({sys.argv[2]}); read-level evidence was {inf or d.get('state')}",
           file=sys.stderr)
