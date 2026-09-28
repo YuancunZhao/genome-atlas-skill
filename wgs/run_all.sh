@@ -76,7 +76,21 @@ step 14b phase summary and cis/trans questions;                python3 $S/14b_ph
 step 15 statistical phasing;                                   bash  $S/15_phase_statistical.sh
 if [ "${LOCAL_ENABLED:-0}" = "1" ]; then
   step 16 local ancestry;                                        bash  $S/16_local_ancestry.sh
-  step 16b local-ancestry calibration;                           bash  $S/16b_local_ancestry_calibration.sh
+  # 校准是增强不是前置（AN3 复审）：16b 失败时原始 LA（17/17b）仍要独立交付。失败在这里降级——
+  # run_info 记 failed、12_localanc 里留 manifest，主流程继续；17b 在没有 calib.* 产物时也能产出
+  # 原始结果，并把校准状态明确写成 not_run，报告不会把"没跑校准"当成"跑了没写"。
+  step 16b local-ancestry calibration
+  if bash $S/16b_local_ancestry_calibration.sh; then
+    :
+  else
+    _rc=$?
+    python3 "$S/_run_info.py" --step "16b local-ancestry calibration" --status failed --rc "$_rc" >/dev/null 2>&1 || true
+    _STEP_NAME=""
+    echo "warning: 16b calibration failed (rc=$_rc); continuing -- raw local ancestry (17/17b) is still deliverable" >&2
+    python3 $S/ancestry_data.py --disabled 16b-la-calibration \
+      --out "$PROJ/wgs/12_localanc/manifest.16b-la-calibration.json" --sample "$SAMPLE" \
+      --reason "calibration_failed_raw_local_ancestry_delivered"
+  fi
   step 17 local-ancestry summary;                                python3 $S/17_local_ancestry_summary.py
   step 17b calibrated against held-out references;               python3 $S/17b_local_ancestry_calibrated.py
 else

@@ -81,6 +81,7 @@ if cal:
             _d = _json.loads(_lj.read_text(encoding="utf-8"))
             _d["calibration"] = [{"population": p, "n": n, "north_mean": m, "north_sd": sd,
                                   "south_mean": ms, "south_sd": ss} for p, n, m, sd, ms, ss in out]
+            _d["calibration_state"] = "ok"
             _d["calibration_chroms"] = sorted(set(str(c) for c in cd.chrom), key=lambda x: int(x))
             _d["calibration_panels"] = [A_COL, B_COL]   # 参与比较的两个来源面板（来自配置）
             _lj.write_text(_json.dumps(_d, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
@@ -88,6 +89,22 @@ if cal:
                   f"{_d['calibration_chroms']} into local_ancestry.json")
         except (OSError, _json.JSONDecodeError) as e:
             print(f"warning: could not attach calibration to local_ancestry.json ({e})", file=sys.stderr)
+else:
+    # 无校准也要独立交付（AN3）：原始 LA 的 posterior 全局值照常写盘。17 留下的空 calibration 列表
+    # 分不清"没跑校准"与"跑了没写"——这里把状态明确记为 not_run，报告据此分开呈现原始与校准结果。
+    import json as _json
+    _lj = pathlib.Path(f"{W}/local_ancestry.json")
+    if _lj.exists():
+        try:
+            _d = _json.loads(_lj.read_text(encoding="utf-8"))
+            _d["calibration"] = []
+            _d["calibration_state"] = "not_run"
+            _d["calibration_reason"] = "no calib.*.global.anc.gz products (step 16b did not run or produced nothing)"
+            _lj.write_text(_json.dumps(_d, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+            print("note: no calibration products; raw local ancestry delivered, "
+                  "calibration marked not_run in local_ancestry.json")
+        except (OSError, _json.JSONDecodeError) as e:
+            print(f"warning: could not mark calibration not_run ({e})", file=sys.stderr)
 pd.Series(gw).to_csv(f"{W}/dayu_global.tsv",sep="\t",header=False)
 dy.to_csv(f"{W}/per_chrom.tsv",sep="\t",index=False)
 print(f"\nper-chromosome {B_COL} share ({NAME_EN}):")
