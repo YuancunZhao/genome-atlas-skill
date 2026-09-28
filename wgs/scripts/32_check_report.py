@@ -269,6 +269,37 @@ def check_shapes(D):
         tg = D.get("ho_target_group")
         if tg and not (tg.get("members") and tg.get("mean_d") is not None):
             fail("ho_target_group must carry its members and its mean distance")
+    # 28_f3_stats payload. Optional as a whole (null = step not run), but when present the
+    # modern ranking must be sorted desc with finite triples, the contrast list must reference
+    # exactly the adjacent pairs of that ranking (the figure annotates them by position), and
+    # every admixture row must carry a finite f3/se/z -- the card quotes all three.
+    f3 = D.get("f3")
+    if f3:
+        for side, rows_key in (("modern", "outgroup_f3"),):
+            blk = f3.get(side) or {}
+            rows = blk.get(rows_key) or []
+            if not rows:
+                continue
+            for r in rows:
+                for k in ("f3", "se", "z"):
+                    if not isinstance(r.get(k), (int, float)):
+                        fail(f"f3 {side} row {r.get('set')}: {k} is not a number")
+                if not (r.get("n") and r.get("label_zh") and r.get("label_en")):
+                    fail(f"f3 {side} row {r.get('set')}: n and bilingual labels are required")
+            vals = [r["f3"] for r in rows]
+            if vals != sorted(vals, reverse=True):
+                fail("f3 modern outgroup_f3 is not sorted descending")
+            got = [(c.get("a"), c.get("b")) for c in (blk.get("contrasts") or [])]
+            want = [(rows[i]["set"], rows[i + 1]["set"]) for i in range(len(rows) - 1)]
+            if got != want:
+                fail(f"f3 contrasts {got} do not match the adjacent ranking pairs {want}")
+        for label, blk in (("modern", f3.get("modern") or {}), ("ancient", f3.get("ancient") or {})):
+            for r in blk.get("admixture") or []:
+                for k in ("f3", "se", "z"):
+                    if not isinstance(r.get(k), (int, float)):
+                        fail(f"f3 {label} admixture row {r.get('a')}x{r.get('b')}: {k} is not a number")
+                if not (r.get("a") and r.get("b")):
+                    fail(f"f3 {label} admixture row lacks its source names")
 
 
 def check_sections(D):

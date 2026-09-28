@@ -112,7 +112,7 @@ const renderAll=()=>{try{document.documentElement.setAttribute('lang',LANG==='zh
       err.setAttribute('x',8);err.setAttribute('y',16);err.setAttribute('font-size',10);err.setAttribute('fill','#b3261e');
       err.textContent=id+': '+(e&&e.message?e.message:e);n.appendChild(err)}}
   if(window.__renderErrors.length)console.warn('[render] failed figures:',window.__renderErrors.join(', '));
-  renderKpi(); renderFindings(); renderPgx(); renderHla(); renderMisc(); renderSections(); renderLineageCards(); if(typeof deepRender==='function') deepRender();{const _bd=document.getElementById('bootstate');if(_bd){const _nf=(window.__renderErrors||[]).length,_nt=Object.keys(CH).length;_bd.textContent='rendered · figures '+(_nt-_nf)+'/'+_nt+(_nf?' (failed: '+window.__renderErrors.join(', ')+')':'');_bd.style.color=_nf?'#ffb4a2':'#9ae6b4';}}}catch(e){console.error('[renderAll]',e);{const _be=document.getElementById('bootstate');if(_be){_be.textContent='RENDER FAILED: '+(e&&e.message?e.message:e);_be.style.color='#ffb4a2';}}try{document.body.insertAdjacentHTML('afterbegin','<div style="margin:14px auto;max-width:900px;padding:10px 14px;border:1px solid #b3261e;border-radius:8px;color:#b3261e;font:13px/1.5 system-ui">render error: '+(e&&e.message?e.message:e)+'</div>')}catch(_){}}};
+  renderKpi(); renderFindings(); renderPgx(); renderHla(); renderMisc(); renderSections(); renderLineageCards(); renderF3(); if(typeof deepRender==='function') deepRender();{const _bd=document.getElementById('bootstate');if(_bd){const _nf=(window.__renderErrors||[]).length,_nt=Object.keys(CH).length;_bd.textContent='rendered · figures '+(_nt-_nf)+'/'+_nt+(_nf?' (failed: '+window.__renderErrors.join(', ')+')':'');_bd.style.color=_nf?'#ffb4a2':'#9ae6b4';}}}catch(e){console.error('[renderAll]',e);{const _be=document.getElementById('bootstate');if(_be){_be.textContent='RENDER FAILED: '+(e&&e.message?e.message:e);_be.style.color='#ffb4a2';}}try{document.body.insertAdjacentHTML('afterbegin','<div style="margin:14px auto;max-width:900px;padding:10px 14px;border:1px solid #b3261e;border-radius:8px;color:#b3261e;font:13px/1.5 system-ui">render error: '+(e&&e.message?e.message:e)+'</div>')}catch(_){}}};
 document.getElementById('langbtn').addEventListener('click',()=>{LANG=zh()?'en':'zh';try{localStorage.setItem('dayu-lang',LANG)}catch(e){};renderAll()});
 if(window.matchMedia){window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change',renderAll)}
 const prsName=n=>zh()?(PRS_EN[n]||n):n;
@@ -785,6 +785,88 @@ reveal('timedist',(s,c)=>{
   ].forEach((line,i)=>txt(s,{x:0,y:ny+i*11,'font-size':7.4,fill:c.faint},line));
   foot(s,c,420,ny+4*11+12,Z?'条形 = 到样本的距离 · 虚线 = 最近现代人群 · 竖线 = 组均值':'bar = distance to the sample · dashed = nearest modern group · tick = group mean');
 });
+/* ── f3 statistics card (28_f3_stats.py). Built like the lineage card (JS-filled div), not a
+      reveal() figure: the copy is bilingual inline and the whole card hides when D.f3 is null,
+      which the sections table already explains. Numbers only; no group names are hardcoded --
+      sets, labels and n all come from the payload. ── */
+const renderF3=()=>{
+  const box=document.getElementById('f3card'); if(!box) return;
+  const FD=D.f3; if(!FD){box.style.display='none';return}
+  const M=FD.modern||null, A=FD.ancient||null, Z=zh();
+  const rows=(M&&M.outgroup_f3)||[];
+  if(!rows.length&&!(A&&(A.admixture||[]).length)){box.style.display='none';return}
+  const _sg=(v,d)=>(v>0?'+':'')+Number(v).toFixed(d);
+  // Ranking bars: the spread between groups is a tiny fraction of the absolute value, so the
+  // axis is floored near the data (lo = min - 3*SE); the whiskers carry the real uncertainty.
+  const x0=150,X1=310,top=30,rh=19;
+  const lo=rows.length?Math.min(...rows.map(r=>r.f3-3*r.se)):0, hi=rows.length?Math.max(...rows.map(r=>r.f3+3*r.se)):1;
+  const X=v=>x0+(X1-x0)*(v-lo)/(hi-lo);
+  const adm=(M&&M.admixture||[]).map(r=>({...r,scope:'m'})).concat((A&&A.admixture||[]).map(r=>({...r,scope:'a'})));
+  const gM=(M&&M.groups)||{};
+  const H=top+(rows.length*rh||0)+(rows.length?16:0)+(adm.length?adm.length*18+26:0)+16;
+  box.innerHTML=
+    '<div class="claim" style="margin-top:34px">'+(Z?'f3 统计：与各参照群的共享漂移':'f3 statistics: shared drift with each reference group')+'</div>'
+   +'<div class="sub">'+(Z
+      ?'外群 f3 越大 = 与该群共享的漂移越多（配对差异的 Z 是排序的正式依据）；混合 f3 显著为负才是两群混合的证据'
+      :'larger outgroup-f3 = more shared drift with that group (adjacent-rank contrast Z values are the formal basis for the ordering); a significantly negative admixture-f3 is the signature of two-source admixture')+'</div>'
+   +'<div class="fig"><svg id="f3" viewBox="0 0 900 '+Math.max(H,140)+'" preserveAspectRatio="xMidYMid meet"></svg></div>'
+   +'<p class="note" id="n_f3" style="max-width:86ch"></p>';
+  const s=document.getElementById('f3'), c=C(), a=AC(), note=document.getElementById('n_f3');
+  let y=top;
+  if(rows.length){
+    txt(s,{x:0,y:14,'font-size':8,'font-weight':600,fill:c.faint,'letter-spacing':'.08em'},
+      Z?('外群 F3（'+(M.outgroup||'')+'；样本，P） · 共享漂移'):('OUTGROUP-F3('+(M.outgroup||'')+'; TARGET, P) · SHARED DRIFT'));
+    [lo,lo+(hi-lo)/2,hi].forEach(v=>{el(s,'line',{x1:X(v),y1:top-6,x2:X(v),y2:top+rows.length*rh-6,stroke:c.grid,'stroke-width':.5});
+      txt(s,{x:X(v),y:top+rows.length*rh+8,'text-anchor':'middle','font-size':7.4,fill:c.faint},v.toFixed(4));});
+    rows.forEach((r,i)=>{const yy=y+i*rh, col=r.kind==='pool'?c.ink:c.data2;
+      txt(s,{x:x0-10,y:yy+3,'text-anchor':'end','font-size':8.4,'font-weight':r.kind==='pool'?700:600,fill:c.ink},
+        Z?(r.label_zh||r.set):(r.label_en||r.set));
+      el(s,'line',{x1:X(r.f3-r.se),y1:yy,x2:X(r.f3+r.se),y2:yy,stroke:c.faint,'stroke-width':1});
+      const b=el(s,'line',{x1:X(Math.max(r.f3-r.se,lo)),y1:yy,x2:X(r.f3),y2:yy,stroke:col,'stroke-width':3,class:'fade',style:`animation-delay:${i*.04}s`});
+      tip(b,`${r.set} · f3=${r.f3.toFixed(6)} ±${r.se.toFixed(6)} · Z=${_sg(r.z,1)} · n=${r.n}`);
+      el(s,'circle',{cx:X(r.f3),cy:yy,r:2.4,fill:col});
+      txt(s,{x:X1+10,y:yy+3,'font-size':7.6,'font-weight':700,fill:c.ink},r.f3.toFixed(5));
+      txt(s,{x:X1+62,y:yy+3,'font-size':7,fill:c.muted},'n='+r.n);});
+    y+=rows.length*rh+8;
+    (M.contrasts||[]).forEach((ct,i)=>{const yy=top+i*rh+rh/2+3;
+      txt(s,{x:470,y:yy,'font-size':7.4,'font-weight':Math.abs(ct.z)>=3?800:400,fill:Math.abs(ct.z)>=3?c.ink:c.muted},
+        ct.a+' − '+ct.b+':  Δ='+_sg(ct.diff,4)+'  (Z='+_sg(ct.z,1)+')');});
+    y+=18;
+  }
+  if(adm.length){
+    txt(s,{x:0,y:y+4,'font-size':8,'font-weight':600,fill:c.faint,'letter-spacing':'.08em'},
+      Z?'混合检验 · ADMIXTURE-F3（样本；来源A，来源B）':'ADMIXTURE-F3(TARGET; SOURCE A, SOURCE B)');
+    y+=14;
+    adm.forEach((r,i)=>{const yy=y+i*18;
+      const lab=r.scope==='a'
+        ?(Z?(r.label_zh||((r.a+'×'+r.b))):(r.label_en||(r.a+' x '+r.b)))
+        :(Z?(((gM[r.a]||{}).label_zh||r.a)+'×'+((gM[r.b]||{}).label_zh||r.b)):(r.a+' x '+r.b));
+      txt(s,{x:0,y:yy+3,'font-size':8.4,'font-weight':600,fill:c.ink},
+        (r.scope==='a'?(Z?'古参照 · ':'ancient · '):(Z?'现代 · ':'modern · '))+lab);
+      txt(s,{x:470,y:yy+3,'font-size':8,'font-weight':700,fill:c.ink},
+        _sg(r.f3,4)+' ±'+r.se.toFixed(4)+'  (Z='+_sg(r.z,1)+')');
+      const n=(r.scope==='a')?('n='+r.n_a+'/'+r.n_b):('n='+(((gM[r.a]||{}).n)||'—')+'/'+(((gM[r.b]||{}).n)||'—'));
+      txt(s,{x:680,y:yy+3,'font-size':7,fill:c.muted},n);
+      tip(el(s,'circle',{cx:462,cy:yy,r:2.4,fill:r.f3<0&&Math.abs(r.z)>3?a.s:c.faint}),
+        r.f3<0&&Math.abs(r.z)>3?(Z?'显著为负：两群混合的证据':'significantly negative: evidence of two-source admixture')
+                               :(Z?'为正：未检出两群混合（受参照分化程度限制）':'positive: no two-source admixture detected (power depends on source divergence)'));});
+    y+=adm.length*18+6;
+  }
+  foot(s,c,900,Math.max(H-6,y),
+    Z?'条形 = 外群 f3（越右越近） · 须 = ±1 标准误 · 粗体对比 = |Z|≥3 的相邻排名差异'
+      :'bar = outgroup-f3 (right = closer) · whisker = ±1 SE · bold contrast = adjacent-rank difference with |Z|≥3');
+  const bits=[];
+  if(M)bits.push(Z?`现代：${fmt(M.sites)} 个 LD 修剪位点 · ${M.blocks} 个 ${(FD.block_mb||5)}Mb 块 jackknife（1000G）`
+                  :`modern: ${fmt(M.sites)} LD-pruned sites · ${M.blocks} ${(FD.block_mb||5)}Mb-block jackknife (1000G)`);
+  if(A)bits.push(Z?`古参照：${fmt(A.sites)} 个位点 · ${A.blocks} 块（AADR 区域池，${(A.admixture||[]).map(r=>r.label_zh+' n='+r.n_a+'/'+r.n_b).join('，')}）`
+                  :`ancient: ${fmt(A.sites)} sites · ${A.blocks} blocks (AADR region pools, ${(A.admixture||[]).map(r=>r.label_en+' n='+r.n_a+'/'+r.n_b).join(', ')})`);
+  note.textContent=bits.join('  ·  ')+'. '
+   +(Z?'混合 f3 均为正只表示"未检出"两群混合：东亚参照群彼此分化浅，该检验对南北混合的功效本就有限，检不出不等于不存在。'
+      :'All admixture-f3 values being positive only means two-source admixture was not detected: East Asian reference groups are weakly differentiated, the test has little power for north-south admixture, and non-detection is not evidence of absence. ')
+   +(Z?'f3 刻画的是等位基因频率的相对接近程度，不据此做族群或籍贯推断。'
+      :'f3 measures relative allele-frequency closeness only; no ethnic or geographic-origin inference is drawn from it.');
+};
+
 /* ── archaic ideogram ── */
 reveal('archaic',(s,c)=>{
   const x0=30,x1=880,rows=11,rh=28,maxL=D.chrlen['1'];

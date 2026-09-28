@@ -1,0 +1,13 @@
+# 现代 f3 统计（28_f3_stats.py）的分组定义。组员是 1000G Population 代码（kg.common.psam 第 5 列），
+# 空格分隔；标签在报告的 f3 图里按当前语言显示。改这里即可换参照构成，脚本不含任何写死的群体。
+# kind: outgroup = 外群 f3 的参照系（只取第一个）；profile = 逐群排名（相邻对做对比检验）；
+#       pool     = 池化组（两两做 admixture-f3）。
+kind	set	members	label_zh	label_en
+outgroup	YRI	YRI	约鲁巴（外群）	Yoruba (outgroup)
+profile	CHB	CHB	汉族·北京	Han, Beijing
+profile	CHS	CHS	汉族·南方	Han, South China
+profile	JPT	JPT	日本人	Japanese
+profile	CDX	CDX	傣族	Dai, China
+profile	KHV	KHV	京族·越南	Kinh, Vietnam
+pool	NorthEAS	CHB JPT	北方东亚池	Northern East Asian pool
+pool	SouthEAS	CHS CDX KHV	南方东亚池	Southern East Asian pool

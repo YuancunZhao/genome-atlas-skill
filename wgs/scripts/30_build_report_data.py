@@ -513,6 +513,17 @@ else:
     D["ho_affinity"] = []; D["ho_affinity_strip"] = []; D["ho_target_group"] = None
 _na = _read_tsv(W/"11_aadr/near_ancient.tsv")
 D["ho_near_ancient"] = _na.to_dict("records") if _na is not None and len(_na) else []
+# --- f3 statistics (28_f3_stats.py). Optional module: null when the step was not run,
+# and the report's f3 card hides itself on a null -- the sections table records why.
+_f3_f = W/"04_ancestry/f3/f3_stats.json"
+if _f3_f.exists():
+    try:
+        D["f3"] = json.loads(_f3_f.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        print("30: f3_stats.json is unreadable; the f3 panel is skipped", file=sys.stderr)
+        D["f3"] = None
+else:
+    D["f3"] = None
 # --- AN5（§7 报告契约）：把各分析的结构化结果组装成 D.ancestry / D.lineages。
 # 这是模板与 AN6 要消费的形状；旧键（ho_*/near_eas/…）只作为尚未迁移的视图的过渡，不再各自算一套。
 _kg_state, _kg_reason, _kg_doc = _analysis_state(W/"04_ancestry")
@@ -573,6 +584,7 @@ _SEC_NAMES = {
     "density": ("全基因组密度", "genome-wide density"), "prs": ("多基因评分", "polygenic scores"),
     "behaviour": ("行为特征评分", "behavioural scores"), "candidate": ("候选基因位点", "candidate-gene variants"),
     "ancestry": ("祖源分析", "ancestry"), "local_ancestry": ("局部祖源", "local ancestry"),
+    "f3": ("f3 统计", "f3 statistics"),
     "archaic": ("古人类渗入", "archaic introgression"), "aadr": ("古 DNA 投影", "ancient DNA projection"),
     "clinvar": ("ClinVar 命中", "ClinVar hits"), "lof": ("功能丧失变异", "loss-of-function variants"),
 }
@@ -638,6 +650,7 @@ _sec("local_ancestry", "ok" if _LA_STATE == "ok" else "unavailable",
      None if _LA_STATE == "ok" else _LA_CODES.get(_LA_REASON, ("未启用或不可用", "not available"))[1],
      ev="12_localanc/local_ancestry.json", detail=f"state={_LA_STATE}")
 _need("archaic", _has("archaic"), *_MISS_OUT, ev="15_archaic/segments_all.tsv")
+_need("f3", _has("f3"), *_MISS_OUT, ev="04_ancestry/f3/f3_stats.json")
 _sec("aadr", "ok" if (_AADR_STATE == "ok" and _has("ho_modern")) else "unavailable",
      None if _AADR_STATE == "ok" else _AADR_REASON,
      None if _AADR_STATE == "ok" else _LA_CODES.get(_AADR_REASON, ("未启用或不可用", "not available"))[0],
