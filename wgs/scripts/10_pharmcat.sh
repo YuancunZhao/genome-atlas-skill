@@ -6,7 +6,12 @@ set -euo pipefail
 source "$(dirname "$0")/env.sh"
 W=$WGS/06_pgx/pharmcat; mkdir -p $W; cd $W
 PC=$PHARMCAT_DIR
-[ -f $REF_DIR/chain/hg38ToHg19.over.chain.gz ] || curl -sSL -o $REF_DIR/chain/hg38ToHg19.over.chain.gz https://hgdownload.soe.ucsc.edu/goldenPath/hg38/liftOver/hg38ToHg19.over.chain.gz
+# 这条链文件是所有 PharmCAT liftover 的基础，缺了或截断了会让 lift 静默出错，故校验后再落盘。
+[ -f $REF_DIR/chain/hg38ToHg19.over.chain.gz ] || { \
+  _u=hgdownload.soe.ucsc.edu/goldenPath/hg38/liftOver/hg38ToHg19.over.chain.gz; \
+  curl -fsSL --retry 3 -o $REF_DIR/chain/hg38ToHg19.over.chain.gz.part "https://$_u" && \
+  gzip -t $REF_DIR/chain/hg38ToHg19.over.chain.gz.part && \
+  mv $REF_DIR/chain/hg38ToHg19.over.chain.gz.part $REF_DIR/chain/hg38ToHg19.over.chain.gz; }
 bcftools query -f '%CHROM\t%POS\t%ID\t%REF\t%ALT\n' $PC/pharmcat_positions_3.4.0.vcf.bgz > pos38.tsv
 for c in $(seq 1 22) X Y; do echo -e "$c\tchr$c"; done > rename.txt
 # the target's PASS calls within +-5kb of PharmCAT positions (b37), chr-renamed
