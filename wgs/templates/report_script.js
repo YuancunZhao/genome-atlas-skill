@@ -43,8 +43,8 @@ F.cmp=fmt(D.chip.compared); F.nocall=D.chip.nocall??'—'; F.nonp=D.chip.nocall_
 const _AN=(D.ancestry&&D.ancestry.analyses)||[];
 const _byScope=s=>_AN.find(a=>a.scope===s)||{};
 const _byData=d=>_AN.find(a=>a.dataset===d)||{};
-const _grp=a=>Array.isArray(a.groups)?a.groups:((a.groups&&a.groups.ancient)||[]);
-const _ranked=a=>_grp(a).filter(g=>g.rank&&!g.small_group).sort((x,y)=>x.rank-y.rank);
+const _ranked=a=>analysisGroups(a).filter(g=>g.rank&&!g.small_group)
+  .sort((x,y)=>(x.rank-y.rank)||(Number(x.distance_mean||0)-Number(y.distance_mean||0)));
 const _sp=a=>Array.isArray(a.supported_path)?a.supported_path:[];
 F.ng=fmt(D.anc.n_global); F.ne=fmt(D.anc.n_eas);
 F.knn=_ranked(_byScope('regional')).slice(0,3).map(g=>`${g.label} n=${g.n}`).join(' · ')||'—';
@@ -604,6 +604,17 @@ function geomapRows(records, loBP, hiBP) {
   return { inRange, outRange, noDate };
 }
 
+/* AN6 复审：09b 的 groups 是 {modern:[...], ancient:[...]}，1000G（04b）的是平铺数组。旧代码
+   字典形状只取 .ancient——现代主图（默认视图）按 kind='modern' 过滤后一个不剩，排名/前五名/
+   列表全空。归一化把两层的**已算好**结果拼起来：不重算任何排名，各行保留自己梯队里算出的
+   rank；并列（两个梯队的第 1 名）按 distance_mean 稳定排序，两边的第 1 名都可见。 */
+function analysisGroups(a){
+  const g=(a||{}).groups;
+  if(Array.isArray(g)) return g;
+  if(g&&typeof g==='object') return [].concat(g.modern||[],g.ancient||[]);
+  return [];
+}
+
 /* 视图分层（AN6 批一，纯函数与测试同源）：modern/ancient 只看各自 kind 的记录，'all' 保持
    原样（含未分层记录）。现代群体是默认主视图——现代参考个体没有年代，古代时间轴属于古代视图，
    两个视图不该被同一个"全部"混在一起。 */
@@ -626,8 +637,9 @@ reveal('geomap',(s,c)=>{
   const A=(D.ancestry&&D.ancestry.analyses)||[], Z=zh();
   const _defId=(D.ancestry&&D.ancestry.default_analysis_id)||'';
   const a=(_defId&&A.find(x=>String(x.analysis_id)===String(_defId)))|| (_defId?null:A[0]) || {};
-  const groups=(Array.isArray(a.groups)?a.groups:((a.groups||{}).ancient||[]));
-  const rankedAll=groups.filter(g=>g.rank&&!g.small_group).sort((x,y)=>x.rank-y.rank);
+  const groups=analysisGroups(a);
+  const rankedAll=groups.filter(g=>g.rank&&!g.small_group)
+    .sort((x,y)=>(x.rank-y.rank)||(Number(x.distance_mean||0)-Number(y.distance_mean||0)));
   const VB={w:900,h:470}, pad={l:26,t:26}, mapH=300;
   const sc=Math.min((VB.w-2*pad.l)/360,(mapH-2*pad.t)/180);
   const ox=pad.l+((VB.w-2*pad.l)-360*sc)/2, oy=pad.t+((mapH-2*pad.t)-180*sc)/2;
