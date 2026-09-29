@@ -980,27 +980,51 @@ reveal('spectrum',(s,c)=>{
 });
 
 /* ── KIR ── */
+/* Pure helpers for the KIR card (node-tested in tests/test_kir_card.py). The haplotype call
+   and this run's HLA ligand groups come from 24's kir_summary via 30 (D.kir_summary); the
+   card used to hardcode the example sample's haplotype and HLA ligand sentence, which
+   contradicted this sample's real call. Genes are "unknown" when T1K never ran (empty
+   kir.tsv), and only "absent" when the typing actually reports the gene missing. */
+function kirRan(rows){ return Array.isArray(rows) && rows.length>0; }
+function kirHapLabel(KS,Z){
+  const hap=KS&&KS.haplotype;
+  if(!hap) return Z?'单倍型：未知（KIR 分型未运行）':'Haplotype: unknown (KIR typing not run)';
+  if(/^unavailable/i.test(hap)) return Z?'单倍型：未知（T1K 未运行）':'Haplotype: unknown (T1K not run)';
+  if(hap==='AA (two A haplotypes)') return Z?'单倍型：AA（两条 A 单倍型）':'Haplotype: AA (two A haplotypes)';
+  if(hap==='Bx (at least one B haplotype)') return Z?'单倍型：Bx（至少一条 B 单倍型）':'Haplotype: Bx (at least one B haplotype)';
+  return (Z?'单倍型：':'Haplotype: ')+hap;
+}
+function kirLigandLine(KS,Z){
+  const cg=(KS&&KS.C_ligands)||'', bw=(KS&&KS.B_epitopes)||'', a3=(KS&&KS.A311_ligands)||'';
+  const seg=[
+    (Z?'HLA-C 配体组：':'HLA-C ligand groups: ')+(cg||'—'),
+    (Z?'HLA-B 表位：':'HLA-B epitopes: ')+(bw||'—'),
+    (Z?'HLA-A3/A11（KIR3DL2 配体）：':'HLA-A3/A11 (KIR3DL2 ligands): ')+(a3||'—')];
+  return seg.join(Z?' · ':'; ');
+}
 reveal('kir',(s,c)=>{
   const a=AC();
   const ORDER=['KIR3DL3','KIR2DS2','KIR2DL2','KIR2DL3','KIR2DP1','KIR2DL1','KIR3DP1','KIR2DL4','KIR3DL1','KIR3DS1','KIR2DL5A','KIR2DL5B','KIR2DS3','KIR2DS5','KIR2DS1','KIR2DS4','KIR3DL2'];
   const ACT=new Set(['KIR2DS1','KIR2DS2','KIR2DS3','KIR2DS4','KIR2DS5','KIR3DS1']);
+  const ran=kirRan(D.kir);
   const map=Object.fromEntries(D.kir.map(k=>[k.gene,k]));
   const x0=30,x1=880,y=64,bw=(x1-x0)/ORDER.length;
   txt(s,{x:x0,y:18,'font-size':8,'font-weight':600,fill:c.faint,'letter-spacing':'.08em'},zh()?'KIR 基因区（19q13.4）按染色体顺序':'THE KIR LOCUS (19q13.4) IN CHROMOSOMAL ORDER');
   el(s,'line',{x1:x0,y1:y+22,x2:x1,y2:y+22,stroke:c.quiet,'stroke-width':1});
-  ORDER.forEach((g,i)=>{const k=map[g], on=k&&k.present, x=x0+i*bw;
+  ORDER.forEach((g,i)=>{const k=map[g], on=ran&&k&&k.present, x=x0+i*bw;
+    // no typing at all -> unknown (light outline, no fill); typing present -> real absent is dashed
     const r=el(s,'rect',{x:x+2,y:y,width:bw-4,height:44,rx:2.5,fill:on?(ACT.has(g)?a.s:a.n):'none',opacity:on?.9:1,
-      stroke:on?'none':c.faint,'stroke-width':1.2,'stroke-dasharray':on?'':'3 3'});
-    tip(r,on?`${g}: ${k.call}`:`${g}: absent`);
+      stroke:on?'none':(ran?c.faint:c.quiet),'stroke-width':1.2,'stroke-dasharray':on?'':'3 3'});
+    tip(r,on?`${g}: ${k.call}`:(ran?`${g}: absent`:`${g}: unknown (KIR typing not run)`));
     txt(s,{x:x+bw/2,y:y-8,'text-anchor':'middle','font-size':8.5,'font-weight':on?700:500,fill:on?c.ink:c.faint,transform:`rotate(-42 ${x+bw/2} ${y-8})`},g.replace('KIR',''));
     if(on) txt(s,{x:x+bw/2,y:y+27,'text-anchor':'middle','font-size':9,fill:c.bg,'font-weight':800},'✓')});
-  [[a.n,zh()?'抑制性受体':'inhibitory'],[a.s,zh()?'活化性受体':'activating'],['none',zh()?'缺失':'absent']].forEach(([col,lab],i)=>{
+  [[a.n,zh()?'抑制性受体':'inhibitory'],[a.s,zh()?'活化性受体':'activating'],['none',ran?(zh()?'缺失':'absent'):(zh()?'未知（未运行）':'unknown (not run)')]].forEach(([col,lab],i)=>{
     const lx=x0+i*160;
     if(col==='none') el(s,'rect',{x:lx,y:y+44,width:11,height:11,rx:2,fill:'none',stroke:c.faint,'stroke-width':1.2,'stroke-dasharray':'3 3'});
     else el(s,'rect',{x:lx,y:y+44,width:11,height:11,rx:2,fill:col});
     txt(s,{x:lx+16,y:y+53,'font-size':9.5,fill:c.lab},lab)});
-  txt(s,{x:x0,y:y+82,'font-size':12,'font-weight':800,fill:c.ink},zh()?'单倍型：AA（两条 A 单倍型）':'Haplotype: AA (two A haplotypes)');
-  txt(s,{x:x0,y:y+99,'font-size':10,fill:c.lab},zh()?'HLA 配体：C*03:04 与 C*01:02 均为 C1 组 · B*13:01 为 Bw4 · B*54:01 为 Bw6':'HLA ligands: C*03:04 and C*01:02 are both C1 · B*13:01 is Bw4 · B*54:01 is Bw6');
+  txt(s,{x:x0,y:y+82,'font-size':12,'font-weight':800,fill:c.ink},kirHapLabel(D.kir_summary,zh()));
+  txt(s,{x:x0,y:y+99,'font-size':10,fill:c.lab},kirLigandLine(D.kir_summary,zh()));
 });
 
 /* ── stat grids and tables ── */

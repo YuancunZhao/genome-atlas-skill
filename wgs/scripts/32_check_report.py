@@ -312,6 +312,19 @@ def check_shapes(D):
                         fail(f"f3 {label} admixture row {r.get('a')}x{r.get('b')}: {k} is neither a finite number nor null")
                 if not (r.get("a") and r.get("b")):
                     fail(f"f3 {label} admixture row lacks its source names")
+    # KIR (step 24 via 30): gene rows and the haplotype/ligand summary must agree. Rows
+    # without a summary made the old card invent a haplotype; a summary claiming AA/Bx with
+    # no rows is stale output from another run. "unknown" and a genuine absent row are
+    # different states and must not be swapped (M3/H2).
+    kir_rows = D.get("kir") or []
+    ks = D.get("kir_summary") or {}
+    hap = ks.get("haplotype", "")
+    if kir_rows and not hap:
+        fail("kir rows present but kir_summary is missing: the haplotype/ligand line has no source")
+    if not kir_rows and hap and not hap.lower().startswith("unavailable"):
+        fail(f"kir_summary claims {hap!r} but the gene table is empty: typing did not run")
+    if kir_rows and hap and hap.lower().startswith("unavailable"):
+        fail("kir rows present but the summary says typing was unavailable")
 
 
 def check_sections(D):

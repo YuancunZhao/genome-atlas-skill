@@ -115,6 +115,39 @@ class TestF3Gate(unittest.TestCase):
                         "a verdict number with no estimate behind it is not a statistic")
 
 
+class TestKirGate(unittest.TestCase):
+    """M3/H2: gene rows and kir_summary must agree; unknown (not run) is not absent."""
+
+    def setUp(self):
+        chk.FAIL.clear()
+
+    def _D(self, rows, summary):
+        return {"kir": rows, "kir_summary": summary}
+
+    def test_rows_with_real_summary_pass(self):
+        D = self._D([{"gene": "KIR2DL1", "present": True, "call": "KIR2DL1*003"}],
+                    {"haplotype": "Bx (at least one B haplotype)",
+                     "present": "KIR2DL1", "C_ligands": "C1", "B_epitopes": "Bw6/Bw6"})
+        chk.check_shapes(D)
+        self.assertFalse([f for f in chk.FAIL if "kir" in f.lower()])
+
+    def test_rows_without_summary_fail(self):
+        chk.check_shapes(self._D([{"gene": "KIR2DL1", "present": True}], None))
+        self.assertTrue(any("kir_summary is missing" in f for f in chk.FAIL),
+                        "the haplotype line must not fall back to an invented example")
+
+    def test_summary_claim_without_rows_is_stale(self):
+        D = self._D([], {"haplotype": "AA (two A haplotypes)"})
+        chk.check_shapes(D)
+        self.assertTrue(any("but the gene table is empty" in f for f in chk.FAIL),
+                        "a haplotype call with no typing rows is another run's output")
+
+    def test_unavailable_summary_with_empty_rows_is_consistent(self):
+        D = self._D([], {"haplotype": "unavailable (T1K was not run)"})
+        chk.check_shapes(D)
+        self.assertFalse([f for f in chk.FAIL if "kir" in f.lower()])
+
+
 class TestNodeGate(unittest.TestCase):
     def test_missing_node_fails_instead_of_passing(self):
         chk.FAIL.clear()

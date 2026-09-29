@@ -382,6 +382,17 @@ else:
 # KIR (step 24; empty table when no T1K input was delivered)
 _kr = _read_tsv(W/"16_panels/kir.tsv")
 D["kir"] = _kr.to_dict("records") if _kr is not None and len(_kr) else []
+# kir_summary.txt (same step) carries the haplotype call and this run's HLA ligand groups;
+# without it the figure would have no haplotype line and the old card invented an example one.
+_ks_f = W/"16_panels/kir_summary.txt"
+D["kir_summary"] = None
+if _ks_f.exists():
+    _ksd = {}
+    for _l in _ks_f.read_text(encoding="utf-8").splitlines():
+        if "\t" in _l:
+            _k2, _v2 = _l.split("\t", 1)
+            _ksd[_k2] = _v2
+    D["kir_summary"] = _ksd or None
 # PASS variants per 1 Mb bin, for the circos density ring
 try:
     _dens = {}
