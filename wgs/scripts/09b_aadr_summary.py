@@ -109,7 +109,10 @@ _dup = s["iid"].duplicated(keep="first")
 if _dup.any():
     print(f"note: dropped {_dup.sum()} duplicated iid row(s) (kept the first of each)", file=sys.stderr)
     s = s[~_dup].reset_index(drop=True)
-    me = s[s.kind == "target"]
+# smiss 合并重建了 s；me 若不跟着重建，summary 的 target 块拿的还是合并前的旧帧——call_rate 是
+# samples.tsv 里提取阶段的陈旧值（旧格式恰为 1.0），n_called_snps 则永远 None。门槛用的是合并后
+# 的 _t；上报的 target 字段必须与门槛出自同一帧。
+me = s[s.kind == "target"]
 
 # Geographic and dating fields come from the normalised .anno metadata that 08 wrote in full (7.3
 # requires the history views to read it, and the earlier code never carried it into this summary at

@@ -191,5 +191,32 @@ class TestGroupingBySite(unittest.TestCase):
             self.assertIn("duplicated iid", r.stderr)
 
 
+@unittest.skipIf(_SKIP, _SKIP)
+class TestTargetBlockCarriesRealCoverage(unittest.TestCase):
+    """summary 的 target 块要带合并 smiss 后的覆盖数字，不是 samples.tsv 的提取阶段陈旧值。"""
+
+    def test_target_block_reads_the_merged_frame(self):
+        with tempfile.TemporaryDirectory() as td:
+            cfg = _write_config(td)
+            w = _write_panel(td, {
+                "TESTSAMPLE": (650, 130000),           # 目标真实覆盖 129350 / 0.995
+                "HAN1": (0, 130000), "HAN2": (650, 130000), "AM1": (30000, 130000),
+            })
+            # 旧格式 samples.tsv 自带提取阶段的 call_rate（目标恰为 1.0）：smiss 合并重建 s 之后，
+            # target 块若仍读合并前的旧帧，就会原样回显这个 1.0，而 n_called_snps 整列缺失得 None。
+            (w / "samples.tsv").write_text(
+                "iid\tlabel\tkind\tdate\tcall_rate\n"
+                "TESTSAMPLE\tTarget\ttarget\t\t1.0\n"
+                "HAN1\tHan\tmodern\t\t1.0\n"
+                "HAN2\tHan\tmodern\t\t1.0\n"
+                "AM1\tChina_Am\tancient\t1000\t0.8\n", encoding="utf-8")
+            r = _run_09b(cfg)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            t = _summary(w)["target"]
+            self.assertEqual(t["n_called_snps"], 130000 - 650)
+            self.assertAlmostEqual(t["call_rate"], 1 - 650 / 130000, places=5)
+            self.assertNotEqual(t["call_rate"], 1.0, "不得回显 samples.tsv 的提取阶段值")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
