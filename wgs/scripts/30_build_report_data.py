@@ -68,52 +68,87 @@ if _yr is not None:
     D["y_tree"] = f"{_yr.get('tree_source') or 'YFull'} {_yr.get('tree_version') or ''}".strip()
     D["lineage_history"] = (_yr.get("history") or {})
     ypath = D["ypath"]
-else:
+elif (W/"03_haplo/y_haplogroup_yfull.txt").exists():
     for l in open(W/"03_haplo/y_haplogroup_yfull.txt"):
-        m = re.match(r"\s+(\S+)\s+der=\s*(\d+) anc=\s*(\d+) n/a=\s*(\d+)\s+formed=(\d+) tmrca=(\d+)", l)
+        m = re.match(r"\s+(\S+)\s+der=\s*(\d+) anc=\s*(\d+) n/a=\s*(\d+)\s+formed=\s*(\d+)\s+tmrca=\s*(\d+)", l)
         if m: ypath.append({"snp": m.group(1), "der": int(m.group(2)), "anc": int(m.group(3)), "na": int(m.group(4)), "formed": int(m.group(5)), "tmrca": int(m.group(6))})
     D["ypath"] = ypath
     D["y_terminal"] = ypath[-1]["snp"] if ypath else ""   # 旧文本回退也做空路径保护
     D["y_conservative"] = None; D["y_uncertain"] = []; D["y_state"] = "ok" if ypath else "unavailable"
+    D["y_tree"] = ""; D["lineage_history"] = {}
+else:
+    # 复审 P1（AN0/AN5）：缺 Y 是交付形态，不是崩溃——女性/未做 Y 调用的样本既没有 y_result.json
+    # 也没有文本回退。结构化 unavailable 照常交付，一个缺失模块不能带走整份报告。
+    print("30: no Y result (y_result.json / y_haplogroup_yfull.txt absent); delivered as unavailable",
+          file=sys.stderr)
+    D["ypath"] = []; D["y_terminal"] = ""; D["y_conservative"] = None
+    D["y_uncertain"] = []; D["y_state"] = "unavailable"; D["y_tree"] = ""; D["lineage_history"] = {}
 # Keep `n_anc` and `state` too: a branch with der=0 is "ancestral (genuinely negative)" when anc>0,
 # but "no hg19-mapped site / low coverage" when both are zero, and the figure must not conflate them.
-ysn = pd.read_csv(W/"03_haplo/y_terminal_snps.tsv", sep="\t"); D["y_snps"] = ysn[["branch", "snp", "depth", "n_der", "n_anc", "state"]].to_dict("records")
+_ysn_f = W/"03_haplo/y_terminal_snps.tsv"
+D["y_snps"] = (pd.read_csv(_ysn_f, sep="\t")[["branch", "snp", "depth", "n_der", "n_anc", "state"]].to_dict("records")
+                if _ysn_f.exists() else [])
 # --- mt
 # keep_default_na=False: an empty Found_Polys cell used to become NaN, and str(NaN) is the *string*
 # "nan", which then surfaced in the report as one "defining site hit" for the haplogroup.
-hg = pd.read_csv(W/"03_haplo/haplogrep3.txt", sep="\t", keep_default_na=False)
-row = hg.iloc[0]; found = str(row["Found_Polys"]).split(); rem = [x.split(" ")[0] for x in str(row["Remaining_Polys"]).split(") ")]
-rem = re.findall(r"(\d+(?:\.\d+)?[ACGTd])", str(row["Remaining_Polys"]))
-D["mt"] = {"hg": row["Haplogroup"], "quality": float(row["Quality"]), "found": found, "private": rem, "notfound": str(row["Not_Found_Polys"]).split()}
-_mf = W/"03_haplo/mt_result.json"
-if _mf.exists():   # AN4：判定与状态以结构化结果为准，文本只提供位点细节
-    try:
-        _mr = json.loads(_mf.read_text(encoding="utf-8"))
-        D["mt"]["state"] = _mr.get("state"); D["mt"]["call_quality"] = _mr.get("call_quality")
-        D["mt"]["hg"] = _mr.get("reported_hg") or D["mt"]["hg"]
-        D["mt"]["conservative_hg"] = _mr.get("conservative_hg")
-    except (json.JSONDecodeError, OSError):
-        pass
-het = pd.read_csv(W/"03_haplo/mt_heteroplasmy.tsv", sep="\t"); D["mt_het"] = het.to_dict("records")
+# 复审 P1（AN0/AN5）：无 mt 也是交付形态——结构化 unavailable 代替在读取处崩溃（有 Y 无 mt
+# 的样本此前会让整份 30 带着 FileNotFoundError 退出）。
+if (W/"03_haplo/haplogrep3.txt").exists():
+    hg = pd.read_csv(W/"03_haplo/haplogrep3.txt", sep="\t", keep_default_na=False)
+    row = hg.iloc[0]; found = str(row["Found_Polys"]).split(); rem = [x.split(" ")[0] for x in str(row["Remaining_Polys"]).split(") ")]
+    rem = re.findall(r"(\d+(?:\.\d+)?[ACGTd])", str(row["Remaining_Polys"]))
+    D["mt"] = {"hg": row["Haplogroup"], "quality": float(row["Quality"]), "found": found, "private": rem, "notfound": str(row["Not_Found_Polys"]).split()}
+    _mf = W/"03_haplo/mt_result.json"
+    if _mf.exists():   # AN4：判定与状态以结构化结果为准，文本只提供位点细节
+        try:
+            _mr = json.loads(_mf.read_text(encoding="utf-8"))
+            D["mt"]["state"] = _mr.get("state"); D["mt"]["call_quality"] = _mr.get("call_quality")
+            D["mt"]["hg"] = _mr.get("reported_hg") or D["mt"]["hg"]
+            D["mt"]["conservative_hg"] = _mr.get("conservative_hg")
+        except (json.JSONDecodeError, OSError):
+            pass
+else:
+    print("30: no mt result (haplogrep3.txt absent); delivered as unavailable", file=sys.stderr)
+    D["mt"] = {"hg": "", "quality": None, "found": [], "private": [], "notfound": [], "state": "unavailable"}
+_het_f = W/"03_haplo/mt_heteroplasmy.tsv"
+D["mt_het"] = pd.read_csv(_het_f, sep="\t").to_dict("records") if _het_f.exists() else []
 # --- ancestry
 ps = pd.read_csv(P/"data/ref/all_phase3.psam", sep="\t").rename(columns={"#IID": "IID"})
 kg = pd.read_csv(W/"04_ancestry/kg.proj.sscore", sep="\t"); me = pd.read_csv(W/"04_ancestry/target.proj.sscore", sep="\t")
 D["pca_global"] = {"pts": [[r.SuperPop, r.Population, round(r.PC1_AVG, 4), round(r.PC2_AVG, 4)] for r in kg.itertuples()], "me": [round(me.PC1_AVG[0], 4), round(me.PC2_AVG[0], 4)]}
-# 复审 P0：生产端 04 用 SCOPE=regional 写 regional.*，这里原先读 eas.* —— 新跑的产物根本不会被读到，
-# 而旧命名只存在于早先的交付树里（那次 SCOPE=eas）。统一到 regional；若只找到旧的 eas.*，明确说清楚
-# 这是历史命名、需要重跑 04，而不是悄悄用旧文件当成新结果。
-_REG = W / "04_ancestry" / "regional.proj.sscore"
-_OLD = W / "04_ancestry" / "eas.proj.sscore"
-if not _REG.exists() and _OLD.exists():
-    print(f"ERROR: found the legacy {_OLD.name} but not {_REG.name}. Step 04 now writes the regional.* "
-          f"names, so these eas.* files are from an earlier run and must not stand in for a fresh result. "
-          f"Re-run 04_ancestry_pca.sh, or set ref_superpop to the scope that produced them.",
-          file=sys.stderr)
-    raise SystemExit(2)
-ke = pd.read_csv(_REG, sep="\t"); mee = pd.read_csv(W/"04_ancestry/regional.target.proj.sscore", sep="\t")
-D["pca_eas"] = {"pts": [[r.Population, round(r.PC1_AVG, 4), round(r.PC2_AVG, 4)] for r in ke.itertuples()], "me": [round(mee.PC1_AVG[0], 4), round(mee.PC2_AVG[0], 4)]}  # 键名 pca_eas 是 D 契约的一部分（report_script.js 读 D.pca_eas），与文件名的地域命名无关；2cf8340 曾把赋值误写进注释，导致该键从未写入
-D["anc"] = {"n_global": sum(1 for _ in open(W/"04_ancestry/prune.prune.in")), "n_eas": sum(1 for _ in open(W/"04_ancestry/prune.regional.prune.in")), "summary": open(W/"04_ancestry/summary.txt").read()}
-D["pop"] = {"n_super": int((ps.SuperPop == "EAS").sum()), "n_sub": int(ps.Population.isin(["CHS", "CHB"]).sum())}  # sizes the percentile captions quote
+# 复审 P1（AN0/AN2/AN5）：区域视图只属于显式配置了 ref_superpop 的运行。开关关着时旧
+# regional.*/eas.* 一律不读（换配置后留下的旧文件不得冒充本次结果），按 global-only 交付；
+# 配置了但产物缺失（04 未跑/中断）同样交付结构化空态，而不是在读取处崩溃。
+D["pca_eas"] = None; D["pca_eas_reason"] = ""; _n_eas = None
+if REGIONAL_ENABLED:
+    _REG = W / "04_ancestry" / "regional.proj.sscore"
+    _OLD = W / "04_ancestry" / "eas.proj.sscore"
+    if not _REG.exists() and _OLD.exists():
+        print(f"ERROR: found the legacy {_OLD.name} but not {_REG.name}. Step 04 now writes the regional.* "
+              f"names, so these eas.* files are from an earlier run and must not stand in for a fresh result. "
+              f"Re-run 04_ancestry_pca.sh, or set ref_superpop to the scope that produced them.",
+              file=sys.stderr)
+        raise SystemExit(2)
+    if _REG.exists() and (W/"04_ancestry/regional.target.proj.sscore").exists():
+        ke = pd.read_csv(_REG, sep="\t"); mee = pd.read_csv(W/"04_ancestry/regional.target.proj.sscore", sep="\t")
+        # 键名 pca_eas 是 D 契约的一部分（report_script.js 读 D.pca_eas），与文件名的地域命名无关；2cf8340 曾把赋值误写进注释，导致该键从未写入
+        D["pca_eas"] = {"pts": [[r.Population, round(r.PC1_AVG, 4), round(r.PC2_AVG, 4)] for r in ke.itertuples()], "me": [round(mee.PC1_AVG[0], 4), round(mee.PC2_AVG[0], 4)]}
+        if (W/"04_ancestry/prune.regional.prune.in").exists():
+            _n_eas = sum(1 for _ in open(W/"04_ancestry/prune.regional.prune.in"))
+    else:
+        D["pca_eas_reason"] = "missing_products"
+        print("30: regional reference is configured but its products are missing; the regional view is "
+              "delivered as unavailable (run 04)", file=sys.stderr)
+else:
+    D["pca_eas_reason"] = "not_configured"
+    print("30: regional reference not configured (ref_superpop absent); global-only delivery, any stale "
+          "regional.*/eas.* products are ignored", file=sys.stderr)
+D["anc"] = {"n_global": sum(1 for _ in open(W/"04_ancestry/prune.prune.in")), "n_eas": _n_eas,
+            "summary": open(W/"04_ancestry/summary.txt").read() if (W/"04_ancestry/summary.txt").exists() else ""}
+# 复审 P1：百分位说明的计数按**配置**的超群/亚群算，不再写死 EAS/CHB+CHS——EUR 区域配置下
+# 报"东亚人/汉族"而数的是 EUR，是事实错误。名称一并交给模板按配置渲染。
+D["pop"] = {"n_super": int((ps.SuperPop == SUPERPOP).sum()), "n_sub": int(ps.Population.isin(SUBPOPS).sum()),
+            "superpop": SUPERPOP, "subpops": list(SUBPOPS)}
 # PAR heterozygous sites in the re-called X VCF (GRCh37 PAR1/PAR2); the misc caption quotes this
 _par_vcf = W/"00_input/X.recall.vcf.gz"
 if _par_vcf.exists():
@@ -121,11 +156,21 @@ if _par_vcf.exists():
     D["par_het"] = sum(1 for l in _par_out.splitlines() if len(l.split("\t")) > 9 and re.search(r"0[/|]1|1[/|]0", l.split("\t")[9]))
 else:
     D["par_het"] = None
-def near(k, m, pcs):
-    cen = k.groupby("Population")[pcs].mean(); d = np.sqrt(((cen - m)**2).sum(axis=1)).sort_values()
-    k = k.copy(); k["d"] = np.sqrt(((k[pcs].values - m)**2).sum(1)); return d.head(5).round(4).to_dict(), k.nsmallest(15, "d").Population.value_counts().to_dict()
-pcs = ["PC1_AVG", "PC2_AVG", "PC3_AVG", "PC4_AVG"]
-D["near_global"], D["knn_global"] = near(kg, me[pcs].values[0], pcs); D["near_eas"], D["knn_eas"] = near(ke, mee[pcs].values[0], pcs)
+# 复审 P1（AN0/AN2/AN5）：near_* 不再在 30 里另算一套质心排名——群质心距离与 04b 的个体
+# 距离均值不是同一口径，同一个目标会得到两个"最近群体"榜单。04b 的 summary.json 是唯一
+# 生产者：near = 排名群体的距离均值，knn = 04b 记录的前 15 近个体的人群计数。区域未配置/
+# 未产出时 near_eas 为 None（结构化空态，不造数）。取数走 _analysis_state 准入后的
+# _anc_analyses（见下方 ancestry 组装处）：直接解析文件会绕过 manifest 参数校验，让换参
+# 数后留下的 stale summary.json 继续投递 near_*——复审点名的"有旧文件就读取"。
+def _near_from(analyses, analysis_id):
+    a = next((x for x in analyses if isinstance(x, dict) and x.get("analysis_id") == analysis_id
+              and x.get("state") == "ok"), None)
+    if not a:
+        return None, None
+    ranked = sorted((g for g in (a.get("groups") or []) if g.get("rank") and not g.get("small_group")),
+                    key=lambda g: (g["rank"], float(g.get("distance_mean") or 0)))
+    return ({g["label"]: round(float(g["distance_mean"]), 4) for g in ranked[:5]},
+            (a.get("nearest_individuals") or None))
 # --- ClinVar
 cv = pd.read_csv(W/"05_clinvar/clinvar_all_hits.tsv", sep="\t", header=None, dtype=str, keep_default_na=False,
                  names=["chrom","pos","id","ref","alt","qual","geneinfo","clnsig","revstat","clndn","sigconf","eas_af","all_af","bcsq","gt","dp","gq","ad"])
@@ -590,6 +635,9 @@ D["ancestry"] = {"schema_version": 1, "default_analysis_id": _default or
                  (_anc_analyses[0].get("analysis_id") if _anc_analyses else ""),
                  "analyses": _anc_analyses,
                  "local": (_LA_DOC if isinstance(_LA_DOC, dict) else {})}
+# near_* 取准入后的分析（stale/missing 一律 None），口径与 D.ancestry 同源，不二次解析文件
+D["near_global"], D["knn_global"] = _near_from(_anc_analyses, "kg-global")
+D["near_eas"], D["knn_eas"] = _near_from(_anc_analyses, "kg-regional")
 # 父母系：以 05/06 的结构化结果 + 04 的历史视图为准（lineage_history.json）
 _lh = None
 _lhf = W/"03_haplo/lineage_history.json"

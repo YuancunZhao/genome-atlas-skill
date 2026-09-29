@@ -147,6 +147,8 @@ for scope, tag, kg_file, target_file, prune_name in spaces:
         say(f"   {g['label']:<12} n={g['n']:<4} d={g['distance_mean']:.4f}")
     nearest15 = k.nsmallest(15, "distance_to_target").Population.value_counts().to_dict()
     say(f"   nearest 15 individuals: {nearest15}")
+    # 复审 P1（AN0/AN2/AN5）：30 的 near_*/knn_* 不再另算一套质心排名，从这里转录同一口径——
+    # 个体距离均值（groups）与前 15 近个体的人群计数（nearest_individuals）。
     # Percentile position of the target inside the configured sub-populations (not a fixed list).
     for p in [x for x in SUBPOPS if x in set(k.Population)]:
         sub = k[k.Population == p]
@@ -165,6 +167,7 @@ for scope, tag, kg_file, target_file, prune_name in spaces:
         "target": {"sample_id": SAMPLE, "pcs": [float(x) for x in D],
                    "call_rate": _t_rate, "n_called_snps": _t_n},
         "groups": groups,
+        "nearest_individuals": nearest15,
         "sources": [{"scores": kg_file, "target_scores": target_file,
                      "coverage": f"qc.{tag}.ref.smiss+qc.{tag}.target.smiss over {prune_name}"},
         ],

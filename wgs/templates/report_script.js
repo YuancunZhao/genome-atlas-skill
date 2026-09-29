@@ -46,6 +46,14 @@ const _byData=d=>_AN.find(a=>a.dataset===d)||{};
 const _ranked=a=>analysisGroups(a).filter(g=>g.rank&&!g.small_group)
   .sort((x,y)=>(x.rank-y.rank)||(Number(x.distance_mean||0)-Number(y.distance_mean||0)));
 const _sp=a=>Array.isArray(a.supported_path)?a.supported_path:[];
+// 复审 P1（AN0/AN2/AN5）：百分位说明按**配置**的超群/亚群渲染（30 传 D.pop.superpop/subpops
+// 与计数）。写死"东亚/汉"在 EUR 配置下数着 EUR 却自称东亚，是事实错误；未知代码原样显示。
+const _SP_ZH={EAS:'东亚',EUR:'欧洲',AFR:'非洲',SAS:'南亚',AMR:'美洲'}, _SP_EN={EAS:'East Asians',EUR:'Europeans',AFR:'Africans',SAS:'South Asians',AMR:'Americans'};
+const _spZh=()=>_SP_ZH[(D.pop||{}).superpop]||((D.pop||{}).superpop||'参考');
+const _spEn=()=>_SP_EN[(D.pop||{}).superpop]||((D.pop||{}).superpop||'reference')+' individuals';
+const _subPops=()=>{const ss=(D.pop||{}).subpops;return (Array.isArray(ss)&&ss.length)?ss:['CHB','CHS'];};
+const _subZh=()=>_subPops().every(x=>x==='CHB'||x==='CHS')?'汉族':_subPops().join('/');
+const _subEn=()=>_subPops().every(x=>x==='CHB'||x==='CHS')?'Han':_subPops().join('/');
 F.ng=fmt(D.anc.n_global); F.ne=fmt(D.anc.n_eas);
 F.knn=_ranked(_byScope('regional')).slice(0,3).map(g=>`${g.label} n=${g.n}`).join(' · ')||'—';
 F.knng=_ranked(_byData('1000G')).slice(0,3).map(g=>`${g.label} n=${g.n}`).join(' · ')||'—';
@@ -183,7 +191,7 @@ reveal('ychain',(s,c)=>{
   txt(s,{x:x0,y:y+80,'font-size':8,'font-weight':600,fill:c.muted},(D.ypath&&D.ypath.length)?(zh()?`YFull 树路径（共 ${D.ypath.length} 级）：${D.ypath.slice(0,8).map(p=>p.snp).join(' → ')} → … → ${D.ypath[D.ypath.length-1].snp}`:`YFull path (${D.ypath.length} levels): ${D.ypath.slice(0,8).map(p=>p.snp).join(' → ')} → … → ${D.ypath[D.ypath.length-1].snp}`):(zh()?'Y 路径数据缺失':'Y path data unavailable'));
   txt(s,{x:x0,y:y+96,'font-size':8,'font-weight':600,fill:c.muted},zh()?'逐级从 YFull 树下行，每级取衍生态支持最多的支系（明细见 y_terminal_snps.tsv）':'Walked down the YFull tree, taking the best derived-state-supported branch at each step');
   txt(s,{x:x0,y:y+130,'font-size':24,'font-weight':700,fill:c.ink,...NUM},D.y_terminal);
-  txt(s,{x:x0+150,y:y+130,'font-size':9,'font-weight':600,fill:c.muted},'YFull '+D.versions.yfull+(zh()?' · 叶节点':' · leaf branch'));
+  txt(s,{x:x0+150,y:y+130,'font-size':9,'font-weight':600,fill:c.muted},'YFull '+(D.versions.yfull||'—')+(zh()?' · 叶节点':' · leaf branch'));
   const _ysD=(D.y_snps||[]).map(r=>r.depth).filter(d=>d>0);
   const _ysState=(D.y_snps||[]).reduce((a,r)=>{a[r.state]=(a[r.state]||0)+1;return a;},{});
   const _ysMin=_ysD.length?Math.min(..._ysD):0, _ysMax=_ysD.length?Math.max(..._ysD):0;
@@ -195,6 +203,15 @@ reveal('ychain',(s,c)=>{
 
 /* ── 01 mt strip ── */
 reveal('mtstrip',(s,c)=>{
+  // 复审 P1（AN0/AN5）：无 mt 是交付形态（未做 mt 调用/只有 Y 的样本），画明确说明而不是
+  // 在 D.mt.found 处带着整页崩溃。
+  if(!D.mt||!D.mt.hg){
+    txt(s,{x:200,y:140,'text-anchor':'middle','font-size':12,'font-weight':700,fill:c.muted},zh()?'线粒体结果不可用':'mt result unavailable');
+    txt(s,{x:200,y:162,'text-anchor':'middle','font-size':8.5,fill:c.faint},
+        zh()?'未找到单倍群判定产物（haplogrep3.txt）——母系结论按不可用交付，不用常染色体相似性补位'
+            :'no haplogroup call was produced (haplogrep3.txt absent); the maternal line is delivered as unavailable, never backfilled from autosomal similarity');
+    return;
+  }
   const L=16569, x0=24, x1=376, y=110;
   el(s,'line',{x1:x0,y1:y,x2:x1,y2:y,stroke:c.ink,'stroke-width':1});
   [0,4000,8000,12000,16569].forEach(p=>{const x=x0+(x1-x0)*p/L;el(s,'line',{x1:x,y1:y+4,x2:x,y2:y+8,stroke:c.faint,'stroke-width':.8});txt(s,{x,y:y+18,'text-anchor':'middle','font-size':7,fill:c.faint},p===16569?'16,569':fmt(p))});
@@ -240,7 +257,21 @@ function scatter(s,c,pts,me,opts){
 }
 reveal('pcaglobal',(s,c)=>{const pts=D.pca_global.pts.map(p=>({g:p[0],x:p[2],y:p[3],t:`${p[1]} (${p[0]})`}));
   scatter(s,c,pts,{x:D.pca_global.me[0],y:D.pca_global.me[1]},{color:p=>p.g==='EAS'?c.data:c.fd,labels:true,foot:zh()?'一点 = 一个人 · 深蓝 = 东亚 · 菱形 = '+NAME():'one dot = one person · dark blue = East Asian · diamond = '+NAME()})});
-reveal('pcaeas',(s,c)=>{const shade={CHB:c.hero,CHS:c.data,JPT:c.data2,CDX:c.fd,KHV:c.fd};const pts=D.pca_eas.pts.map(p=>({g:p[0],x:p[1],y:p[2],t:p[0]}));
+reveal('pcaeas',(s,c)=>{
+  // 复审 P1（AN0/AN2/AN5）：区域视图按状态交付。未配置 ref_superpop 是合法的 global-only
+  // 形态、配置了但产物缺失是待重跑——两者都画明确说明，不造空图也不拿另一份参考冒充。
+  if(!D.pca_eas){
+    const r=D.pca_eas_reason;
+    txt(s,{x:210,y:130,'text-anchor':'middle','font-size':12,'font-weight':700,fill:c.muted},
+        r==='missing_products'?(zh()?'区域参考视图不可用':'regional reference view unavailable')
+                            :(zh()?'区域参考视图未配置':'regional reference view not configured'));
+    txt(s,{x:210,y:152,'text-anchor':'middle','font-size':8.5,fill:c.faint},
+        r==='missing_products'
+          ?(zh()?'ref_superpop 已配置，但 04 的 regional.* 产物缺失——重跑 04_ancestry_pca.sh 后可恢复':'ref_superpop is configured but 04\'s regional.* products are missing; re-run 04_ancestry_pca.sh to restore the view')
+          :(zh()?'ref_superpop 未给出：本报告按全球参考交付，区域视图不是缺件':'no ref_superpop was given: this report is delivered on the global reference; the regional view is not a missing piece'));
+    return;
+  }
+  const shade={CHB:c.hero,CHS:c.data,JPT:c.data2,CDX:c.fd,KHV:c.fd};const pts=D.pca_eas.pts.map(p=>({g:p[0],x:p[1],y:p[2],t:p[0]}));
   scatter(s,c,pts,{x:D.pca_eas.me[0],y:D.pca_eas.me[1]},{color:p=>shade[p.g]||c.fd,labels:true,foot:zh()?'一点 = 一个人 · 明度 = 人群 · 菱形 = '+NAME():'one dot = one person · shade = population · diamond = '+NAME()})});
 
 /* ── 03 findings ── */
@@ -287,7 +318,7 @@ reveal('prs',(s,c)=>{
     txt(s,{x:x1+34,y:y+3,'font-size':7.5,fill:c.faint},r.coverage_pct+'%');
   });
   txt(s,{x:x1+10,y:top-10,'font-size':7,'font-weight':600,fill:c.faint,'letter-spacing':'.08em'},zh()?'百分位 · 覆盖':'PCT · COVERAGE');
-  foot(s,c,900,H-8,zh()?`菱形 = 在 ${(D.pop||{}).n_super||'—'} 名东亚人中的百分位 · 空心圆 = 在 ${(D.pop||{}).n_sub||'—'} 名汉族中 · 灰带 = 中间一半的人`:`diamond = percentile among ${(D.pop||{}).n_super||'—'} East Asians · hollow = among ${(D.pop||{}).n_sub||'—'} Han · band = middle half`);
+  foot(s,c,900,H-8,zh()?`菱形 = 在 ${(D.pop||{}).n_super||'—'} 名${_spZh()}人中的百分位 · 空心圆 = 在 ${(D.pop||{}).n_sub||'—'} 名${_subZh()}中 · 灰带 = 中间一半的人`:`diamond = percentile among ${(D.pop||{}).n_super||'—'} ${_spEn()} · hollow = among ${(D.pop||{}).n_sub||'—'} ${_subEn()} · band = middle half`);
 });
 
 /* ── 06 SV panel (Delly): the slot used to hold a copy-number depth chart that no producer fills,
@@ -1212,7 +1243,7 @@ reveal('behaviour',(s,c)=>{
   el(s,'rect',{x:X(25),y:top-10,width:X(75)-X(25),height:rows.length*rh+2,fill:c.track,opacity:.6});
   [0,25,50,75,100].forEach(v=>{el(s,'line',{x1:X(v),y1:top-10,x2:X(v),y2:top+rows.length*rh-4,stroke:v===50?c.faint:c.grid,'stroke-width':v===50?.9:.5});
     txt(s,{x:X(v),y:top+rows.length*rh+10,'text-anchor':'middle','font-size':8,fill:c.faint},v)});
-  txt(s,{x:x0,y:10,'font-size':8,'font-weight':600,fill:c.faint,'letter-spacing':'.08em'},zh()?`在 ${(D.pop||{}).n_super||'—'} 名东亚参考个体中的百分位`:`PERCENTILE AMONG THE ${(D.pop||{}).n_super||'—'} EAST ASIAN REFERENCE INDIVIDUALS`);
+  txt(s,{x:x0,y:10,'font-size':8,'font-weight':600,fill:c.faint,'letter-spacing':'.08em'},zh()?`在 ${(D.pop||{}).n_super||'—'} 名${_spZh()}参考个体中的百分位`:`PERCENTILE AMONG THE ${(D.pop||{}).n_super||'—'} ${(((D.pop||{}).superpop)||'EAS')} REFERENCE INDIVIDUALS`);
   rows.forEach((r,i)=>{const y=top+i*rh+6, eas=r.panel==='EAS';
     txt(s,{x:x0-12,y:y+3,'text-anchor':'end','font-size':10,'font-weight':eas?700:500,fill:eas?c.ink:c.muted},zh()?r.zh:r.en);
     const mx=X(r.pct_EAS);
