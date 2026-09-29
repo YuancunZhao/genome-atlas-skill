@@ -22,6 +22,11 @@ done
 echo "pruned SNPs: $(wc -l < prune.prune.in)"; head -2 target.proj.sscore
 # Regional PCA. The super-population comes from the configuration (SUPERPOP); the products are named
 # after the scope, not "eas", so a non-East-Asian panel is not described by the wrong file name.
+# 复审 P1（AN0/AN2/AN5）：区域参考只属于显式配置了 ref_superpop 的运行。开关关着时不按共享
+# SUPERPOP 默认训练区域空间——那会让每个"没问区域问题"的样本都带一个东亚区域结果，而下游
+# 又照读 regional.*。global-only 是合法形态，不是缺件；此前留下的旧 regional.* 由 30/04b
+# 按配置拒绝，不会冒充本次结果，所以这里也不删（换回配置重跑即恢复）。
+if [ "${REGIONAL_ENABLED:-0}" = "1" ]; then
 SCOPE=regional
 { printf '#FID\tIID\n'; awk -v sp="$SUPERPOP" 'NR>1 && $4==sp{print $1"\t"$2}' $R.psam; } > $SCOPE.ids
 $PLINK2 --pfile kg.common --keep $SCOPE.ids --maf 0.05 --bp-space 2000 --indep-pairwise 200 50 0.2 --out prune.$SCOPE --threads $THREADS --memory $MEM_MB >/dev/null
@@ -36,4 +41,7 @@ $PLINK2 --pfile kg.common --keep $SCOPE.ids --extract prune.$SCOPE.prune.in --fr
 $PLINK2 --pfile kg.common --keep $SCOPE.ids --extract prune.$SCOPE.prune.in --read-freq $SCOPE.pca.afreq --score $SCOPE.pca.eigenvec.allele 2 5 header-read no-mean-imputation variance-standardize --score-col-nums 6-15 --out $SCOPE.proj --threads $THREADS --memory $MEM_MB >/dev/null
 $PLINK2 --pfile $WGS/02_complete/$SAMPLE.1kg --extract prune.$SCOPE.prune.in --read-freq $SCOPE.pca.afreq --score $SCOPE.pca.eigenvec.allele 2 5 header-read no-mean-imputation variance-standardize --score-col-nums 6-15 --out $SCOPE.target.proj --threads $THREADS --memory $MEM_MB >/dev/null
 echo "$SUPERPOP pruned SNPs: $(wc -l < prune.$SCOPE.prune.in)"
+else
+  echo "regional reference not configured (ref_superpop absent); global PCA only"
+fi
 echo PCA_DONE
