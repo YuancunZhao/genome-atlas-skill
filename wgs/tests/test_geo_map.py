@@ -16,6 +16,7 @@ const code = [
   grab(/function overlapsAge[\s\S]*?\n}/),
   grab(/function ageInRange[\s\S]*?\n}/),
   grab(/function geomapRows[\s\S]*?\n}/),
+  grab(/function kindView[\s\S]*?\n}/),
   grab(/const GEO_VB[\s\S]*?Math\.abs\(b\) <= 180;\n};/),
 ].join('\n').replace(/\bconst /g, 'var ');   // const 在 eval 里是块作用域，取不出来
 eval(code);
@@ -35,7 +36,13 @@ ok(geoValid(null, null) === false, 'null coordinates are invalid (must not becom
 ok(geoValid('', '') === false, 'empty-string coordinates are invalid');
 ok(geoValid(undefined, undefined) === false, 'undefined coordinates are invalid');
 ok(geoValid(91, 0) === false && geoValid(0, 181) === false, 'out-of-range coordinates are invalid');
-ok(geoValid(-90, 180) === true && geoValid('39.9', '116.4') === true, 'valid values pass (strings included)');
+ok(geoValid(-90, 180) === true && geoValid('39.9', '116.4') === true, 'valid values pass (strings include)');
+// —— 视图分层（批一）：modern/ancient 只看各自 kind；'all'/其它值原样返回同一数组
+const _kr = [{kind:'modern',r:1},{kind:'ancient',r:2},{kind:'unknown',r:3},{}];
+ok(kindView(_kr,'modern').length===1 && kindView(_kr,'modern')[0].r===1, 'modern view keeps only kind=modern');
+ok(kindView(_kr,'ancient').length===1 && kindView(_kr,'ancient')[0].r===2, 'ancient view keeps only kind=ancient');
+ok(kindView(_kr,'all')===_kr && kindView(_kr,'modern-pop')===_kr, "'all' and unrecognised kinds return the input unchanged");
+ok(kindView(null,'modern').length===0, 'null records degrade to an empty view, not a crash');
 // —— 等距投影：四角与已知城市
 ok(Math.abs(geoXY(90, -180).x) < 1e-9 && Math.abs(geoXY(-90, 180).y - 180) < 1e-9, 'world corners land in the viewBox');
 const bj = geoXY(39.9, 116.4);

@@ -582,6 +582,14 @@ function geomapRows(records, loBP, hiBP) {
   return { inRange, outRange, noDate };
 }
 
+/* 视图分层（AN6 批一，纯函数与测试同源）：modern/ancient 只看各自 kind 的记录，'all' 保持
+   原样（含未分层记录）。现代群体是默认主视图——现代参考个体没有年代，古代时间轴属于古代视图，
+   两个视图不该被同一个"全部"混在一起。 */
+function kindView(records, kind) {
+  if (kind !== 'modern' && kind !== 'ancient') return records || [];
+  return (records || []).filter(r => String(r.kind || '') === kind);
+}
+
 /* 共用地图：底图 + 点 + 选择联动。现代图与古代图只是传入的 locations 不同——同一段绘制逻辑，
    避免两个视图对"精度""无坐标"给出不一致的处理。返回 { placed, unplaced } 计数。 */
 /* AN6 复审：drawGeoMap 自引入以来没有任何调用方（geomap 卡片自绘），却留着一套与卡片不同的
@@ -597,8 +605,7 @@ reveal('geomap',(s,c)=>{
   const _defId=(D.ancestry&&D.ancestry.default_analysis_id)||'';
   const a=(_defId&&A.find(x=>String(x.analysis_id)===String(_defId)))|| (_defId?null:A[0]) || {};
   const groups=(Array.isArray(a.groups)?a.groups:((a.groups||{}).ancient||[]));
-  const ranked=groups.filter(g=>g.rank&&!g.small_group).sort((x,y)=>x.rank-y.rank);
-  const top5=ranked.slice(0,5).map(g=>String(g.label));
+  const rankedAll=groups.filter(g=>g.rank&&!g.small_group).sort((x,y)=>x.rank-y.rank);
   const VB={w:900,h:470}, pad={l:26,t:26}, mapH=300;
   const sc=Math.min((VB.w-2*pad.l)/360,(mapH-2*pad.t)/180);
   const ox=pad.l+((VB.w-2*pad.l)-360*sc)/2, oy=pad.t+((mapH-2*pad.t)-180*sc)/2;
@@ -608,15 +615,21 @@ reveal('geomap',(s,c)=>{
                 {l:0,h:1500,zh:'1500 BP 以内',en:'< 1500 BP'},
                 {l:1500,h:5000,zh:'1500–5000 BP',en:'1500–5000 BP'},
                 {l:5000,h:1000000,zh:'5000 BP 以上',en:'> 5000 BP'}];
-  let cur=0, sel=null;              // sel = 选中的记录 ID（稳定键），点与列表共用
+  // 视图分层（AN6 批一）：现代群体是默认主视图；古代视图自带时间轴；'all' 是原来的混合视图。
+  // 切换只是换一批已算好的记录/分组查看，不重算任何统计。
+  const KINDS=[{k:'modern',zh:'现代群体',en:'modern'},{k:'ancient',zh:'古代',en:'ancient'},{k:'all',zh:'全部',en:'all'}];
+  let kv='modern', cur=0, sel=null;    // sel = 选中的记录 ID（稳定键），点与列表共用
   const LBOX=document.getElementById('geomap_list');
   const bandY=mapH+40;
   const draw=()=>{
     clearEl(s);
     const R=RANGES[cur];
-    // 选取走 geomapRows（与测试同一份纯函数）：不合格记录不进视图；"全部"下无年代者也显示
-    // ——现代参考个体普遍没有年代，不能被古代时间轴藏起来。
-    const { inRange, outRange, noDate } = geomapRows(a.records, R.l, R.h);
+    // 选取走 geomapRows/kindView（与测试同一份纯函数）：不合格记录不进视图；"全部"下无年代者
+    // 也显示——现代参考个体普遍没有年代，不能被古代时间轴藏起来。
+    const { inRange, outRange, noDate } = geomapRows(kindView(a.records, kv), R.l, R.h);
+    // 分层视图下排名/前五名/列表也只看该层：现代主图标现代群体，古代图标古代群体。
+    const ranked=(kv==='all'?rankedAll:rankedAll.filter(g=>String(g.kind||'')===kv));
+    const top5=ranked.slice(0,5).map(g=>String(g.label));
     const unplaced=inRange.filter(r=>!geoValid(r.latitude,r.longitude)).length;
     const placed=inRange.filter(r=>geoValid(r.latitude,r.longitude));
     el(s,'use',{href:'#world_land',x:ox,y:oy,width:360*sc,height:180*sc,fill:c.grid,'fill-opacity':.55,stroke:'none'});
@@ -656,34 +669,49 @@ reveal('geomap',(s,c)=>{
     });
     txt(s,{x:pad.l,y:16,'font-size':8,'font-weight':600,fill:c.faint,'letter-spacing':'.06em'},
         Z?'参考样本的来源地（不是目标样本的坐标）':'WHERE THE REFERENCE SAMPLES COME FROM (NOT THE TARGET)');
-    // ── 时间带：左古右今；BP 与公元并列（BP 基准 1950）
+    // ── 视图选择（AN6 批一）：现代群体主图 / 古代 / 全部。可聚焦 + Enter；只换查看层，不重算。
     const bx0=pad.l+40, bx1=VB.w-pad.l-40, by=bandY;
-    el(s,'line',{x1:bx0,y1:by,x2:bx1,y2:by,stroke:c.grid,'stroke-width':1.2});
-    const X=v=>bx1-(bx1-bx0)*Math.min(v,8000)/8000;      // 8000 BP 以上折到左端
-    [0,2000,4000,6000,8000].forEach(v=>{
-      el(s,'line',{x1:X(v),y1:by-4,x2:X(v),y2:by+4,stroke:c.faint,'stroke-width':.8});
-      // BP → 公元：1950 - BP（BP 以 1950 为基准，2000 BP 是公元前 50 年，不是公元 50 年）。
-      // 两套基准写错方向就会把"前 2050 年"说成"公元 2050 年"。0 BP 就是 1950 年本身——
-      // 标成"今"会把基准年当成当前年份（AN6）。
-      const ce=1950-v;
-      txt(s,{x:X(v),y:by+15,'text-anchor':'middle','font-size':7.5,fill:c.faint},
-          v===0?(Z?'1950（BP 基准）':'1950 (BP base)')
-               :`${fmt(v)} BP`+(ce<=0?`（${Z?'约前':'≈'}${fmt(-ce)}${Z?' 年':''}）`:`（${Z?'约':'≈'}${fmt(ce)}${Z?' 年':' CE'}）`));
-    });
-    txt(s,{x:bx0-6,y:by+4,'text-anchor':'end','font-size':7.5,'font-weight':700,fill:c.muted},Z?'古老':'older');
-    txt(s,{x:bx1+6,y:by+4,'font-size':7.5,'font-weight':700,fill:c.muted},Z?'现代':'recent');
-    // 范围选择：可聚焦 + Enter，键盘可用；点击只改查看范围，不重算任何统计
-    RANGES.forEach((r,i)=>{
-      const x0=bx0+i*((bx1-bx0)/RANGES.length), w=(bx1-bx0)/RANGES.length-8, y=by+28;
-      const on=i===cur;
+    KINDS.forEach((v,i)=>{
+      const x0=bx0+i*((bx1-bx0)/KINDS.length), w=(bx1-bx0)/KINDS.length-8, y=by+28;
+      const on=v.k===kv;
       const b=el(s,'rect',{x:x0,y:y,width:w,height:18,rx:2,fill:on?c.hero:'none',stroke:on?c.hero:c.grid,'stroke-width':on?0:.8,
                            class:'fade'});
       b.setAttribute('tabindex','0'); b.setAttribute('role','button');
-      const go=()=>{ if(cur!==i){cur=i;draw();} };
+      const go=()=>{ if(kv!==v.k){kv=v.k;draw();} };
       b.addEventListener('click',go);
       b.addEventListener('keydown',(e)=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();go()}});
-      txt(s,{x:x0+w/2,y:y+12.5,'text-anchor':'middle','font-size':8,'font-weight':700,fill:on?c.bg:c.ink},Z?r.zh:r.en);
+      txt(s,{x:x0+w/2,y:y+12.5,'text-anchor':'middle','font-size':8,'font-weight':700,fill:on?c.bg:c.ink},Z?v.zh:v.en);
     });
+    if(kv!=='modern'){
+      // ── 时间带：左古右今；BP 与公元并列（BP 基准 1950）。现代参考个体没有年代——时间轴与
+      // 年代范围是古代/全部视图的事，现代主图不带（AN6 批一：古代时间筛选是独立视图）。
+      el(s,'line',{x1:bx0,y1:by,x2:bx1,y2:by,stroke:c.grid,'stroke-width':1.2});
+      const X=v=>bx1-(bx1-bx0)*Math.min(v,8000)/8000;      // 8000 BP 以上折到左端
+      [0,2000,4000,6000,8000].forEach(v=>{
+        el(s,'line',{x1:X(v),y1:by-4,x2:X(v),y2:by+4,stroke:c.faint,'stroke-width':.8});
+        // BP → 公元：1950 - BP（BP 以 1950 为基准，2000 BP 是公元前 50 年，不是公元 50 年）。
+        // 两套基准写错方向就会把"前 2050 年"说成"公元 2050 年"。0 BP 就是 1950 年本身——
+        // 标成"今"会把基准年当成当前年份（AN6）。
+        const ce=1950-v;
+        txt(s,{x:X(v),y:by+15,'text-anchor':'middle','font-size':7.5,fill:c.faint},
+            v===0?(Z?'1950（BP 基准）':'1950 (BP base)')
+                 :`${fmt(v)} BP`+(ce<=0?`（${Z?'约前':'≈'}${fmt(-ce)}${Z?' 年':''}）`:`（${Z?'约':'≈'}${fmt(ce)}${Z?' 年':' CE'}）`));
+      });
+      txt(s,{x:bx0-6,y:by+4,'text-anchor':'end','font-size':7.5,'font-weight':700,fill:c.muted},Z?'古老':'older');
+      txt(s,{x:bx1+6,y:by+4,'font-size':7.5,'font-weight':700,fill:c.muted},Z?'现代':'recent');
+      // 范围选择：可聚焦 + Enter，键盘可用；点击只改查看范围，不重算任何统计
+      RANGES.forEach((r,i)=>{
+        const x0=bx0+i*((bx1-bx0)/RANGES.length), w=(bx1-bx0)/RANGES.length-8, y=by+50;
+        const on=i===cur;
+        const b=el(s,'rect',{x:x0,y:y,width:w,height:18,rx:2,fill:on?c.hero:'none',stroke:on?c.hero:c.grid,'stroke-width':on?0:.8,
+                             class:'fade'});
+        b.setAttribute('tabindex','0'); b.setAttribute('role','button');
+        const go=()=>{ if(cur!==i){cur=i;draw();} };
+        b.addEventListener('click',go);
+        b.addEventListener('keydown',(e)=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();go()}});
+        txt(s,{x:x0+w/2,y:y+12.5,'text-anchor':'middle','font-size':8,'font-weight':700,fill:on?c.bg:c.ink},Z?r.zh:r.en);
+      });
+    }
     // ── 列表：与地图共用同一个 sel（稳定 ID），两边互选；缺坐标的行标出来但仍可选中
     if(LBOX){
       LBOX.textContent='';
@@ -706,11 +734,15 @@ reveal('geomap',(s,c)=>{
         LBOX.appendChild(row);
       });
     }
-    // 计数：分别说明"范围外"与"年代未知"，后者既不算命中也不算排除；"全部"下无年代者照常显示
+    // 计数：分别说明"范围外"与"年代未知"，后者既不算命中也不算排除；"全部"下无年代者照常显示。
+    // 现代视图没有年代维度，计数照给但时间轴说明换成视图说明（AN6 批一）。
     const note=document.getElementById('geomap_note');
+    const _kv=KINDS.find(v=>v.k===kv)||KINDS[0];
     if(note) note.textContent=(Z
-      ? `当前范围：${R.zh} · 命中 ${inRange.length} 条（其中 ${placed.length} 条已定位、${unplaced} 条缺坐标不落点）· 范围外 ${outRange.length} 条 · 年代未知 ${noDate.length} 条（"全部"下照常显示，其余范围不计入筛选）· 深色 = 距离最近的前五名 · 圆点 = 遗址级或精度未知，方框 = 地区级 · 底图 Natural Earth 1:110m（public domain）`
-      : `range: ${R.en} · ${inRange.length} records (${placed.length} placed, ${unplaced} without coordinates) · ${outRange.length} outside · ${noDate.length} with an unknown date (shown under "all", excluded from ranged filtering) · emphasised = five closest · circles = site or unknown precision, squares = region-level · base map Natural Earth 1:110m (public domain)`)
+      ? `视图：${_kv.zh}`+(kv==='modern'?'（现代参考无年代，时间轴与年代范围见"古代/全部"视图）':` · 范围：${R.zh}`)
+        +` · 命中 ${inRange.length} 条（其中 ${placed.length} 条已定位、${unplaced} 条缺坐标不落点）· 范围外 ${outRange.length} 条 · 年代未知 ${noDate.length} 条（"全部"下照常显示，其余范围不计入筛选）· 深色 = 距离最近的前五名 · 圆点 = 遗址级或精度未知，方框 = 地区级 · 底图 Natural Earth 1:110m（public domain）`
+      : `view: ${_kv.en}`+(kv==='modern'?' (modern references carry no date; see the ancient/all views for the timeline)':` · range: ${R.en}`)
+        +` · ${inRange.length} records (${placed.length} placed, ${unplaced} without coordinates) · ${outRange.length} outside · ${noDate.length} with an unknown date (shown under "all", excluded from ranged filtering) · emphasised = five closest · circles = site or unknown precision, squares = region-level · base map Natural Earth 1:110m (public domain)`)
       .replace(/\*\*/g,'');
     foot(s,c,VB.w,VB.h-6,Z?'筛选只是换个范围查看已算好的结果，不重建 PCA、也不重算排名 · 离线底图，无外部请求'
                           :'filtering only changes which computed records are shown; no PCA rebuild, no re-ranking · offline base map, no external requests');
