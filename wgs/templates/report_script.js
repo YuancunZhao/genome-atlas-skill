@@ -389,17 +389,37 @@ const _LOC=(D.ancestry&&D.ancestry.local)||{};
 const _CAL=Array.isArray(_LOC.calibration)?_LOC.calibration:[];
 const _SRC=((_LOC.panels||[]).find(p=>p.role==='source')||{});
 // 参与比较的面板来自校准结果本身（配置的 la_labels），不是 FLARE 的列顺序。
-const _SRCLAB=((_LOC.calibration_panels||[])[0])||_SRC.label||_SRC.id||'';
+// 复审 AN3/AN5：没有校准时，标签回退到**原始 LA** 已知的来源面板（17 写入 panels），不能变 '—'。
+const _SRC_PANELS=(_LOC.panels||[]).filter(p=>p.role==='source').map(p=>p.id||p.label).filter(Boolean);
+const _PANELS=laPanelLabels(_LOC.calibration_panels,_LOC.panels);
+const _SRCLAB=_PANELS[0]||_SRC.label||_SRC.id||'';
 const CALCH=(Array.isArray(_LOC.calibration_chroms)&&_LOC.calibration_chroms.length)
   ? _LOC.calibration_chroms.map(String) : [];
-const calLen=CALCH.reduce((a,c)=>a+(D.chrlen[c]||0),0)||1;
-const _perChrom=(_LOC.per_chrom||[]).length?(_LOC.per_chrom||[]):(D.la_per_chrom||[]);
-const dayuCal=CALCH.reduce((a,c)=>{const r=_perChrom.find(x=>String(x.chrom)===String(c)&&(!_SRCLAB||String(x.panel_id||x.anc||'')===_SRCLAB||x.panel_id===undefined));
-  const v=r?(r.value!=null?r.value:r[_SRCLAB]):null;return a+((v!=null?v:0)*(D.chrlen[c]||0))},0)/calLen;
+/* 复审 AN3/AN5：KPI 与校准图必须是同一个统计量。dayuCal 取 17b 在共同染色体集合上写回的
+   posterior 目标值（target_north），不再从 17 的 per_chrom 片段跨度比例折算——片段比例 0.9 而
+   posterior 目标 0.6/参照均值 0.5/SD 0.1 时，旧代码显示 90%/+4 SD，同口径的正解是 60%/+1 SD。
+   校准行没有 target_north（17b 未运行）时 dayuCal 为 null：KPI 显示 '—'，不用别的口径顶上。 */
+function calibTarget(cal){
+  const r=(cal||[]).find(x=>x&&x.target_north!=null&&isFinite(Number(x.target_north)));
+  return r?Number(r.target_north):null;
+}
+function laSdScore(t,mean,sd){
+  if(t==null||mean==null||!(Number(sd)>0)) return null;
+  if(!isFinite(t)||!isFinite(mean)||!isFinite(sd)) return null;
+  return (t-mean)/sd;
+}
+/* 复审 AN3/AN5：空 calibration_panels 不能把标签变 '—'——原始 LA 的 panels（17 写入）已经
+   声明了来源面板；校准在场时仍以校准面板（配置的 la_labels）为准。 */
+function laPanelLabels(calPans, rawPans){
+  const cal=(calPans||[]).filter(Boolean);
+  if(cal.length) return cal;
+  return (rawPans||[]).filter(p=>p&&p.role==='source').map(p=>p.id||p.label).filter(Boolean);
+}
+const dayuCal=calibTarget(_CAL);
 /* AN6（§7）：局部祖源的面板名、对照面板与"哪一列是来源"都来自结构化结果，不再写死
-   NorthEA/SouthEA/European/SouthAsian。拿不到就留 '—'——不编一个看起来合理的百分比。 */
+   NorthEA/SouthEA/European/SouthAsian。拿不到就留 '—'——不编一个看起来合理的百分比。
+   _PANELS 已在上方带原始 LA 回退。 */
 const _lg=D.la_global||{};
-const _PANELS=(_LOC.calibration_panels||[]);
 const _P0=_PANELS[0]||'', _P1=_PANELS[1]||'';
 const _CTRL=((_LOC.panels||[]).filter(p=>p.role==='control').map(p=>p.id||p.label)).filter(Boolean);
 F.north=(_P0&&_lg[_P0]!=null)?(_lg[_P0]*100).toFixed(1):'—';
@@ -408,8 +428,9 @@ F.la_a=_P0||'—'; F.la_b=_P1||'—';
 F.noise=(_CTRL.length&&_CTRL.every(k=>_lg[k]!=null))?(_CTRL.reduce((a,k)=>a+_lg[k],0)*100).toFixed(1):'—';
 F.chb=_CAL[0]&&_CAL[0].north_mean!=null?(_CAL[0].north_mean*100).toFixed(0):'—';
 F.chs=_CAL[1]&&_CAL[1].north_mean!=null?(_CAL[1].north_mean*100).toFixed(0):'—';
-F.dayucal=isFinite(dayuCal)?(dayuCal*100).toFixed(1):'—';
-F.sdchb=(_CAL[0]&&_CAL[0].north_mean!=null&&_CAL[0].north_sd)?((dayuCal-_CAL[0].north_mean)/_CAL[0].north_sd).toFixed(1):'—';
+F.dayucal=dayuCal!=null?(dayuCal*100).toFixed(1):'—';
+const _sds=laSdScore(dayuCal,_CAL[0]&&_CAL[0].north_mean,_CAL[0]&&_CAL[0].north_sd);
+F.sdchb=_sds==null?'—':((_sds>0?'+':'')+ _sds.toFixed(1));
 F.archmb=D.archaic_summary.span_mb; F.neamb=D.archaic_summary.neanderthal_mb; F.denmb=D.archaic_summary.denisovan_mb;
 F.archn=D.archaic_summary.merged; F.archpct=(D.archaic_summary.span_mb/2875*100).toFixed(1);
 F.phhet=fmt(D.phase.het); F.phased=fmt(D.phase.phased); F.phpct=D.phase.het>0?(D.phase.phased/D.phase.het*100).toFixed(1):'—';
@@ -474,8 +495,9 @@ reveal('calib',(s,c)=>{
   const a=AC(), x0=170,x1=770,y0=34,rh=32;
   if(!_CAL.length){txt(s,{x:12,y:22,'font-size':10,fill:c.faint},
     zh()?'本版没有留出校准结果（未运行或来源面板不足）':'No holdout calibration in this build (not run, or too few reference individuals)');return}
-  // 每个校准群体一行：名字、人数、均值与标准差都来自结果本身
-  const rows=[{lab:NAME(),n:dayuCal,sd:0,me:true}].concat(
+  // 每个校准群体一行：名字、人数、均值与标准差都来自结果本身。样本行画的是 17b 的 posterior
+  // 目标值（与各组均值同口径）；没有 target_north 就不画样本行，不拿片段跨度比例冒充。
+  const rows=(dayuCal!=null?[{lab:NAME(),n:dayuCal,sd:0,me:true}]:[]).concat(
     _CAL.map(x=>({lab:`${x.population} · n=${x.n}`,n:x.north_mean,sd:x.north_sd||0})));
   const X=v=>x0+(x1-x0)*(v-0.5)/0.5;
   [0.5,0.6,0.7,0.8,0.9,1].forEach(v=>{el(s,'line',{x1:X(v),y1:y0-12,x2:X(v),y2:y0+rows.length*rh-10,stroke:c.grid,'stroke-width':.7});
