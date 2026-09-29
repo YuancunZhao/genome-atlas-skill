@@ -20,13 +20,58 @@ for _ext in (".geno", ".snp", ".ind"):
     if not pathlib.Path(PREF + _ext).exists():
         sys.exit(f"incomplete AADR panel: {PREF}{_ext} is missing")
 RELEASE = (re.match(r"(v\d+(?:\.\d+)?)", pathlib.Path(PREF).name) or [None, "unknown"])[1]
+
+def _fail(reason, detail):
+    # 复审 AN1：提取失败不是一行日志。bcftools 可以先吐一条合法 stdout 再 exit 1，旧代码
+    # 照常把 manifest 写成 ok，09b 就拿着半份基因型出结论。失败必须落 failed manifest
+    # （原子覆盖上一次运行留下的 ok）并以非零码退出。
+    ad.write_manifest(f"{W}/manifest.json", ad.build_manifest(
+        SAMPLE, "08-aadr-extract", state="failed", reason_code=reason, reference_release=RELEASE,
+        parameters={"aadr_prefix": PREF, "detail": str(detail)}, outputs=[]))
+    sys.exit(f"08-aadr-extract failed ({reason}): {detail}")
+
+def validate_tgeno_header(path, n_ind, n_snp):
+    """返回 None 表示 .geno 的 TGENO 头与 .ind/.snp 维度一致；否则返回原因字符串。
+
+    TGENO 头是 48 字节：'TGENO' 魔数后跟空格分隔的十进制 n_ind、n_snp（个体优先布局，
+    每行 rlen=(n_snp+3)//4 字节）。旧代码只断言文件总尺寸——任何等长的损坏头都放行，
+    而维度对不上的读取就是静默把两个人的基因型错位拼在一起。"""
+    try:
+        with open(path, "rb") as f:
+            raw = f.read(48)
+    except OSError as e:
+        return f"unreadable .geno: {e}"
+    if len(raw) < 48:
+        return f"truncated header: {len(raw)} bytes"
+    if not raw.startswith(b"TGENO"):
+        return "bad magic: expected b'TGENO'"
+    fields = raw.rstrip(b"\x00").decode("ascii", "replace").split()
+    if len(fields) < 3:
+        return f"malformed header fields: {fields!r}"
+    try:
+        h_ind, h_snp = int(fields[1]), int(fields[2])
+    except ValueError:
+        return f"non-numeric header dimensions: {fields[1:3]!r}"
+    if h_ind != n_ind:
+        return f"header n_ind {h_ind} != .ind rows {n_ind}"
+    if h_snp != n_snp:
+        return f"header n_snp {h_snp} != .snp rows {n_snp}"
+    rlen = (n_snp + 3) // 4
+    size = os.path.getsize(path)
+    if 48 + rlen * n_ind != size:
+        return f"size {size} != 48 + {rlen} * {n_ind}"
+    return None
+
 # Original geno row numbers, captured before any merge: reading packed genotypes by a post-merge
 # DataFrame index is how a merge that reorders rows silently mixes individuals up.
 ind=pd.read_csv(f"{PREF}.ind",sep=r"\s+",header=None,names=["iid","sex","pop"])
 ind["geno_row"]=np.arange(len(ind),dtype=np.int64)
 snp=pd.read_csv(f"{PREF}.snp",sep=r"\s+",header=None,names=["rsid","chrom","cm","pos","a1","a2"],dtype={"chrom":str})
 n_ind,n_snp=len(ind),len(snp); rlen=(n_snp+3)//4
-assert 48+rlen*n_ind==os.path.getsize(f"{PREF}.geno"), "layout mismatch"
+# 复审 AN1：断言不能代替输入校验——校验不过要带着原因落 failed manifest 退出，不是 AssertionError 裸栈。
+_bad_tgeno = validate_tgeno_header(f"{PREF}.geno", n_ind, n_snp)
+if _bad_tgeno:
+    _fail("tgeno_header_invalid", _bad_tgeno)
 
 # Panel membership comes from the configuration (aadr_modern / aadr_ancient_prefix); the age of a
 # record never decides its kind, and no 500 BP cutoff is applied. Everything the panel does not name
@@ -86,7 +131,13 @@ snp["idx"]=np.arange(n_snp)
 sel=snp[(snp.chrom.isin([str(i) for i in range(1,23)]))&snp.a1.isin(list("ACGT"))&snp.a2.isin(list("ACGT"))].copy()
 sel[["chrom","pos"]].to_csv(f"{W}/ho_sites.tsv",sep="\t",header=False,index=False)
 q=subprocess.run(["bcftools","query","-R",f"{W}/ho_sites.tsv","-f","%CHROM\t%POS\t%REF\t%ALT\t[%GT]\n",f"{P}/wgs/02_complete/{SAMPLE}.1kg_sites.vcf.gz"],capture_output=True,text=True)
-if q.returncode: print("bcftools query failed:\n"+q.stderr[-2000:],file=sys.stderr)  # otherwise an empty result silently yields 0 usable SNPs
+# 复审 AN1：子进程失败立即终止并使本次状态失效。exit 1 就是失败——哪怕 stdout 里已有合法行
+# （半份输出配上 ok manifest 会让 09b 拿截断的基因型照常出结论）；exit 0 但一行都没有同样
+# 是输入坏了（错的 VCF/错的 build），不是"目标恰好全缺失"。
+if q.returncode:
+    _fail("bcftools_query_failed", f"bcftools exit {q.returncode}: {q.stderr.strip()[-500:]}")
+if not q.stdout.strip():
+    _fail("bcftools_query_empty", "bcftools exited 0 but returned no rows for ho_sites.tsv")
 q=q.stdout
 dg=pd.read_csv(io.StringIO(q),sep="\t",header=None,names=["chrom","pos","ref","alt","gt"],dtype={"chrom":str}).drop_duplicates(["chrom","pos"])
 # LEFT join: a site the target cannot be called at keeps its reference individuals and is encoded as
