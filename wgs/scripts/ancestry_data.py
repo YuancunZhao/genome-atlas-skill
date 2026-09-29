@@ -1075,10 +1075,12 @@ def analysis_state(dir_path, expected=None, names=("summary.json", "local_ancest
     # 第一版把这段放在"找不到 manifest.json 时"才走，实测两种位置都返回 ok——因为真实 manifest 存在，
     # glob 根本不会被走到。
     man = None
+    _step_non_ok = False
     for extra in sorted(d.glob("manifest.*.json")) if d.exists() else []:
         cand = read_manifest(extra)
         if cand and str(cand.get("state") or "ok") not in ("ok",):
             man = cand
+            _step_non_ok = True
             break
         if cand and man is None:
             man = cand
@@ -1094,6 +1096,11 @@ def analysis_state(dir_path, expected=None, names=("summary.json", "local_ancest
             continue
         if str(man.get(k)) != str(v):
             return "unavailable", "stale_result", None
+    # 步骤级禁用/失败记录压过目录 manifest 时，目录里的结果文件属于**上一次**运行——状态照实
+    # 报告，但结果不能作为 doc 交出（与目录自身 manifest.json 标 disabled、由该步写入原因文件的
+    # 情形不同：那种结果属于本次运行，读出来是安全的）。
+    if _step_non_ok:
+        return str(man.get("state") or "ok"), str(man.get("reason_code") or ""), None
     for name in names:
         f = d / name
         if f.exists():

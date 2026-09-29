@@ -315,18 +315,25 @@ _analysis_state = lambda d, expected=None: _ad.analysis_state(d, {"sample_id": S
 _LA_STATE, _LA_REASON, _LA_DOC = _analysis_state(W/"12_localanc")
 _AADR_STATE, _AADR_REASON, _AADR_DOC = _analysis_state(W/"11_aadr")
 _g = W/"12_localanc/global.tsv"
-if _g.exists():
-    D["la_global"] = {a: float(f) for a, f in (l.split() for l in open(_g).read().strip().split("\n"))}
+# 复审 AN5：旧读入口必须服从状态。LA 被禁用/失败时，目录里残留的 global.tsv 与旧
+# local_ancestry.json 都是上一次运行的结果——照读等于让禁用状态失效。只有 state=ok 才碰文件。
+if _LA_STATE == "ok":
+    if _g.exists():
+        D["la_global"] = {a: float(f) for a, f in (l.split() for l in open(_g).read().strip().split("\n"))}
+    else:
+        _gl = ((_LA_DOC or {}).get("global") or [])
+        D["la_global"] = ({str(g["panel_id"]): float(g["value"]) for g in _gl} if _gl else {})
 else:
-    _gl = ((_LA_DOC or {}).get("global") or [])
-    D["la_global"] = ({str(g["panel_id"]): float(g["value"]) for g in _gl} if _gl else {})
+    D["la_global"] = {}
     D["la_state"], D["la_reason"] = _LA_STATE, _LA_REASON
-_pc = _read_tsv(W/"12_localanc/per_chrom.tsv", dtype={"chrom": str})
+_pc = (_read_tsv(W/"12_localanc/per_chrom.tsv", dtype={"chrom": str})
+       if _LA_STATE == "ok" else None)
 # 列名来自配置的两个来源面板；缺失就退化为"只带 chrom"，而不是让整个构建 KeyError
 _PA, _PB = (OPT.get("la_labels") or ["", ""])[0], (OPT.get("la_labels") or ["", ""])[1]
 _pc_cols = ["chrom"] + [c for c in (_PA, _PB) if c and c in getattr(_pc, "columns", [])]
 D["la_per_chrom"] = _pc[_pc_cols].to_dict("records") if _pc is not None and len(_pc) else []
-_sg = _read_tsv(W/"12_localanc/segments.tsv", dtype={"chrom": str})
+_sg = (_read_tsv(W/"12_localanc/segments.tsv", dtype={"chrom": str})
+       if _LA_STATE == "ok" else None)
 if _sg is not None and len(_sg):
     _sg = _sg.copy(); _sg["hap"] = _sg["hap"].astype(str).str.replace("a", "", regex=False).astype(int)  # a1/a2 -> 1/2 for the painting figures
     D["la_segments"] = _sg[["chrom", "start", "end", "anc", "mb", "hap"]].to_dict("records")
@@ -338,7 +345,7 @@ else:
 # so rather than leaving a blank band that reads like the untyped acrocentric short arms.
 _lac = {str(s["chrom"]) for s in D["la_segments"]}
 D["la_missing"] = [str(i) for i in range(1, 23) if str(i) not in _lac] if D["la_segments"] else []
-_cb = _read_tsv(W/"12_localanc/calibration.tsv")
+_cb = (_read_tsv(W/"12_localanc/calibration.tsv") if _LA_STATE == "ok" else None)
 D["la_calib"] = _cb.to_dict("records") if _cb is not None and len(_cb) else []
 # archaic introgression (step 18)
 _as = W/"15_archaic/summary.txt"
@@ -393,8 +400,10 @@ try:
 except Exception:
     D["density"] = []
 # Human Origins PCA (step 09b)
+# 复审 AN5：ho_* 是旧视图的读入口，同样服从状态——AADR 被禁用/失败时，目录里的
+# proj_annotated.tsv/summary.json 是上一次运行的结果，照读会让报告继续展示已禁用的数据。
 _pa = _read_tsv(W/"11_aadr/proj_annotated.tsv")
-if _pa is not None and len(_pa):
+if _AADR_STATE == "ok" and _pa is not None and len(_pa):
     anc = _pa[_pa.kind == "ancient"]
     mod = _pa[_pa.kind != "ancient"]
     D["ho_ancient_pts"] = [{"label": r.label, "pc1": r.PC1_AVG, "pc2": r.PC2_AVG, "date": r.date} for r in anc.itertuples()]
@@ -512,7 +521,8 @@ else:
     D["ho_ancient_pts"] = []; D["ho_modern"] = []; D["ho_me"] = [0.0, 0.0]; D["ho_prov"] = []
     D["ho_affinity"] = []; D["ho_affinity_strip"] = []; D["ho_target_group"] = None
 _na = _read_tsv(W/"11_aadr/near_ancient.tsv")
-D["ho_near_ancient"] = _na.to_dict("records") if _na is not None and len(_na) else []
+D["ho_near_ancient"] = (_na.to_dict("records")
+                         if _AADR_STATE == "ok" and _na is not None and len(_na) else [])
 # --- f3 statistics (28_f3_stats.py). Optional module: null when the step was not run,
 # and the report's f3 card hides itself on a null -- the sections table records why.
 _f3_f = W/"04_ancestry/f3/f3_stats.json"

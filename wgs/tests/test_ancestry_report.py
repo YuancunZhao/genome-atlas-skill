@@ -81,6 +81,23 @@ class TestStaleManifestRejected(unittest.TestCase):
             self.assertEqual(state, "disabled")
             self.assertIsNotNone(doc, "禁用也要能读出结果文件（里面写着原因）")
 
+    def test_step_level_disabled_manifest_overrides_a_healthy_directory_one(self):
+        """run_all 禁用某步时写 manifest.<step>.json；它必须压过目录里上一次运行留下的
+        manifest.json——否则 A→B→A 换回配置后，旧结果照旧以 ok 进报告（复审 AN0+AN5+H6）。"""
+        with tempfile.TemporaryDirectory() as td:
+            d = self._dir(td, "SAMPLE_A")            # 健康的 manifest.json + summary.json（上次运行的）
+            ad.write_manifest(d / "manifest.09b-aadr-summary.json",
+                              ad.disabled_manifest("SAMPLE_A", "09b-aadr-summary", "aadr_not_configured"))
+            state, reason, doc = ad.analysis_state(d, {"sample_id": "SAMPLE_A"})
+            self.assertEqual((state, reason), ("disabled", "aadr_not_configured"))
+            self.assertIsNone(doc, "禁用时不能把旧 summary.json 当结果交给调用方")
+        # 步骤级记录全部是 ok 时，回落到目录级 manifest：不因存在 manifest.*.json 而误判
+        with tempfile.TemporaryDirectory() as td:
+            d = self._dir(td, "SAMPLE_A")
+            ad.write_manifest(d / "manifest.09b-aadr-summary.json",
+                              ad.build_manifest("SAMPLE_A", "09b-aadr-summary"))
+            self.assertEqual(ad.analysis_state(d, {"sample_id": "SAMPLE_A"})[0], "ok")
+
 
 class TestEligibleSetIsShared(unittest.TestCase):
     """§7：同一 Analysis 进入所有视图的合格集合完全相同。"""
