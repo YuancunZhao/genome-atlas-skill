@@ -532,6 +532,14 @@ class TestGroupSummaries(unittest.TestCase):
         self.assertEqual(g[0]["n"], 2)
         self.assertEqual(g[0]["member_ids"], ["a", "b"])
 
+    def test_records_without_record_id_fall_back_to_iid(self):
+        """1000G 记录没有 record_id 只有 iid：member_ids 不得退化为 "None" 字面量。"""
+        r = [{"group_id": "CHS", "iid": "CHS1", "distance_to_target": 0.01},
+             {"group_id": "CHS", "iid": "CHS2", "distance_to_target": 0.02}]
+        g = ad.group_summaries(r, min_group_n=2)
+        self.assertEqual(g[0]["member_ids"], ["CHS1", "CHS2"])
+        self.assertNotIn("None", g[0]["member_ids"])
+
     def test_one_and_zero_groups(self):
         self.assertEqual(ad.group_summaries([], min_group_n=2), [])
         one = ad.group_summaries([{"group_id": "solo", "record_id": "x", "distance_to_target": 0.1}],

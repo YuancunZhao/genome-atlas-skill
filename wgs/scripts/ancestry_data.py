@@ -751,7 +751,10 @@ def group_summaries(records, min_group_n):
     out = []
     for gid, rows in buckets.items():
         ds = [float(r["distance_to_target"]) for r in rows]
-        rows_sorted = sorted(rows, key=lambda r: str(r.get("record_id")))
+        # 成员键：AADR 记录有 record_id；1000G 记录没有，只有 sscore 的 iid。直接 str(record_id)
+        # 会把每个成员都写成 "None" 字面量——下游按 member_ids 关联记录时全体失配。
+        _mem = lambda r: str(r.get("record_id") if r.get("record_id") is not None else r.get("iid"))
+        rows_sorted = sorted(rows, key=_mem)
         first = rows_sorted[0]
         dmin = [r.get("date_min_bp") for r in rows if r.get("date_min_bp") is not None]
         dmax = [r.get("date_max_bp") for r in rows if r.get("date_max_bp") is not None]
@@ -761,7 +764,7 @@ def group_summaries(records, min_group_n):
             "kind": first.get("kind"),
             "location_id": first.get("location_id"),
             "n": len(rows),
-            "member_ids": [str(r.get("record_id")) for r in rows_sorted],
+            "member_ids": [_mem(r) for r in rows_sorted],
             "rank": None,
             "small_group": len(rows) < int(min_group_n),
             "distance_mean": sum(ds) / len(ds),
