@@ -592,6 +592,19 @@ def assign_kind(records, ancient_prefixes, modern_groups):
     return records
 
 
+def unmatched_panel_entries(records, modern_groups, ancient_prefixes):
+    """配置里点名了、但一条记录都匹配不到的条目（modern 精确匹配，ancient 前缀匹配）。
+
+    匹配语义与 assign_kind 完全一致。一个拼错的群体名会静默掏空那一侧的 PCA 集合，
+    分析表面上照常出结果——这里把没命中的配置点名交回去，让 08 打印并写进 manifest。
+    """
+    modern = [str(x) for x in (modern_groups or [])]
+    prefixes = [str(x) for x in (ancient_prefixes or [])]
+    pops = {str(r.get("source_population_id") or "") for r in records}
+    return {"modern": [m for m in modern if m not in pops],
+            "ancient_prefix": [p for p in prefixes if not any(s.startswith(p) for s in pops)]}
+
+
 LOCATION_COLUMNS = ("dataset", "source_id", "location_id", "label_zh", "label_en", "locality",
                     "latitude", "longitude", "precision", "source_url", "note")
 

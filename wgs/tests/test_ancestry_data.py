@@ -351,6 +351,22 @@ class TestNormalizeMetadata(unittest.TestCase):
         with self.assertRaises(ValueError):
             ad.assign_kind([], ancient_prefixes=["Han"], modern_groups=["Han_sub"])
 
+    def test_unmatched_panel_entries_name_the_configured_misses(self):
+        """配置点名但面板零命中必须点名道姓，匹配语义与 assign_kind 一致。"""
+        rows = [anno_row(gid="M.HO", master="M", iid="M", group="Han"),
+                anno_row(gid="R.SG", master="R", iid="R", group="China_Recent_IA")]
+        recs = ad.normalize_metadata(rows, dataset="AADR", release="v66")
+        um = ad.unmatched_panel_entries(recs, modern_groups=["Han", "Hann", "Japanese"],
+                                        ancient_prefixes=["China_", "Korea_"])
+        # modern 是精确匹配：Hann 拼错要被抓出来；ancient 是前缀匹配：Korea_ 未命中
+        self.assertEqual(um["modern"], ["Hann", "Japanese"])
+        self.assertEqual(um["ancient_prefix"], ["Korea_"])
+        # 全命中时两边都为空；空记录集则所有配置条目都算未命中
+        ok = ad.unmatched_panel_entries(recs, modern_groups=["Han"], ancient_prefixes=["China_"])
+        self.assertEqual(ok, {"modern": [], "ancient_prefix": []})
+        empty = ad.unmatched_panel_entries([], modern_groups=["Han"], ancient_prefixes=["China_"])
+        self.assertEqual(empty, {"modern": ["Han"], "ancient_prefix": ["China_"]})
+
     def test_locations_table_is_validated(self):
         with tempfile.TemporaryDirectory() as td:
             f = pathlib.Path(td) / "ancestry_locations.tsv"

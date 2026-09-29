@@ -35,6 +35,16 @@ anno=pd.read_csv(ANNO,sep="\t",dtype=str,low_memory=False)
 anno.columns=[c.strip() for c in anno.columns]
 recs=ad.assign_kind(ad.normalize_metadata(anno.to_dict("records"),dataset="AADR",release=RELEASE),
                     ancient_prefixes=AADR_ANCIENT_PREFIX,modern_groups=AADR_MODERN)
+# 复审 AN1：配置点名但面板里一条记录都没有的条目要点名道姓——一个拼错的群体名会静默掏空
+# 那一侧的 PCA 集合，分析照常出结果但训练集合悄悄变了。计数行不区分"没配置"与"没命中"。
+_um=ad.unmatched_panel_entries(recs,AADR_MODERN,AADR_ANCIENT_PREFIX)
+if _um["modern"] or _um["ancient_prefix"]:
+    print("warning: configured panel entries matched no records: "
+          f"modern={_um['modern']} ancient_prefix={_um['ancient_prefix']}",file=sys.stderr)
+if not any(r.get("kind")=="modern" for r in recs):
+    print("warning: no modern references selected -- the modern PCA/projection side is empty",file=sys.stderr)
+if not any(r.get("kind")=="ancient" for r in recs):
+    print("warning: no ancient references selected -- the ancient projection side is empty",file=sys.stderr)
 # 复审 AN1：同一个人可以有多种技术表示（不同 call 版本、重复记录）。之前只在测试里有去重，生产路径
 # 不去重，于是同一个人可能以两条记录各自计入分组与计数。这里接上：保留可用的那一条，被丢弃的带原因
 # 落盘供审计，而不是悄悄消失。
@@ -134,6 +144,7 @@ pd.DataFrame({"iid":iids,"label":labels,"kind":kinds,"date":list(keep2.date_mean
 ad.write_manifest(f"{W}/manifest.json", ad.build_manifest(
     SAMPLE,"08-aadr-extract",state="ok",reference_release=RELEASE,
     parameters={"aadr_prefix":PREF,"annotation":ANNO,"modern":AADR_MODERN,"ancient_prefix":AADR_ANCIENT_PREFIX,
+                "unmatched_modern":_um["modern"],"unmatched_ancient_prefix":_um["ancient_prefix"],
                 "min_call_rate_ancient":MIN_CR_ANCIENT,"min_projection_snps":MIN_PROJECTION_SNPS},
     input_fingerprints={"geno_size":os.path.getsize(f"{PREF}.geno"),"n_snp":int(n_snp),"n_ind":int(n_ind)},
     outputs=["11_aadr/reference_metadata.tsv","11_aadr/samples.tsv","11_aadr/aadr.bed","11_aadr/aadr.bim","11_aadr/aadr.fam"]))
