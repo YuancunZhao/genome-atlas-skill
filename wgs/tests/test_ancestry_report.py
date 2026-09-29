@@ -3,7 +3,7 @@
 这些用例只依赖 ancestry_data 的纯函数——构建器 30/31 在 import 时就会读数据、建目录，不能拿来
 当测试夹具；被它们调用的逻辑因此都放在这里。
 """
-import json, pathlib, sys, tempfile, unittest
+import json, pathlib, subprocess, sys, tempfile, unittest
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "scripts"))
 import ancestry_data as ad  # noqa: E402
@@ -97,6 +97,88 @@ class TestStaleManifestRejected(unittest.TestCase):
             ad.write_manifest(d / "manifest.09b-aadr-summary.json",
                               ad.build_manifest("SAMPLE_A", "09b-aadr-summary"))
             self.assertEqual(ad.analysis_state(d, {"sample_id": "SAMPLE_A"})[0], "ok")
+
+    def test_disable_then_rerun_success_ends_the_disabled_state(self):
+        """复审 AN0/AN5/H6 生命周期：禁用→重新启用并成功产出后，状态必须回到 ok。
+        生产者成功时通过 clear_step_manifests 撤下**自己的**步骤级记录——不撤别人的。"""
+        with tempfile.TemporaryDirectory() as td:
+            d = self._dir(td, "SAMPLE_A")
+            ad.write_manifest(d / "manifest.09b-aadr-summary.json",
+                              ad.disabled_manifest("SAMPLE_A", "09b-aadr-summary", "aadr_not_configured"))
+            ad.write_manifest(d / "manifest.08-aadr-extract.json",
+                              ad.disabled_manifest("SAMPLE_A", "08-aadr-extract", "aadr_not_configured"))
+            self.assertEqual(ad.analysis_state(d, {"sample_id": "SAMPLE_A"})[0], "disabled")
+            # 09b 本次成功：只撤自己的记录；08 的禁用证据必须留下（不粗暴清场）
+            removed = ad.clear_step_manifests(d, "09b-aadr-summary")
+            self.assertEqual(removed, ["manifest.09b-aadr-summary.json"])
+            self.assertTrue((d / "manifest.08-aadr-extract.json").exists(),
+                            "clearing one step's record must not delete another step's evidence")
+            # 08 仍有一条 disabled 记录压着目录——照实报告，直到 08 也成功撤下
+            self.assertEqual(ad.analysis_state(d, {"sample_id": "SAMPLE_A"})[0], "disabled")
+            ad.clear_step_manifests(d, "08-aadr-extract")
+            state, reason, doc = ad.analysis_state(d, {"sample_id": "SAMPLE_A"})
+            self.assertEqual((state, doc), ("ok", {"counts": {"selected": 1}}))
+
+    def test_clear_step_is_a_noop_without_a_record(self):
+        with tempfile.TemporaryDirectory() as td:
+            self.assertEqual(ad.clear_step_manifests(td, "17b-la-calibrated"), [])
+
+    def test_expected_parameters_gate_config_changes(self):
+        """复审 AN0/AN5/H6：30 的准入要比 sample_id 更多——同一样本换了门槛/prune 集/参考子集，
+        旧 manifest 必须判 stale_result。parameters 里**缺键**同样 stale：没记录不等于一致。"""
+        with tempfile.TemporaryDirectory() as td:
+            d = self._dir(td, "SAMPLE_A")
+            m = ad.read_manifest(d / "manifest.json")
+            m["parameters"] = {"min_group_n": 2, "prune_sha": "abc123def456"}
+            ad.write_manifest(d / "manifest.json", m)
+            # 完全一致 → ok
+            self.assertEqual(ad.analysis_state(
+                d, {"sample_id": "SAMPLE_A"},
+                expected_parameters={"min_group_n": 2, "prune_sha": "abc123def456"})[0], "ok")
+            # 换门槛 → stale_result（旧结果是另一套参数算的）
+            self.assertEqual(ad.analysis_state(
+                d, {"sample_id": "SAMPLE_A"}, expected_parameters={"min_group_n": 5})[1], "stale_result")
+            # 换 prune 集 → stale_result
+            self.assertEqual(ad.analysis_state(
+                d, {"sample_id": "SAMPLE_A"}, expected_parameters={"prune_sha": "ffffffffffff"})[1],
+                "stale_result")
+            # manifest 根本没记录这个键 → stale_result，不能当"一致"
+            self.assertEqual(ad.analysis_state(
+                d, {"sample_id": "SAMPLE_A"}, expected_parameters={"reference_release": "v66"})[1],
+                "stale_result")
+            # 数据依赖键不传就不比：missing_chroms 由本次运行决定，不是准入条件
+            self.assertEqual(ad.analysis_state(d, {"sample_id": "SAMPLE_A"})[0], "ok")
+
+    def test_manifest_matches_rejects_missing_expected_keys(self):
+        """复审 AN0/AN5/H6：此前非 REQUIRED 键缺失会跳过——没有 reference_release 的 manifest
+        也能通过按 reference_release 的比对。现在任何 expected 键缺失都拒绝。"""
+        bare = {"sample_id": "A", "state": "ok"}
+        self.assertFalse(ad.manifest_matches(bare, {"sample_id": "A", "reference_release": "v66"}),
+                        "a manifest that never recorded the reference must not pass a reference check")
+        full = {**bare, "reference_release": "v66"}
+        self.assertTrue(ad.manifest_matches(full, {"sample_id": "A", "reference_release": "v66"}))
+
+    def test_run_all_clear_cli_matches_the_documented_invocation(self):
+        """run_all 用 `ancestry_data.py --clear-step <id> --dir <dir>` 撤记录；这个入口本身
+        要按 run_all 的写法被驱动一次（生产路径），而不是只测函数。"""
+        with tempfile.TemporaryDirectory() as td:
+            d = pathlib.Path(td)
+            ad.write_manifest(d / "manifest.17b-la-calibrated.json",
+                              ad.disabled_manifest("S1", "17b-la-calibrated", "x"))
+            r = subprocess.run(
+                [sys.executable, str(pathlib.Path(__file__).resolve().parents[1]
+                                     / "scripts" / "ancestry_data.py"),
+                 "--clear-step", "17b-la-calibrated", "--dir", str(d)],
+                capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertFalse((d / "manifest.17b-la-calibrated.json").exists())
+            # 幂等：再次清除同样退出 0
+            r2 = subprocess.run(
+                [sys.executable, str(pathlib.Path(__file__).resolve().parents[1]
+                                     / "scripts" / "ancestry_data.py"),
+                 "--clear-step", "17b-la-calibrated", "--dir", str(d)],
+                capture_output=True, text=True)
+            self.assertEqual(r2.returncode, 0, r2.stderr)
 
 
 class TestEligibleSetIsShared(unittest.TestCase):

@@ -5,7 +5,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import pathlib
 from wgsconfig import *  # noqa: F401,F403 -- P, W, REF, TOOLS, SAMPLE, THREADS ...
 
-import json, re, subprocess, pathlib, collections
+import hashlib, json, re, subprocess, pathlib, collections
 import pandas as pd, numpy as np
 W = P/"wgs"; D = {}
 _ch = pd.read_csv(pathlib.Path(__file__).resolve().parents[1]/"panel"/"chrom_grch37.tsv", sep="\t", dtype={"chrom": str})
@@ -309,11 +309,25 @@ else:
 # AN5（§7）：祖源各节的状态来自结构化结果与 manifest 校验。缺 manifest、指纹不符或文件损坏都
 # 直接标成 unavailable 并给出原因代码，绝不"读旧路径猜结果"，也不用 0% 假值兜底。
 # 分析状态判定放在 ancestry_data 里（可测）：缺 manifest / 指纹不符 / 结果损坏各有原因码。
+# 复审 AN0/AN5/H6：准入不能只比 sample_id——同一样本换门槛/换参考/换 prune 集后，旧 manifest
+# 照样通过。expected_parameters 传**当前有效配置**能推导出的键，与 manifest.parameters 逐一比对；
+# 任一缺失或不等 → stale_result。prune 指纹从当前文件重算（与 09b 写入侧同一算法）。
 import ancestry_data as _ad
-_analysis_state = lambda d, expected=None: _ad.analysis_state(d, {"sample_id": SAMPLE, **(expected or {})})  # noqa: E731
+_analysis_state = lambda d, expected=None, expected_parameters=None: _ad.analysis_state(  # noqa: E731
+    d, {"sample_id": SAMPLE, **(expected or {})}, expected_parameters=expected_parameters)
+
+_prune_in = W/"11_aadr/prune.prune.in"
+_prune_sha = (hashlib.sha256(_prune_in.read_bytes()).hexdigest()[:12] if _prune_in.exists() else "")
 
 _LA_STATE, _LA_REASON, _LA_DOC = _analysis_state(W/"12_localanc")
-_AADR_STATE, _AADR_REASON, _AADR_DOC = _analysis_state(W/"11_aadr")
+_AADR_STATE, _AADR_REASON, _AADR_DOC = _analysis_state(
+    W/"11_aadr",
+    expected_parameters={
+        "min_call_rate_modern": MIN_CR_MODERN, "min_call_rate_ancient": MIN_CR_ANCIENT,
+        "min_projection_snps": MIN_PROJECTION_SNPS, "min_group_n": MIN_GROUP_N,
+        "ancient_prefix": AADR_ANCIENT_PREFIX, "modern_groups": AADR_MODERN,
+        "prune_sha": _prune_sha, "prune_sites": (len(_prune_in.read_text().split()) if _prune_in.exists() else 0),
+    })
 _g = W/"12_localanc/global.tsv"
 # 复审 AN5：旧读入口必须服从状态。LA 被禁用/失败时，目录里残留的 global.tsv 与旧
 # local_ancestry.json 都是上一次运行的结果——照读等于让禁用状态失效。只有 state=ok 才碰文件。
@@ -547,7 +561,10 @@ else:
     D["f3"] = None
 # --- AN5（§7 报告契约）：把各分析的结构化结果组装成 D.ancestry / D.lineages。
 # 这是模板与 AN6 要消费的形状；旧键（ho_*/near_eas/…）只作为尚未迁移的视图的过渡，不再各自算一套。
-_kg_state, _kg_reason, _kg_doc = _analysis_state(W/"04_ancestry")
+_kg_state, _kg_reason, _kg_doc = _analysis_state(
+    W/"04_ancestry",
+    expected_parameters={"regional_enabled": REGIONAL_ENABLED, "superpop": SUPERPOP,
+                        "subpops": SUBPOPS})
 _AADR_DOC = _AADR_DOC if isinstance(_AADR_DOC, dict) else None
 _anc_analyses = []
 for _doc, _st, _rs in ((_AADR_DOC, _AADR_STATE, _AADR_REASON), (_kg_doc, _kg_state, _kg_reason)):

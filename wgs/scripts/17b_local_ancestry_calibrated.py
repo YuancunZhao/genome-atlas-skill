@@ -53,10 +53,22 @@ gw={a:np.average(dy[a],weights=dy.w) for a in anc}
 print(f"{NAME_EN}, length-weighted over 22 autosomes:")
 for a in anc: print(f"  {a:12s} {gw[a]*100:5.2f}%")
 ps=pd.read_csv(KG_PFILE+".psam",sep="\t").rename(columns={"#IID":"SAMPLE","IID":"SAMPLE"})
+# 复审 AN0/AN5/H6：不能只凭 calib.* 文件存在就读校准——上一轮**失败前**留下的旧产物同样满足这个
+# 条件。16b 开跑时先清掉自己的旧记录与旧 calib.*，成功才写 manifest.16b-la-calibration.json
+# （state=ok）；因此"记录 ok 且样本相符"就是"校准产物属于本次运行"的凭证。
 cal=[]
-for f in glob.glob(f"{W}/calib.*.global.anc.gz"):
-    c=os.path.basename(f).split(".")[1]
-    d=pd.read_csv(f,sep="\t"); d["chrom"]=c; cal.append(d)
+_cal_reason_absent = "no calib.*.global.anc.gz products (step 16b did not run or produced nothing)"
+_cal_man = _ad.read_manifest(pathlib.Path(f"{W}/manifest.16b-la-calibration.json"))
+_cal_ok = bool(_cal_man) and str(_cal_man.get("state")) == "ok" and str(_cal_man.get("sample_id")) == str(SAMPLE)
+if glob.glob(f"{W}/calib.*.global.anc.gz") and not _cal_ok:
+    _cal_reason_absent = ("stale calibration products ignored: manifest.16b-la-calibration.json "
+                          + ("missing (16b did not succeed this run)" if not _cal_man
+                             else f"is state={_cal_man.get('state')}, sample_id={_cal_man.get('sample_id')}"))
+    print(f"warning: {_cal_reason_absent}", file=sys.stderr)
+if _cal_ok:
+    for f in glob.glob(f"{W}/calib.*.global.anc.gz"):
+        c=os.path.basename(f).split(".")[1]
+        d=pd.read_csv(f,sep="\t"); d["chrom"]=c; cal.append(d)
 if cal:
     cd=pd.concat(cal).merge(ps[["SAMPLE","Population"]],on="SAMPLE"); cd["w"]=cd.chrom.map(LEN)
     # 统一有效染色体集合（AN3 复审）：均值与 sd 只有在同一分母上才可比。某个 holdout 个体缺一条
@@ -139,7 +151,7 @@ else:
             _d = _json.loads(_lj.read_text(encoding="utf-8"))
             _d["calibration"] = []
             _d["calibration_state"] = "not_run"
-            _d["calibration_reason"] = "no calib.*.global.anc.gz products (step 16b did not run or produced nothing)"
+            _d["calibration_reason"] = _cal_reason_absent
             _lj.write_text(_json.dumps(_d, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
             print("note: no calibration products; raw local ancestry delivered, "
                   "calibration marked not_run in local_ancestry.json")

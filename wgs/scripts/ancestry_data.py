@@ -298,6 +298,23 @@ def write_manifest(path, manifest):
         json.dump(manifest, fh, ensure_ascii=False, indent=1, sort_keys=True)
         fh.write("\n")
     os.replace(tmp, path)
+
+
+def clear_step_manifests(dir_path, *step_ids):
+    """一个步骤本次**成功**运行后，撤下它自己的步骤级 manifest（manifest.<step-id>.json）。
+
+    禁用→重新启用→成功之后，目录 manifest.json 已是本次结果，但旧的步骤级 disabled 记录还
+    留在目录里，analysis_state 仍会返回 disabled（复审 AN0/AN5/H6 的生命周期缺口：成功必须
+    结束对应步骤的非 ok 状态）。只删**自己**的记录——同目录其他步骤的失败/禁用证据原样保留，
+    不粗暴清场。返回被撤下的文件名列表；记录本就不存在时是无操作。"""
+    d = pathlib.Path(dir_path)
+    removed = []
+    for sid in step_ids:
+        f = d / f"manifest.{sid}.json"
+        if f.exists():
+            f.unlink()
+            removed.append(f.name)
+    return removed
     return path
 
 
@@ -315,9 +332,10 @@ def read_manifest(path):
 def manifest_matches(actual, expected):
     """这份产物能不能代表当前样本/配置/参考？
 
-    规则：actual 必须存在、含 sample_id、且（若写了 state）state == "ok"；expected 里的每个
-    键只要在 actual 中出现就必须相等。任何不等、任何关键键缺失都返回 False——调用方据此重建，
-    绝不复用旧结果。
+    规则：actual 必须存在、含 sample_id、且（若写了 state）state == "ok"；expected 里的每个键
+    必须在 actual 中**存在且相等**。复审 AN0/AN5/H6：此前非 REQUIRED 键缺失会 `continue` 跳过——
+    一份没有记录参考版本的 manifest 也能通过按 reference_release 的比对，等于没比对。任何不等、
+    任何键缺失都返回 False——调用方据此重建，绝不复用旧结果。
     """
     if not isinstance(actual, dict) or not actual or not isinstance(expected, dict) or not expected:
         return False
@@ -328,9 +346,7 @@ def manifest_matches(actual, expected):
             return False
     for k, v in expected.items():
         if k not in actual:
-            if k in REQUIRED_MANIFEST_KEYS:
-                return False
-            continue
+            return False
         if actual[k] != v:
             return False
     return True
@@ -352,6 +368,11 @@ def _cli(argv=None):
     ap.add_argument("--check-samples", metavar="VCF", help="verify a subset VCF carries exactly these samples")
     ap.add_argument("--expect", metavar="FILE", help="file with the expected sample names, one per line")
     ap.add_argument("--disabled", metavar="ANALYSIS_ID")
+    ap.add_argument("--step-ok", metavar="ANALYSIS_ID",
+                    help="write a state=ok step record (a successful optional step's receipt for its consumer)")
+    ap.add_argument("--clear-step", metavar="ANALYSIS_ID",
+                    help="remove this step's own manifest.<id>.json after a successful run (lifecycle)")
+    ap.add_argument("--dir", help="directory holding the step-level manifest to clear")
     ap.add_argument("--out", help="output path (holdout list, or the manifest to write)")
     ap.add_argument("--sample")
     ap.add_argument("--reason", default="disabled_by_config")
@@ -375,6 +396,19 @@ def _cli(argv=None):
         print(f"sample set mismatch: missing={sorted(want - got)[:5]} unexpected={sorted(got - want)[:5]}",
               file=sys.stderr)
         return 3
+    if a.clear_step:
+        if not a.dir:
+            ap.error("--clear-step requires --dir")
+        removed = clear_step_manifests(a.dir, a.clear_step)
+        print(f"cleared {', '.join(removed)}" if removed
+              else f"no step manifest for {a.clear_step} (nothing to clear)")
+        return 0
+    if a.step_ok:
+        if not a.out or not a.sample:
+            ap.error("--step-ok requires --out and --sample")
+        write_manifest(a.out, build_manifest(a.sample, a.step_ok, state="ok"))
+        print(f"wrote {a.out} (state=ok)")
+        return 0
     if not a.disabled or not a.out or not a.sample:
         ap.error("--disabled requires --out and --sample")
     m = disabled_manifest(a.sample, a.disabled, a.reason)
@@ -1061,12 +1095,18 @@ def js_string_literal(text):
     return json.dumps(text, ensure_ascii=False).replace("</", "<\\/")
 
 
-def analysis_state(dir_path, expected=None, names=("summary.json", "local_ancestry.json")):
+def analysis_state(dir_path, expected=None, names=("summary.json", "local_ancestry.json"),
+                   expected_parameters=None):
     """读某分析目录的 manifest 与结构化结果，返回 (state, reason_code, doc)。
 
     缺 manifest → missing_manifest（旧结果必须重建，不能当current用）；指纹不符 → stale_result；
     结果读不出来 → unreadable_result；没有结果文件 → missing_result。**不**从"文件在不在"推断，
     也不读旧路径猜结果。
+
+    expected_parameters：把 manifest.parameters 里的**配置绑定键**逐一比对（复审 AN0/AN5/H6：
+    30 此前只比 sample_id，同一样本换门槛/换参考/换 prune 集后旧结果照样进场）。调用方传它**当前
+    有效配置**能推导出的键；任一键缺失或不等 → stale_result。数据依赖键（如 missing_chroms）不
+    属于此列，不要传。
     """
     d = pathlib.Path(dir_path)
     # 步骤级 manifest（manifest.<step-id>.json）由 run_all 在"该步被配置禁用或失败"时写。它**优先于**
@@ -1095,6 +1135,11 @@ def analysis_state(dir_path, expected=None, names=("summary.json", "local_ancest
         if v in (None, ""):
             continue
         if str(man.get(k)) != str(v):
+            return "unavailable", "stale_result", None
+    # 配置绑定参数：manifest.parameters 里缺键或值不符同样是 stale_result——"没记录"不等于"一致"。
+    _params = man.get("parameters") or {}
+    for k, v in (expected_parameters or {}).items():
+        if k not in _params or str(_params[k]) != str(v):
             return "unavailable", "stale_result", None
     # 步骤级禁用/失败记录压过目录 manifest 时，目录里的结果文件属于**上一次**运行——状态照实
     # 报告，但结果不能作为 doc 交出（与目录自身 manifest.json 标 disabled、由该步写入原因文件的

@@ -1,11 +1,12 @@
 """AN2 验收：断言对着**生产 09b 脚本**跑，不对着测试里的复制品。
 
 子进程执行 scripts/09b_aadr_summary.py：$WGS_CONFIG 指向临时 config.yaml，work 根与 11_aadr
-产物全部在临时目录合成，缺失率文件预写为 aadr.pruned.smiss（plink2 因此不会被调用）。HANDOFF
-要求"验收必须对生产09b断言"——辅助函数绿灯不能替代这里。生产脚本 import pandas，当前解释器没有
-pandas 时整文件跳过（本地套件跳过、服务器套件执行，与 test_f3_stats 同一约定）。
+产物全部在临时目录合成。缺失率经**假 plink2 替身**从 --out 落盘（复审 AN2/H6 后 09b 每次重算
+aadr.pruned.smiss，不再吃存在性缓存），替身把每个测试想要的行复制到 $out.smiss 并留调用凭证。
+HANDOFF 要求"验收必须对生产09b断言"——辅助函数绿灯不能替代这里。生产脚本 import pandas，当前
+解释器没有 pandas 时整文件跳过（本地套件跳过、服务器套件执行，与 test_f3_stats 同一约定）。
 """
-import importlib.util, json, os, pathlib, subprocess, sys, tempfile, unittest
+import hashlib, importlib.util, json, os, pathlib, subprocess, sys, tempfile, unittest
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
 SCRIPT = REPO / "scripts" / "09b_aadr_summary.py"
@@ -29,6 +30,7 @@ def _write_config(td, **over):
         "sample_id": "TESTSAMPLE",
         "work_dir": str(pathlib.Path(td) / "work"),
         "aadr_prefix": str(pathlib.Path(td) / "work/data/ref/aadr/panel"),
+        "plink2": str(pathlib.Path(td) / "fake_plink2"),   # _write_panel 落盘的替身
         "ancestry_min_call_rate_modern": 0.95,
         "ancestry_min_call_rate_target": 0.95,
         "aadr_min_call_rate_ancient": 0.50,
@@ -41,9 +43,16 @@ def _write_config(td, **over):
     return p
 
 
-def _write_panel(td, smiss_rows):
-    """合成 11_aadr：sscore + samples + 预计算 smiss。smiss_rows: {(iid): (MISSING_CT, OBS_CT)}。"""
-    w = pathlib.Path(td) / "work" / "wgs" / "11_aadr"
+def _write_panel(td, smiss_rows, preexisting_stale_smiss=None):
+    """合成 11_aadr：sscore + samples + bed/bim/fam + 假 plink2 替身。
+
+    09b 现在**每次重算** aadr.pruned.smiss（复审 AN2/H6：存在性缓存挡不住换目标/换 prune 集），
+    所以缺失率不再预写为成品，而是经替身 plink2 从 --out 落盘——替身把本测试想要的行写到
+    <td>/stub.smiss 再复制过去，并 touch plink_called 留证。preexisting_stale_smiss 用来预置
+    一份**旧** smiss：重算必须覆盖它，否则那份旧文件就是"换输入后命中缓存"的复现。
+    smiss_rows: {(iid): (MISSING_CT, OBS_CT)}。"""
+    td = pathlib.Path(td)
+    w = td / "work" / "wgs" / "11_aadr"
     w.mkdir(parents=True, exist_ok=True)
     hdr = "#FID\tIID\tPC1_AVG\tPC2_AVG\tPC3_AVG\tPC4_AVG\tPHENO\tC1\tC2\tC3\tC4"
     lines = [f"{lab}\t{iid}\t" + "\t".join(f"{v:.4f}" for v in pcs) + "\tNA\t0\t0\t0\t0"
@@ -56,8 +65,20 @@ def _write_panel(td, smiss_rows):
     smiss = ["#FID\tIID\tMISSING_CT\tOBS_CT\tF_MISS"]
     for iid, (mc, oc) in smiss_rows.items():
         smiss.append(f"X\t{iid}\t{mc}\t{oc}\t{mc / oc:.6f}")
-    (w / "aadr.pruned.smiss").write_text("\n".join(smiss) + "\n", encoding="utf-8")
-    (w / "prune.prune.in").write_text("rs1\nrs2\n", encoding="utf-8")   # 存在即可：smiss 已预写
+    (td / "stub.smiss").write_text("\n".join(smiss) + "\n", encoding="utf-8")
+    stub = td / "fake_plink2"
+    stub.write_text("#!/bin/bash\n"
+                    "out=\"\"; prev=\"\"\n"
+                    "for a in \"$@\"; do [ \"$prev\" = \"--out\" ] && out=\"$a\"; prev=\"$a\"; done\n"
+                    f"cp \"{td}/stub.smiss\" \"$out.smiss\" && touch \"{td}/plink_called\"\n"
+                    "exit 0\n", encoding="utf-8")
+    stub.chmod(0o755)
+    if preexisting_stale_smiss is not None:
+        (w / "aadr.pruned.smiss").write_text(preexisting_stale_smiss, encoding="utf-8")
+    (w / "aadr.bed").write_text("", encoding="utf-8")   # 存在即可：替身 plink2 不读内容
+    (w / "aadr.bim").write_text("", encoding="utf-8")
+    (w / "aadr.fam").write_text("", encoding="utf-8")
+    (w / "prune.prune.in").write_text("rs1\nrs2\n", encoding="utf-8")
     return w
 
 
@@ -68,6 +89,36 @@ def _run_09b(cfg):
 
 def _summary(w):
     return json.loads((w / "summary.json").read_text(encoding="utf-8"))
+
+
+@unittest.skipIf(_SKIP, _SKIP)
+class TestSmissIsRecomputed(unittest.TestCase):
+    """复审 AN2/H6：aadr.pruned.smiss 是**每次重算**的，存在性缓存已删。预置一份旧 smiss
+    （上一轮 prune 集算出的、数字全错）后运行：plink2 必须真的被调用，旧文件必须被覆盖，
+    门槛用的是本次替换身落盘的数字——"换 prune 集/换目标后命中旧缓存"从此不复现。"""
+
+    def test_stale_smiss_is_overwritten_not_reused(self):
+        with tempfile.TemporaryDirectory() as td:
+            cfg = _write_config(td)
+            # 替身给出：目标 0 缺失/130000（过门槛），其余个体也全过
+            rows = {"TESTSAMPLE": (0, 130000), "HAN1": (100, 130000),
+                    "HAN2": (200, 130000), "AM1": (60000, 130000)}
+            stale = ("#FID\tIID\tMISSING_CT\tOBS_CT\tF_MISS\n"
+                     "X\tTESTSAMPLE\t130000\t130000\t1.000000\n")   # 旧 prune 集：目标全缺失
+            w = _write_panel(td, rows, preexisting_stale_smiss=stale)
+            r = _run_09b(cfg)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertTrue((pathlib.Path(td) / "plink_called").exists(),
+                            "smiss 已存在也必须重算（plink2 被真正调用）")
+            self.assertNotIn("1.000000", (w / "aadr.pruned.smiss").read_text(encoding="utf-8"),
+                             "旧的 stale smiss 必须被本次结果覆盖")
+            t = _summary(w)["target"]
+            self.assertEqual(t["n_called_snps"], 130000, "门槛读的是本次重算的数字，不是旧缓存")
+            # manifest 记 prune 指纹（复审 AN0/AN5/H6）：30 据此拒绝"换 prune 集后的旧 summary"
+            man = json.loads((w / "manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(man["parameters"]["prune_sites"], 2)
+            self.assertEqual(man["parameters"]["prune_sha"],
+                             hashlib.sha256((w / "prune.prune.in").read_bytes()).hexdigest()[:12])
 
 
 @unittest.skipIf(_SKIP, _SKIP)

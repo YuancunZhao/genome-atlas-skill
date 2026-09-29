@@ -17,6 +17,12 @@ MEM_MB=$(( ${MEM_GB%.*} * 1000 ))
 [ -s ref.panel ] || { echo "ref.panel is missing; run 16_local_ancestry.sh first" >&2; exit 1; }
 [ -s "$R/all_phase3.psam" ] || { echo "no reference panel at $R/all_phase3.psam" >&2; exit 1; }
 
+# 复审 AN0/AN5/H6 生命周期：开跑即作废上一轮的证据——旧的 ok 记录与旧 calib.* 是上一次尝试的
+# 产物；本次若失败，不能留下它们冒充"本次校准成功"（17b 只认 state=ok 且样本相符的记录）。
+# 校准是增强不是前置：本步失败不写 disabled 记录进 12_localanc，原始 LA（17/17b）照常交付，
+# 失败证据在 run_info（failed）与 17b 的 calibration_state 里。
+rm -f manifest.16b-la-calibration.json calib.*
+
 # --- holdout selection: fixed seed, without replacement, min(config n, floor(group/5)) per population
 python3 "$S/ancestry_data.py" --pick-holdout "$R/all_phase3.psam" \
   --pops "$CALIB_POPS" --n "$CALIB_N" --seed "$CALIB_SEED" --out holdout.ids || {
@@ -54,4 +60,9 @@ for c in ${CALIB_CHROMS//,/ }; do
   rm -f "ho.$c.vcf.gz" "ho.$c.vcf.gz.tbi"
   echo "chr$c calibration done"
 done
+# 成功凭证（复审 AN0/AN5/H6）：17b 凭这份 state=ok 且样本相符的记录读 calib.*——只看文件存在
+# 会把上一轮失败前的旧校准当成本次结果。写不进记录就视为失败，不留半成功状态。
+python3 "$S/ancestry_data.py" --step-ok 16b-la-calibration \
+  --out "$W/manifest.16b-la-calibration.json" --sample "$SAMPLE" \
+  || { echo "calibration ran but its success record could not be written" >&2; exit 7; }
 echo CALIB_DONE

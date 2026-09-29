@@ -64,11 +64,19 @@ def _write_la(td, target_rows_by_chrom):
     return w
 
 
-def _write_calib(td, rows_by_chrom, psam_lines):
-    """校准产物 + 真实 psam（holdout 的群体归属来自这里）。"""
+def _write_calib(td, rows_by_chrom, psam_lines, record=True, sample="TESTSAMPLE"):
+    """校准产物 + 真实 psam（holdout 的群体归属来自这里）。
+
+    record=False 时**不**写 16b 的成功凭证（manifest.16b-la-calibration.json），用于复现
+    "calib.* 存在但属于上一轮失败前的旧产物"的场景；sample= 用于复现凭证样本不符。"""
     w = pathlib.Path(td) / "work" / "wgs" / "12_localanc"
     for c, rows in rows_by_chrom.items():
         _write_anc(w, "calib", c, rows)
+    if record:
+        (w / "manifest.16b-la-calibration.json").write_text(json.dumps({
+            "schema_version": 1, "sample_id": sample, "analysis_id": "16b-la-calibration",
+            "state": "ok", "reason_code": "",
+        }), encoding="utf-8")
     ref = pathlib.Path(td) / "work" / "data" / "ref"
     (ref / "all_phase3.psam").write_text("#IID\tPopulation\n" + psam_lines, encoding="utf-8")
     return w
@@ -99,6 +107,56 @@ class TestRawDeliverableWithoutCalibration(unittest.TestCase):
             self.assertEqual(d["calibration"], [])
             self.assertEqual(d["calibration_state"], "not_run")
             self.assertIn("16b", d["calibration_reason"])
+
+
+@unittest.skipIf(_SKIP, _SKIP)
+class TestCalibrationGate(unittest.TestCase):
+    """复审 AN0/AN5/H6：calib.* 文件存在 ≠ 本次校准成功。17b 只认 16b 写的 state=ok 且样本
+    相符的凭证；上一轮失败前留下的旧 calib.* 必须被忽略，原始 LA 照常独立交付。"""
+
+    def _la(self, td):
+        return _write_la(td, {"1": [_anc_row("TESTSAMPLE", 0.60, 0.35)],
+                              "2": [_anc_row("TESTSAMPLE", 0.58, 0.37)]})
+
+    def test_stale_calib_without_receipt_is_ignored(self):
+        with tempfile.TemporaryDirectory() as td:
+            cfg = _write_config(td)
+            w = self._la(td)
+            _write_calib(td, {"1": [_anc_row("N1", 0.95, 0.03)],
+                               "2": [_anc_row("N1", 0.95, 0.03)]},
+                         "N1\tP_NORTH\n", record=False)
+            r = _run_17b(cfg)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertIn("stale calibration products ignored", r.stderr)
+            d = _json(w)
+            self.assertEqual(d["calibration_state"], "not_run",
+                            "no 16b success receipt: the old calib.* must not enter this run's results")
+            self.assertEqual(d["calibration"], [])
+            self.assertIn("stale", d["calibration_reason"])
+            self.assertTrue((w / "dayu_global.tsv").exists(), "raw LA is still delivered")
+
+    def test_receipt_from_another_sample_is_ignored(self):
+        with tempfile.TemporaryDirectory() as td:
+            cfg = _write_config(td)
+            w = self._la(td)
+            _write_calib(td, {"1": [_anc_row("N1", 0.95, 0.03)],
+                               "2": [_anc_row("N1", 0.95, 0.03)]},
+                         "N1\tP_NORTH\n", sample="SOMEONE_ELSE")
+            r = _run_17b(cfg)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertEqual(_json(w)["calibration_state"], "not_run")
+
+    def test_valid_receipt_lets_the_calibration_in(self):
+        with tempfile.TemporaryDirectory() as td:
+            cfg = _write_config(td)
+            w = self._la(td)
+            _write_calib(td, {"1": [_anc_row("N1", 0.95, 0.03)],
+                               "2": [_anc_row("N1", 0.95, 0.03)]},
+                         "N1\tP_NORTH\n")
+            r = _run_17b(cfg)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            cal = {c["population"]: c for c in _json(w)["calibration"]}
+            self.assertAlmostEqual(cal["P_NORTH"]["north_mean"], 0.95, places=6)
 
 
 @unittest.skipIf(_SKIP, _SKIP)

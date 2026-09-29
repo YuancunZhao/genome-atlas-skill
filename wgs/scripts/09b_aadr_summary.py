@@ -10,7 +10,7 @@ The eligible set comes from ancestry_data.eligible_records(), so this summary, t
 see exactly the same people. The target is found by its internal kind, never by display name: a
 reference group may legitimately share the sample's display name.
 """
-import sys, pathlib, json
+import hashlib, sys, pathlib, json
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from wgsconfig import *  # noqa: F401,F403 -- P, W, REF, TOOLS, SAMPLE, THREADS ...
 from wgsconfig import (SAMPLE, AADR, AADR_ANNOTATION, MIN_CR_ANCIENT, MIN_CR_MODERN, MIN_CR_TARGET,
@@ -64,22 +64,24 @@ s["distance_to_target"] = np.sqrt(((s[present].values - D) ** 2).sum(1))
 # 再拿它做 PCA，而这里原先只给 --bfile aadr，等于用全部位点的缺失率去描述一个只用修剪集算出来的结果——
 # 两个分母不同，"call_rate 0.70" 之类的数字与它要解释的对象对不上。
 # 输出名换成 aadr.pruned：旧的 aadr.smiss 是未修剪口径，命中缓存就等于问题一直在。
+# 复审 AN2/H6：这里**每次重算**，不再"文件存在就跳过"——存在性缓存把换目标、换 prune 集、换参考
+# 全都挡在门外（旧 smiss 是哪个输入算出来的，事后无从知道）。plink2 --missing 对这个面板只需数秒，
+# 重算比给缓存记账便宜也可靠：覆盖率、投影、排名永远出自同一批最终位点。
 _MISS = pathlib.Path(f"{W}/aadr.pruned.smiss")
 _PRUNE = pathlib.Path(f"{W}/prune.prune.in")
-if not _MISS.exists():
-    if not pathlib.Path(f"{W}/aadr.bed").exists():
-        _state("unavailable", "missing_panel", f"{W}/aadr.bed not found; run 08 first")
-    if not _PRUNE.exists():
-        _state("unavailable", "missing_prune_set",
-               f"{_PRUNE} not found; the missingness must be computed over the same sites the PCA used, "
-               f"which come from 09_aadr_pca.sh -- run it first")
-    import subprocess
-    r = subprocess.run([PLINK2, "--bfile", f"{W}/aadr", "--extract", str(_PRUNE), "--missing",
-                        "--out", f"{W}/aadr.pruned",
-                        "--threads", str(THREADS), "--memory", str(int(float(MEM_GB) * 1000))],
-                       capture_output=True, text=True)
-    if r.returncode != 0 or not _MISS.exists():
-        _state("unavailable", "missingness_failed", (r.stderr or r.stdout or "")[-400:])
+if not pathlib.Path(f"{W}/aadr.bed").exists():
+    _state("unavailable", "missing_panel", f"{W}/aadr.bed not found; run 08 first")
+if not _PRUNE.exists():
+    _state("unavailable", "missing_prune_set",
+           f"{_PRUNE} not found; the missingness must be computed over the same sites the PCA used, "
+           f"which come from 09_aadr_pca.sh -- run it first")
+import subprocess
+r = subprocess.run([PLINK2, "--bfile", f"{W}/aadr", "--extract", str(_PRUNE), "--missing",
+                    "--out", f"{W}/aadr.pruned",
+                    "--threads", str(THREADS), "--memory", str(int(float(MEM_GB) * 1000))],
+                   capture_output=True, text=True)
+if r.returncode != 0 or not _MISS.exists():
+    _state("unavailable", "missingness_failed", (r.stderr or r.stdout or "")[-400:])
 imiss = pd.read_csv(_MISS, sep=r"\s+").rename(columns={"#FID": "label"})
 # 口径在 ancestry_data.coverage_from_smiss（09b/04b 共用）：OBS_CT 是分母，已调用数 = OBS_CT−MISSING_CT。
 imiss = ad.coverage_from_smiss(imiss)
@@ -223,7 +225,11 @@ pathlib.Path(f"{W}/summary.json").write_text(
     json.dumps(summary, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
 ad.write_manifest(f"{W}/manifest.json", ad.build_manifest(
     SAMPLE, "09b-aadr-summary", state="ok", reference_release=release,
-    parameters=summary["thresholds"],
+    parameters={**summary["thresholds"],
+                # 复审 AN0/AN5/H6：prune 集指纹。smiss/投影/排名全出自这批位点（09b 每次重算），
+                # 但 manifest 若不记它，换成 1 个位点的 prune 集、旧 summary 照样能冒充本次结果。
+                "prune_sha": hashlib.sha256(_PRUNE.read_bytes()).hexdigest()[:12],
+                "prune_sites": len(_PRUNE.read_text().split())},
     outputs=["11_aadr/summary.json", "11_aadr/proj_annotated.tsv", "11_aadr/near_modern.tsv",
              "11_aadr/near_ancient.tsv"]))
 

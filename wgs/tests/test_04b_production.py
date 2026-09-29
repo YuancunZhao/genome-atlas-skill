@@ -37,6 +37,7 @@ def _write_config(td, **over):
     cfg = {
         "sample_id": "TESTSAMPLE",
         "work_dir": str(pathlib.Path(td) / "work"),
+        "plink2": str(pathlib.Path(td) / "fake_plink2"),   # _write_space 落盘的替身
         "ancestry_min_call_rate_modern": 0.95,
         "ancestry_min_call_rate_target": 0.95,
         "ancestry_min_projection_snps": 10000,
@@ -49,8 +50,13 @@ def _write_config(td, **over):
 
 
 def _write_space(td, base="global", eas_files=False):
-    """合成 04_ancestry 的一个参考空间 + 02_complete 目标 pfile 占位。"""
-    w = pathlib.Path(td) / "work" / "wgs" / "04_ancestry"
+    """合成 04_ancestry 的一个参考空间 + 02_complete 目标 pfile 占位 + 假 plink2 替身。
+
+    04b 现在**每次重算** qc.<tag>.{ref,target}.smiss（复审 AN2/H6：存在性缓存挡不住换目标/换
+    prune 集），所以缺失率经替身从 --out 落盘：替身复制 <td>/stub.{ref,target}.smiss（_pre_smiss
+    写入本次想要的行）并 touch plink_called 留证。"""
+    td = pathlib.Path(td)
+    w = td / "work" / "wgs" / "04_ancestry"
     w.mkdir(parents=True, exist_ok=True)
     kg = w / (f"{base}.proj.sscore" if base != "global" else "kg.proj.sscore")
     tgt = w / (f"{base}.target.proj.sscore" if base != "global" else "target.proj.sscore")
@@ -63,14 +69,32 @@ def _write_space(td, base="global", eas_files=False):
     prune.write_text("rs1\nrs2\n", encoding="utf-8")
     for e in ("pgen", "psam", "pvar"):
         (w / f"kg.common.{e}").touch()
-    c = pathlib.Path(td) / "work" / "wgs" / "02_complete"
+    c = td / "work" / "wgs" / "02_complete"
     c.mkdir(parents=True, exist_ok=True)
     for e in ("pgen", "psam", "pvar"):
         (c / f"TESTSAMPLE.1kg.{e}").touch()
+    (td / "stub.ref.smiss").write_text("\n".join([S_MISS_HDR] + REF_SMISS_GOOD) + "\n", encoding="utf-8")
+    (td / "stub.target.smiss").write_text(S_MISS_HDR + "\n" + TGT_SMISS_GOOD + "\n", encoding="utf-8")
+    stub = td / "fake_plink2"
+    stub.write_text("#!/bin/bash\n"
+                    "out=\"\"; prev=\"\"\n"
+                    "for a in \"$@\"; do [ \"$prev\" = \"--out\" ] && out=\"$a\"; prev=\"$a\"; done\n"
+                    "case \"$out\" in\n"
+                    f"  *.ref) cp \"{td}/stub.ref.smiss\" \"$out.smiss\" ;;\n"
+                    f"  *.target) cp \"{td}/stub.target.smiss\" \"$out.smiss\" ;;\n"
+                    "esac\n"
+                    f"touch \"{td}/plink_called\"\n"
+                    "exit 0\n", encoding="utf-8")
+    stub.chmod(0o755)
     return w
 
 
 def _pre_smiss(w, tag, ref_rows, tgt_row):
+    """每个测试想要的缺失率行：写给替身的 sidecar（04b 每次重算），同时落一份 qc.<tag>.*——
+    那份旧文件正是"重算必须覆盖存在性缓存"回归里的 stale 候选。"""
+    td = w.parents[2]
+    (td / "stub.ref.smiss").write_text("\n".join([S_MISS_HDR] + ref_rows) + "\n", encoding="utf-8")
+    (td / "stub.target.smiss").write_text(S_MISS_HDR + "\n" + tgt_row + "\n", encoding="utf-8")
     (w / f"qc.{tag}.ref.smiss").write_text("\n".join([S_MISS_HDR] + ref_rows) + "\n", encoding="utf-8")
     (w / f"qc.{tag}.target.smiss").write_text(S_MISS_HDR + "\n" + tgt_row + "\n", encoding="utf-8")
 
@@ -86,6 +110,25 @@ def _summary(w):
 
 @unittest.skipIf(_SKIP, _SKIP)
 class TestCoverageIsReal(unittest.TestCase):
+    def test_stale_qc_smiss_is_overwritten_not_reused(self):
+        """复审 AN2/H6：qc.<tag>.*.smiss 不再存在性缓存。预置一份旧文件（上一轮 prune 集算的，
+        CDX.1 数字全错）后运行：plink2 必须真的被调用，旧文件被本次结果覆盖，门槛用新数字。"""
+        with tempfile.TemporaryDirectory() as td:
+            cfg = _write_config(td)
+            w = _write_space(td)
+            stale = [S_MISS_HDR,
+                     "CHS\tCHS.1\t100000\t100000\t1", "CHS\tCHS.2\t100000\t100000\t1",
+                     "CDX\tCDX.1\t0\t100000\t0", "CDX\tCDX.2\t0\t100000\t0"]
+            (w / "qc.global.ref.smiss").write_text("\n".join(stale) + "\n", encoding="utf-8")
+            r = _run_04b(cfg)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertTrue((pathlib.Path(td) / "plink_called").exists(),
+                            "qc smiss 已存在也必须重算（plink2 被真正调用）")
+            fresh = (w / "qc.global.ref.smiss").read_text(encoding="utf-8")
+            self.assertNotIn("CHS.1\t100000", fresh, "旧 stale smiss 必须被覆盖")
+            a = _summary(w)["analyses"][0]
+            by = {g["group_id"]: g for g in a["groups"]}
+            self.assertEqual(by["CHS"]["n"], 2, "门槛读的是本次重算的数字（CHS 合格），不是旧缓存（全缺失）")
     """1000G 没有例外：覆盖与门槛和 09b 同一套（最终位点上的真实 smiss）。"""
 
     def test_gate_excludes_low_coverage_references(self):

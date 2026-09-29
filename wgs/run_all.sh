@@ -35,6 +35,7 @@ step 04 ancestry PCA and projection;                           bash  $S/04_ances
 step 04b nearest reference populations;                        python3 $S/04b_ancestry_summary.py
 if [ "${REGIONAL_ENABLED:-0}" = "1" ] && [ -n "${AXIS:-}" ]; then
   step 04c per-chromosome axis index;                            python3 $S/04c_axis_index.py
+  python3 $S/ancestry_data.py --clear-step 04c-per-chromosome-axis --dir "$PROJ/wgs/04_ancestry"
 else
   skipped 04c-per-chromosome-axis regional_axis_not_configured 04_ancestry
 fi
@@ -56,6 +57,11 @@ if [ "${AADR_ENABLED:-0}" = "1" ]; then
   step 08 extract the ancient-DNA panel;                         python3 $S/08_aadr_extract.py
   step 09 ancient-DNA PCA and projection;                        bash  $S/09_aadr_pca.sh
   step 09b nearest present-day and ancient groups;               python3 $S/09b_aadr_summary.py
+  # 复审 AN0/AN5/H6 生命周期：禁用轮写下的步骤级 disabled 记录，在对应步骤**本次成功**后必须撤下
+  # （只撤自己的），否则 analysis_state 永远返回 disabled，重新启用等于没启用。
+  python3 $S/ancestry_data.py --clear-step 08-aadr-extract      --dir "$PROJ/wgs/11_aadr"
+  python3 $S/ancestry_data.py --clear-step 09-aadr-pca          --dir "$PROJ/wgs/11_aadr"
+  python3 $S/ancestry_data.py --clear-step 09b-aadr-summary     --dir "$PROJ/wgs/11_aadr"
 else
   skipped 08-aadr-extract aadr_not_configured 11_aadr
   skipped 09-aadr-pca aadr_not_configured 11_aadr
@@ -77,8 +83,11 @@ step 15 statistical phasing;                                   bash  $S/15_phase
 if [ "${LOCAL_ENABLED:-0}" = "1" ]; then
   step 16 local ancestry;                                        bash  $S/16_local_ancestry.sh
   # 校准是增强不是前置（AN3 复审）：16b 失败时原始 LA（17/17b）仍要独立交付。失败在这里降级——
-  # run_info 记 failed、12_localanc 里留 manifest，主流程继续；17b 在没有 calib.* 产物时也能产出
-  # 原始结果，并把校准状态明确写成 not_run，报告不会把"没跑校准"当成"跑了没写"。
+  # run_info 记 failed，主流程继续。**不再**往 12_localanc 写 disabled 步骤记录：那份记录会被
+  # analysis_state 当成整个 LA 目录的非 ok 状态，把本来可交付的原始结果一并吞掉（复审 AN0/AN5/H6）。
+  # 16b 自己负责生命周期：开跑清旧记录与旧 calib.*，成功才写 state=ok 的凭证，17b 凭该记录读校准；
+  # 失败时不留任何"本次校准成功"的痕迹，17b 把校准状态明确写成 not_run，报告不会把"没跑成校准"
+  # 当成"跑了没写"，也不会再读上一轮的旧 calib.*。
   step 16b local-ancestry calibration
   if bash $S/16b_local_ancestry_calibration.sh; then
     :
@@ -87,12 +96,12 @@ if [ "${LOCAL_ENABLED:-0}" = "1" ]; then
     python3 "$S/_run_info.py" --step "16b local-ancestry calibration" --status failed --rc "$_rc" >/dev/null 2>&1 || true
     _STEP_NAME=""
     echo "warning: 16b calibration failed (rc=$_rc); continuing -- raw local ancestry (17/17b) is still deliverable" >&2
-    python3 $S/ancestry_data.py --disabled 16b-la-calibration \
-      --out "$PROJ/wgs/12_localanc/manifest.16b-la-calibration.json" --sample "$SAMPLE" \
-      --reason "calibration_failed_raw_local_ancestry_delivered"
   fi
   step 17 local-ancestry summary;                                python3 $S/17_local_ancestry_summary.py
   step 17b calibrated against held-out references;               python3 $S/17b_local_ancestry_calibrated.py
+  python3 $S/ancestry_data.py --clear-step 16-local-ancestry    --dir "$PROJ/wgs/12_localanc"
+  python3 $S/ancestry_data.py --clear-step 17-la-summary        --dir "$PROJ/wgs/12_localanc"
+  python3 $S/ancestry_data.py --clear-step 17b-la-calibrated    --dir "$PROJ/wgs/12_localanc"
 else
   skipped 16-local-ancestry local_ancestry_not_configured 12_localanc
   skipped 16b-la-calibration local_ancestry_not_configured 12_localanc

@@ -69,8 +69,9 @@ def _plink_missing(pfile_prefix, prune_in, out_prefix):
 
 def _space_coverage(tag, prune_name):
     """本空间在**最终剪枝位点**上的每个体覆盖：参考面板与目标分开算（04 的 PCA 正是这样用的），
-    结果缓存为 qc.<tag>.{ref,target}.smiss。缺任一输入（联合 pgen、剪枝集、目标 1kg）或 plink
-    失败时返回 None——覆盖算不出来就不过门槛，不回退成"人人合格"。"""
+    每次运行重算并写 qc.<tag>.{ref,target}.smiss（不做存在性缓存，见调用处注释）。缺任一输入
+    （联合 pgen、剪枝集、目标 1kg）或 plink 失败时返回 None——覆盖算不出来就不过门槛，不回退成
+    "人人合格"。"""
     w = pathlib.Path(W)
     prune_in = w / prune_name
     refs_out, tgt_out = w / f"qc.{tag}.ref.smiss", w / f"qc.{tag}.target.smiss"
@@ -86,10 +87,12 @@ def _space_coverage(tag, prune_name):
     if not all(pathlib.Path(f"{tgt_prefix}.{e}").exists() for e in ("pgen", "psam", "pvar")):
         say(f"[{tag}] skipped: 02_complete/{SAMPLE}.1kg.* not found -- target coverage cannot be computed")
         return None
-    if not refs_out.exists() and not _plink_missing(refs_prefix, prune_in, w / f"qc.{tag}.ref"):
+    # 复审 AN2/H6：每次重算，不做存在性缓存——qc.<tag>.*.smiss 是哪个 prune 集/哪个目标算出来的，
+    # 事后无法从文件得知；换目标或换位点集后命中旧缓存，门槛就成了摆设。--missing 数秒即完。
+    if not _plink_missing(refs_prefix, prune_in, w / f"qc.{tag}.ref"):
         say(f"[{tag}] skipped: reference missingness failed (plink2)")
         return None
-    if not tgt_out.exists() and not _plink_missing(tgt_prefix, prune_in, w / f"qc.{tag}.target"):
+    if not _plink_missing(tgt_prefix, prune_in, w / f"qc.{tag}.target"):
         say(f"[{tag}] skipped: target missingness failed (plink2)")
         return None
     cov = pd.concat([
