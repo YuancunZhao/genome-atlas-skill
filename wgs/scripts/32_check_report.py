@@ -14,7 +14,7 @@ Checks (P0_FIX_PLAN section 6, condensed):
 
 Exit code 0 = pass, 1 = at least one failure (details on stderr).
 """
-import json, os, pathlib, re, shutil, subprocess, sys, tempfile
+import json, math, os, pathlib, re, shutil, subprocess, sys, tempfile
 
 FAIL = []
 
@@ -275,9 +275,12 @@ def check_shapes(D):
         if tg and not (tg.get("members") and tg.get("mean_d") is not None):
             fail("ho_target_group must carry its members and its mean distance")
     # 28_f3_stats payload. Optional as a whole (null = step not run), but when present the
-    # modern ranking must be sorted desc with finite triples, the contrast list must reference
-    # exactly the adjacent pairs of that ranking (the figure annotates them by position), and
-    # every admixture row must carry a finite f3/se/z -- the card quotes all three.
+    # modern ranking must be sorted desc, the contrast list must reference exactly the
+    # adjacent pairs of that ranking (the figure annotates them by position), and every
+    # row's f3/se/z is either a finite number or an explicit null = "unavailable" (zero-SE /
+    # non-finite; the card renders those as 不可用). NaN/Infinity parse as floats, so the
+    # isfinite check is what actually keeps them out -- isinstance alone would wave them
+    # through as numbers.
     f3 = D.get("f3")
     if f3:
         for side, rows_key in (("modern", "outgroup_f3"),):
@@ -287,12 +290,15 @@ def check_shapes(D):
                 continue
             for r in rows:
                 for k in ("f3", "se", "z"):
-                    if not isinstance(r.get(k), (int, float)):
-                        fail(f"f3 {side} row {r.get('set')}: {k} is not a number")
+                    v = r.get(k)
+                    if v is not None and (not isinstance(v, (int, float)) or not math.isfinite(v)):
+                        fail(f"f3 {side} row {r.get('set')}: {k} is neither a finite number nor null")
+                if r.get("z") is not None and (r.get("f3") is None or r.get("se") is None):
+                    fail(f"f3 {side} row {r.get('set')}: a Z without its f3/SE is not a statistic")
                 if not (r.get("n") and r.get("label_zh") and r.get("label_en")):
                     fail(f"f3 {side} row {r.get('set')}: n and bilingual labels are required")
-            vals = [r["f3"] for r in rows]
-            if vals != sorted(vals, reverse=True):
+            vals = [r["f3"] for r in rows if isinstance(r.get("f3"), (int, float))]
+            if len(vals) >= 2 and vals != sorted(vals, reverse=True):
                 fail("f3 modern outgroup_f3 is not sorted descending")
             got = [(c.get("a"), c.get("b")) for c in (blk.get("contrasts") or [])]
             want = [(rows[i]["set"], rows[i + 1]["set"]) for i in range(len(rows) - 1)]
@@ -301,8 +307,9 @@ def check_shapes(D):
         for label, blk in (("modern", f3.get("modern") or {}), ("ancient", f3.get("ancient") or {})):
             for r in blk.get("admixture") or []:
                 for k in ("f3", "se", "z"):
-                    if not isinstance(r.get(k), (int, float)):
-                        fail(f"f3 {label} admixture row {r.get('a')}x{r.get('b')}: {k} is not a number")
+                    v = r.get(k)
+                    if v is not None and (not isinstance(v, (int, float)) or not math.isfinite(v)):
+                        fail(f"f3 {label} admixture row {r.get('a')}x{r.get('b')}: {k} is neither a finite number nor null")
                 if not (r.get("a") and r.get("b")):
                     fail(f"f3 {label} admixture row lacks its source names")
 

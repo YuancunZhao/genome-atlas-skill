@@ -16,12 +16,30 @@ Writes:
   11_aadr/anc_f3_results.tsv       ancient tests
   04_ancestry/f3/f3_stats.json     combined payload 30_build_report_data.py reads
 
-f3(A;B,C) = unweighted per-site mean of (pA-pB)(pA-pC); SE/Z from a delete-one-block
-jackknife (5 Mb blocks), the same estimator AdmixTools uses. A significantly negative
-admixture-f3 is the signature of A descending from a mix of B and C; outgroup-f3 rises
-with shared drift between the target and the profiled group.
+f3(A;B,C) per site = (pA-pB)(pA-pC) - pA(1-pA)/(nA-1), where nA is the number of called
+alleles for the FIRST population at that site. The subtracted term is the finite-sample
+(finite-sample-corrected) estimator convention qp3pop uses: E[(pAhat-pBhat)(pAhat-pChat)]
+= f3 + pA(1-pA)/nA, so the sample-frequency product of a small panel (e.g. a single diploid
+target, nA=2) is positively biased by its own sampling variance. Without the correction a
+one-diploid target with zero true f3 yields a strictly positive statistic.
+
+SE/Z come from a delete-one-block jackknife (5 Mb blocks) over the same corrected per-site
+values; the correction term cancels inside same-site paired contrasts (same first population),
+which is why contrast rows keep their exact difference. Estimator verified against analytic
+zero/known-value conditions (tests), not against a bundled ADMIXTOOLS run. Missing policy:
+a site needs every set present with >=2 called alleles; REF/ALT-flipped sites are dropped
+and counted, never mixed. SE of exactly 0, a single block, or any non-finite value yields
+null f3/se/z entries ("unavailable"), never NaN or Infinity in the JSON.
+
+Conventions follow the ADMIXTOOLS qp3pop documentation:
+  https://uqrmaie1.github.io/admixtools/reference/qp3pop.html
+  https://uqrmaie1.github.io/admixtools/reference/f3blockdat_from_geno.html
+  https://uqrmaie1.github.io/admixtools/articles/fstats.html
+A significantly negative admixture-f3 is the signature of A descending from a mix of B and
+C; outgroup-f3 rises with shared drift between the target and the profiled group.
 """
 import json
+import math
 import pathlib
 import subprocess
 import sys
@@ -32,6 +50,16 @@ import pandas as pd
 PANEL = pathlib.Path(__file__).resolve().parents[1] / "panel"
 BLOCK_MB = 5_000_000
 MIN_GROUP_N = 20          # an ancient region pool below this is too small to pool quietly
+ESTIMATOR_ID = ("site-mean[(pA-pB)(pA-pC) - pA(1-pA)/(nA-1)] "
+                "+ delete-one-block(5Mb) jackknife SE")
+
+
+def _num(v, nd=6):
+    """Round for the payload; None/non-finite stay None so the JSON says 'unavailable'."""
+    if v is None:
+        return None
+    v = float(v)
+    return round(v, nd) if math.isfinite(v) else None
 
 
 def _cfg():
@@ -45,14 +73,25 @@ def _cfg():
 
 # ---------------------------------------------------------------- pure helpers (tested)
 def jackknife(x, bcode, nblk):
-    """Delete-one-block mean and SE of the per-site statistic x (one value per site)."""
+    """Delete-one-block mean and SE of the per-site statistic x (one value per site).
+
+    SE == 0 (constant statistic / single block) or a non-finite theta is reported as
+    (theta, se, None) / (None, None, None): a zero-SE point estimate has no usable Z, and
+    Infinity must never reach the JSON.
+    """
+    x = np.asarray(x, dtype=float)
+    if len(x) == 0 or not np.isfinite(x).all() or nblk < 1:
+        return None, None, None
     S = x.sum()
     Sb = np.bincount(bcode, weights=x, minlength=nblk)
     Nb = np.bincount(bcode, minlength=nblk).astype(float)
     theta = S / len(x)
     loo = (S - Sb) / (len(x) - Nb)
     se = np.sqrt((nblk - 1) / nblk * ((loo - loo.mean()) ** 2).sum())
-    return float(theta), float(se), float(theta / se)
+    if not (math.isfinite(theta) and math.isfinite(se)):
+        return None, None, None
+    z = theta / se if se > 0 else None
+    return float(theta), float(se), (float(z) if z is not None else None)
 
 
 def block_codes(chroms, positions, block=BLOCK_MB):
@@ -61,17 +100,23 @@ def block_codes(chroms, positions, block=BLOCK_MB):
     return pd.factorize((chroms + "_" + (pd.Series(positions) // block).astype(str)).values)[0]
 
 
-def merge_freqs(freqs, pos):
+def merge_freqs(freqs, pos, min_alleles=2):
     """Join per-set afreq tables on variant ID, validating REF/ALT across sources.
 
     `freqs` maps set name -> raw plink2 .afreq DataFrame; `pos` is ID -> (CHROM_N, POS).
-    Returns (value frame sorted by chrom/pos, n_allele_mismatch). A flipped allele would
-    invert the site's contribution, so mismatched sites are dropped and counted, never mixed.
+    Besides the set's ALT_FREQS column, each set's OBS_CT (called allele count at the site)
+    is carried through as an ``N:<set>`` column -- the finite-sample correction needs the
+    per-site denominator, and dropping it is exactly the uncorrected-estimator bug.
+    A flipped allele would invert the site's contribution, so mismatched sites are dropped
+    and counted, never mixed. A site where any set has fewer than `min_alleles` called
+    alleles is also dropped and counted: nA < 2 cannot estimate its sampling variance.
+    Returns (value frame sorted by chrom/pos, n_allele_mismatch, n_low_allele_dropped).
     """
     keys = list(freqs)
     alt = {k: freqs[k].set_index("ID")["ALT_FREQS"] for k in keys}
+    nct = {f"N:{k}": freqs[k].set_index("ID")["OBS_CT"] for k in keys}
     ra0 = freqs[keys[0]].set_index("ID")[["REF", "ALT"]]
-    df = pd.DataFrame(alt).join(ra0)
+    df = pd.DataFrame(alt).join(pd.DataFrame(nct)).join(ra0)
     bad = pd.Series(False, index=df.index)
     for k in keys[1:]:
         ra = freqs[k].set_index("ID")[["REF", "ALT"]]
@@ -82,38 +127,52 @@ def merge_freqs(freqs, pos):
         bad |= (~miss & ((df["REF"] != ok["REF"]) | (df["ALT"] != ok["ALT"]))).fillna(False)
     df = df.join(pos, how="inner")
     df = df[~bad.reindex(df.index, fill_value=False)].dropna(subset=keys)
-    return df.sort_values(["CHROM_N", "POS"]), int(bad.sum())
+    ncol = [c for c in df.columns if c.startswith("N:")]
+    low = (df[ncol] < min_alleles).any(axis=1) if ncol else pd.Series(False, index=df.index)
+    df = df[~low.fillna(True)]
+    return (df.sort_values(["CHROM_N", "POS"]), int(bad.sum()), int(low.sum()))
 
 
 def f3_matrix(df, outgroup, target, profiles, pools):
-    """Jackknifed f3 rows for the panel.
+    """Jackknifed, finite-sample-corrected f3 rows for the panel.
 
-    outgroup may be None (ancient side: no outgroup group exists in the AADR panel -- pooled
-    ancients are sources, not outgroups -- so only admixture rows are produced there).
-    Ranking rows: f3(outgroup; target, set) per profiled set, ranked desc. Contrast rows:
-    same-site difference between adjacent ranked pairs; the target's own drift error cancels
-    in the difference, which is why the ranking quotes these Z values, not per-row SEs.
+    Per-site statistic (a is the f3 "first" population whose sampling variance is removed):
+    (pa-pb)(pa-pc) - pa(1-pa)/(na-1), na = that population's called-allele count at the
+    site (the ``N:<set>`` columns merge_freqs carries). E[(pahat-pbhat)(pahat-pchat)] =
+    f3 + pa(1-pa)/na, so without the term a single-diploid first population is positively
+    biased by its own sampling noise. outgroup may be None (ancient side: no outgroup group
+    exists in the AADR panel -- pooled ancients are sources, not outgroups -- so only
+    admixture rows are produced there). Ranking rows: f3(outgroup; target, set) per profiled
+    set, ranked desc. Contrast rows: same-site difference between adjacent ranked pairs; the
+    first population (and hence the correction) is common to both terms and cancels exactly.
     """
-    arr = {c: df[c].values for c in df.columns if c not in ("CHROM_N", "POS", "REF", "ALT")}
+    skip = ("CHROM_N", "POS", "REF", "ALT")
+    arr = {c: df[c].values for c in df.columns if c not in skip and not c.startswith("N:")}
+    ncnt = {c[2:]: df[c].values.astype(float)
+            for c in df.columns if c.startswith("N:") and c[2:] not in skip}
     bcode = block_codes(df.CHROM_N, df.POS)
     nblk = int(bcode.max()) + 1
 
     def f3(a, b, c):
-        return jackknife((arr[a] - arr[b]) * (arr[a] - arr[c]), bcode, nblk)
+        pa, na = arr[a], ncnt[a]
+        stat = (pa - arr[b]) * (pa - arr[c]) - pa * (1 - pa) / (na - 1.0)
+        return jackknife(stat, bcode, nblk)
+
+    def row(t, **kw):
+        return {"f3": t[0], "se": t[1], "z": t[2], **kw}
 
     ranked, contrasts, admixture = [], [], []
     if outgroup:
         vals = {p: f3(outgroup, target, p) for p in profiles}
-        order = sorted(profiles, key=lambda p: -vals[p][0])
-        ranked = [{"set": p, "f3": vals[p][0], "se": vals[p][1], "z": vals[p][2]} for p in order]
+        order = sorted(profiles, key=lambda p: -(vals[p][0] if vals[p][0] is not None else 0.0))
+        ranked = [row(vals[p], set=p) for p in order]
         for p, q in zip(order, order[1:]):
             d = jackknife((arr[outgroup] - arr[target]) * (arr[outgroup] - arr[p])
                           - (arr[outgroup] - arr[target]) * (arr[outgroup] - arr[q]), bcode, nblk)
-            contrasts.append({"a": p, "b": q, "f3": d[0], "se": d[1], "z": d[2]})
+            contrasts.append(row(d, a=p, b=q))
     for i, a in enumerate(pools):
         for b in pools[i + 1:]:
-            v = f3(target, a, b)
-            admixture.append({"a": a, "b": b, "f3": v[0], "se": v[1], "z": v[2]})
+            admixture.append(row(f3(target, a, b), a=a, b=b))
     return {"sites": len(df), "blocks": nblk, "ranked": ranked,
             "contrasts": contrasts, "admixture": admixture}
 
@@ -199,7 +258,7 @@ def modern_block(groups):
                       "label_zh": "本样本", "label_en": "this sample", "n": 1}
 
     outgroup = by_kind["outgroup"][0]["set"]
-    df, nbad = merge_freqs(freqs, read_pos(d04 / "kg.common.pvar", extract_ids))
+    df, nbad, nlow = merge_freqs(freqs, read_pos(d04 / "kg.common.pvar", extract_ids))
     res = f3_matrix(df, outgroup, "target",
                     [r["set"] for r in by_kind["profile"]], [r["set"] for r in by_kind["pool"]])
     tsv = ([{"test": f"outgroup_f3({outgroup};target,{r['set']})", "f3": r["f3"], "SE": r["se"], "Z": r["z"]}
@@ -209,19 +268,20 @@ def modern_block(groups):
            + [{"test": f"admixture_f3(target;{a['a']},{a['b']})", "f3": a["f3"], "SE": a["se"], "Z": a["z"]}
               for a in res["admixture"]])
     _write_tsv(outdir / "f3_results.tsv", tsv)
-    print(f"28: modern f3 sites={res['sites']} blocks={res['blocks']} allele_mismatch={nbad}")
+    print(f"28: modern f3 sites={res['sites']} blocks={res['blocks']} "
+          f"allele_mismatch={nbad} low_allele_dropped={nlow}")
     return {
         "outgroup": outgroup, "sites": res["sites"], "blocks": res["blocks"],
-        "allele_mismatch": nbad,
+        "allele_mismatch": nbad, "low_allele_dropped": nlow,
         "outgroup_f3": [{"set": r["set"],
                          "label_zh": meta[r["set"]]["label_zh"], "label_en": meta[r["set"]]["label_en"],
                          "kind": meta[r["set"]]["kind"], "n": meta[r["set"]]["n"],
-                         "f3": round(r["f3"], 6), "se": round(r["se"], 6), "z": round(r["z"], 2)}
+                         "f3": _num(r["f3"]), "se": _num(r["se"]), "z": _num(r["z"], 2)}
                         for r in res["ranked"]],
-        "contrasts": [{"a": c["a"], "b": c["b"], "diff": round(c["f3"], 6), "z": round(c["z"], 2)}
+        "contrasts": [{"a": c["a"], "b": c["b"], "diff": _num(c["f3"]), "z": _num(c["z"], 2)}
                       for c in res["contrasts"]],
-        "admixture": [{"a": a["a"], "b": a["b"], "f3": round(a["f3"], 6),
-                       "se": round(a["se"], 6), "z": round(a["z"], 2)} for a in res["admixture"]],
+        "admixture": [{"a": a["a"], "b": a["b"], "f3": _num(a["f3"]),
+                       "se": _num(a["se"]), "z": _num(a["z"], 2)} for a in res["admixture"]],
         "groups": {s: {"kind": m["kind"], "label_zh": m["label_zh"], "label_en": m["label_en"], "n": m["n"]}
                    for s, m in meta.items()},
     }
@@ -257,7 +317,7 @@ def ancient_block():
     freqs["target"] = plink_freq(d11 / "anc_target", bfile=d11 / "aadr", extract=prune,
                                  keep=d11 / "anc_target.ids")
 
-    df, nbad = merge_freqs(freqs, bim_pos(d11 / "aadr.bim", extract_ids))
+    df, nbad, nlow = merge_freqs(freqs, bim_pos(d11 / "aadr.bim", extract_ids))
     # No outgroup exists in the AADR panel (pooled ancients are sources, not outgroups), so
     # only the pooled admixture rows are produced; a "ranking" against a pooled ancient would
     # not be an outgroup-f3 at all.
@@ -265,36 +325,57 @@ def ancient_block():
     _write_tsv(d11 / "anc_f3_results.tsv",
                [{"test": f"admixture_f3(target;{a['a']},{a['b']})", "f3": a["f3"],
                  "SE": a["se"], "Z": a["z"]} for a in res["admixture"]])
-    print(f"28: ancient f3 sites={res['sites']} blocks={res['blocks']} allele_mismatch={nbad}")
+    print(f"28: ancient f3 sites={res['sites']} blocks={res['blocks']} "
+          f"allele_mismatch={nbad} low_allele_dropped={nlow}")
     zh = {"north": "北方古代池", "south": "南方古代池"}
     return {
-        "sites": res["sites"], "blocks": res["blocks"], "allele_mismatch": nbad,
+        "sites": res["sites"], "blocks": res["blocks"],
+        "allele_mismatch": nbad, "low_allele_dropped": nlow,
         "admixture": [{"a": a["a"], "b": a["b"],
                        "label_zh": f"{zh.get(a['a'], a['a'])}×{zh.get(a['b'], a['b'])}",
                        "label_en": f"{a['a']} x {a['b']}",
                        "n_a": int(len(pools[a["a"]])), "n_b": int(len(pools[a["b"]])),
-                       "f3": round(a["f3"], 6), "se": round(a["se"], 6), "z": round(a["z"], 2)}
+                       "f3": _num(a["f3"]), "se": _num(a["se"]), "z": _num(a["z"], 2)}
                       for a in res["admixture"]],
     }
 
 
 def _write_tsv(path, rows):
+    # Unavailable rows (zero-SE etc.) write NA, not an empty cell that reads as 0 downstream.
+    rows = [{k: ("NA" if v is None else v) for k, v in r.items()} for r in rows]
     pd.DataFrame(rows, columns=["test", "f3", "SE", "Z"]).to_csv(
         path, sep="\t", index=False, float_format="%.6f")
 
 
 def main():
     _cfg()
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+    import ancestry_data as ad
+    outdir = W / "04_ancestry" / "f3"
     groups = pd.read_csv(PANEL / "f3_groups.tsv", sep="\t", comment="#", dtype=str)
     groups["members"] = groups.members.str.split()
     glist = groups.to_dict("records")
-    out = {"block_mb": BLOCK_MB // 1_000_000,
+    out = {"sample_id": SAMPLE, "estimator": ESTIMATOR_ID, "block_mb": BLOCK_MB // 1_000_000,
            "modern": modern_block(glist), "ancient": ancient_block()}
     if out["modern"] is None and out["ancient"] is None:
+        ad.write_manifest(outdir / "manifest.json", ad.build_manifest(
+            SAMPLE, "28-f3-stats", state="unavailable", reason_code="no-inputs",
+            detail="neither modern (04_ancestry) nor ancient (11_aadr) inputs are present"))
         sys.exit("28: neither modern nor ancient inputs are present; nothing to compute")
-    (W / "04_ancestry" / "f3").mkdir(parents=True, exist_ok=True)
-    dst = W / "04_ancestry" / "f3" / "f3_stats.json"
-    dst.write_text(json.dumps(out, ensure_ascii=False, indent=1), encoding="utf-8")
+    dst = outdir / "f3_stats.json"
+    # allow_nan=False: a leaked NaN/Infinity must fail the build here, not ship invalid JSON
+    # that renders as "null" and silently reads as a number downstream.
+    dst.write_text(json.dumps(out, ensure_ascii=False, indent=1, allow_nan=False), encoding="utf-8")
+    outputs = [str(dst.relative_to(W))]
+    for extra in (outdir / "f3_results.tsv", W / "11_aadr" / "anc_f3_results.tsv"):
+        if extra.exists():
+            outputs.append(str(extra.relative_to(W)))
+    ad.write_manifest(outdir / "manifest.json", ad.build_manifest(
+        SAMPLE, "28-f3-stats", state="ok",
+        parameters={"estimator": ESTIMATOR_ID, "block_mb": BLOCK_MB // 1_000_000,
+                    "min_group_n": MIN_GROUP_N},
+        outputs=outputs,
+        sides=[k for k in ("modern", "ancient") if out[k] is not None]))
     print("28: wrote", dst)
 
 

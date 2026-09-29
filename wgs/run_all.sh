@@ -109,6 +109,7 @@ step 24 KIR and HLA ligands;                                   python3 $S/24_kir
 step 25 HLA disease and drug associations;                     python3 $S/25_hla_disease.py
 step 26 behavioural polygenic scores;                          python3 $S/26_behaviour_prs.py
 step 27 candidate behaviour genes;                             python3 $S/27_candidate_genes.py
+step 28 f3 statistics;                                         python3 $S/28_f3_stats.py
 step 30 assemble the report data;                              python3 $S/30_build_report_data.py
 
 cat <<'MSG'

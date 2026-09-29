@@ -73,6 +73,48 @@ class TestSourceChecksFollowTheReport(unittest.TestCase):
         self.assertFalse(chk.FAIL)
 
 
+class TestF3Gate(unittest.TestCase):
+    """W-T2: the f3 payload may carry explicit nulls (unavailable: zero-SE / non-finite),
+    and must never carry NaN/Infinity -- which json.loads hands back as floats, so an
+    isinstance-only gate waves them through as numbers."""
+
+    def setUp(self):
+        chk.FAIL.clear()
+
+    def _row(self, **over):
+        row = {"set": "P1", "n": 85, "label_zh": "P1", "label_en": "P1",
+               "f3": 0.01, "se": 0.001, "z": 10.0}
+        row.update(over)
+        return row
+
+    def _D(self, rows):
+        return {"f3": {"modern": {"outgroup_f3": rows, "contrasts": []},
+                       "ancient": {"admixture": []}}}
+
+    def test_null_triples_are_unavailable_not_failures(self):
+        chk.check_shapes(self._D([self._row(f3=None, se=None, z=None)]))
+        self.assertFalse([f for f in chk.FAIL if "f3" in f],
+                         "an unavailable row is a rendered state, not a build error")
+
+    def test_point_estimate_with_null_z_is_valid(self):
+        chk.check_shapes(self._D([self._row(z=None)]))
+        self.assertFalse([f for f in chk.FAIL if "f3" in f],
+                         "se==0 yields (f3, 0, null): the point estimate is still quotable")
+
+    def test_nan_f3_fails_the_old_isinstance_hole(self):
+        chk.check_shapes(self._D([self._row(f3=float("nan"))]))
+        self.assertTrue(any("is neither a finite number nor null" in f for f in chk.FAIL),
+                        "NaN parses as float -- the gate must reject it explicitly")
+
+    def test_infinity_and_z_without_estimate_fail(self):
+        chk.check_shapes(self._D([self._row(se=float("inf"))]))
+        self.assertTrue(any("is neither a finite number nor null" in f for f in chk.FAIL))
+        chk.FAIL.clear()
+        chk.check_shapes(self._D([self._row(f3=None, se=None, z=3.0)]))
+        self.assertTrue(any("a Z without its f3/SE" in f for f in chk.FAIL),
+                        "a verdict number with no estimate behind it is not a statistic")
+
+
 class TestNodeGate(unittest.TestCase):
     def test_missing_node_fails_instead_of_passing(self):
         chk.FAIL.clear()

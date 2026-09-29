@@ -1,11 +1,15 @@
 """Unit tests for the pure f3 math in 28_f3_stats.py (jackknife, block coding, allele-checked
-frequency merge, matrix assembly). Importing the module must not touch wgsconfig: that creates
-the work directories, a side effect tests cannot have.
+frequency merge with per-site allele counts, finite-sample-corrected matrix assembly, the
+None-safe rounding used by the payload). Importing the module must not touch wgsconfig: that
+creates the work directories, a side effect tests cannot have.
 
 numpy/pandas live on the analysis server (the local suite is stdlib-only, like 30's), so the
 tests skip themselves when those imports are unavailable."""
 import importlib.util
+import json
+import math
 import pathlib
+import tempfile
 import unittest
 
 try:
@@ -20,10 +24,23 @@ except ImportError:            # local runner: everything below needs the analys
 
 _NEEDS_NP = unittest.skipIf(f3 is None, "numpy/pandas not installed here (runs on the server)")
 
+BIG_N = 10 ** 6        # panel-sized allele counts: correction term ~2.5e-7, invisible at 1e-5
+
 
 def _afreq(rows):
-    """rows: (ID, CHROM, POS, REF, ALT, freq) -> plink2 .afreq-shaped frame."""
-    return pd.DataFrame(rows, columns=["ID", "CHROM", "POS", "REF", "ALT", "ALT_FREQS"])
+    """rows: (ID, CHROM, POS, REF, ALT, freq, obs_ct) -> plink2 .afreq-shaped frame.
+
+    OBS_CT is the called-allele count plink2 really emits; the correction reads it, so every
+    fixture must carry it exactly like production input does."""
+    return pd.DataFrame(rows, columns=["ID", "CHROM", "POS", "REF", "ALT", "ALT_FREQS", "OBS_CT"])
+
+
+def _with_n(df, n=BIG_N):
+    """Attach N:<set> columns (the production frame shape merge_freqs returns)."""
+    for c in [c for c in df.columns if c not in ("CHROM_N", "POS", "REF", "ALT")
+              and not c.startswith("N:")]:
+        df[f"N:{c}"] = n
+    return df
 
 
 @_NEEDS_NP
@@ -36,10 +53,29 @@ class TestJackknife(unittest.TestCase):
         self.assertAlmostEqual(se, 1.0)
         self.assertAlmostEqual(z, 2.5)
 
-    def test_zero_statistic_gives_nan_z_not_crash(self):
+    def test_zero_statistic_gives_null_z_not_crash(self):
         theta, se, z = f3.jackknife(np.zeros(6), np.array([0, 0, 1, 1, 2, 2]), 3)
         self.assertEqual((theta, se), (0.0, 0.0))
-        self.assertTrue(np.isnan(z))  # Z is meaningless for an exactly-zero statistic
+        self.assertIsNone(z)  # Z is meaningless for an exactly-zero statistic: null, not inf
+
+    def test_empty_or_nonfinite_inputs_are_unavailable(self):
+        self.assertEqual(f3.jackknife(np.array([]), np.array([], dtype=int), 1), (None, None, None))
+        self.assertEqual(f3.jackknife(np.array([1.0, np.inf]), np.array([0, 1]), 2), (None, None, None))
+        self.assertEqual(f3.jackknife(np.array([1.0]), np.array([0]), 0), (None, None, None))
+
+
+@_NEEDS_NP
+class TestNum(unittest.TestCase):
+    def test_none_and_nonfinite_stay_none(self):
+        self.assertIsNone(f3._num(None))
+        self.assertIsNone(f3._num(float("nan")))
+        self.assertIsNone(f3._num(float("inf")))
+        self.assertEqual(f3._num(0.1234567), 0.123457)
+        self.assertEqual(f3._num(1.0, 2), 1.0)
+
+    def test_num_output_is_json_safe(self):
+        vals = [f3._num(v) for v in (None, float("nan"), float("inf"), 0.5, -0.25)]
+        json.dumps(vals, allow_nan=False)  # must not raise: payload paths all go through _num
 
 
 @_NEEDS_NP
@@ -59,26 +95,45 @@ class TestMergeFreqs(unittest.TestCase):
                             index=pd.Index(["s1", "s2", "s3"], name="ID"))
 
     def test_allele_flip_is_dropped_and_counted(self):
-        a = _afreq([("s1", "1", 100, "A", "G", 0.1), ("s2", "1", 200, "C", "T", 0.2),
-                    ("s3", "2", 50, "G", "A", 0.3)])
-        b = _afreq([("s1", "1", 100, "A", "G", 0.1), ("s2", "1", 200, "T", "C", 0.8),  # flipped
-                    ("s3", "2", 50, "G", "A", 0.3)])
-        df, nbad = f3.merge_freqs({"a": a, "b": b}, self._pos())
-        self.assertEqual(nbad, 1)
+        a = _afreq([("s1", "1", 100, "A", "G", 0.1, 100), ("s2", "1", 200, "C", "T", 0.2, 100),
+                    ("s3", "2", 50, "G", "A", 0.3, 100)])
+        b = _afreq([("s1", "1", 100, "A", "G", 0.1, 200), ("s2", "1", 200, "T", "C", 0.8, 200),  # flipped
+                    ("s3", "2", 50, "G", "A", 0.3, 200)])
+        df, nbad, nlow = f3.merge_freqs({"a": a, "b": b}, self._pos())
+        self.assertEqual((nbad, nlow), (1, 0))
         self.assertEqual(list(df.index), ["s1", "s3"])   # s2 dropped, not mixed
 
     def test_missing_site_in_one_source_is_dropped(self):
-        a = _afreq([("s1", "1", 100, "A", "G", 0.1), ("s2", "1", 200, "C", "T", 0.2),
-                    ("s3", "2", 50, "G", "A", 0.3)])
-        b = _afreq([("s1", "1", 100, "A", "G", 0.1), ("s3", "2", 50, "G", "A", 0.3)])
-        df, nbad = f3.merge_freqs({"a": a, "b": b}, self._pos())
-        self.assertEqual((nbad, len(df)), (0, 2))        # s2 has no b frequency -> dropna removes it
+        a = _afreq([("s1", "1", 100, "A", "G", 0.1, 100), ("s2", "1", 200, "C", "T", 0.2, 100),
+                    ("s3", "2", 50, "G", "A", 0.3, 100)])
+        b = _afreq([("s1", "1", 100, "A", "G", 0.1, 200), ("s3", "2", 50, "G", "A", 0.3, 200)])
+        df, nbad, nlow = f3.merge_freqs({"a": a, "b": b}, self._pos())
+        self.assertEqual((nbad, nlow, len(df)), (0, 0, 2))  # s2 has no b frequency -> dropna
 
     def test_sorted_by_chrom_then_position(self):
-        a = _afreq([("s3", "2", 50, "G", "A", 0.3), ("s1", "1", 100, "A", "G", 0.1),
-                    ("s2", "1", 200, "C", "T", 0.2)])
-        df, _ = f3.merge_freqs({"a": a}, self._pos())
+        a = _afreq([("s3", "2", 50, "G", "A", 0.3, 100), ("s1", "1", 100, "A", "G", 0.1, 100),
+                    ("s2", "1", 200, "C", "T", 0.2, 100)])
+        df, _, _ = f3.merge_freqs({"a": a}, self._pos())
         self.assertEqual(list(df.index), ["s1", "s2", "s3"])
+
+    def test_obs_ct_is_carried_as_n_columns(self):
+        # Dropping OBS_CT was the uncorrected-estimator bug: the merged frame must hand each
+        # set's per-site allele count to f3_matrix as N:<set>.
+        a = _afreq([("s1", "1", 100, "A", "G", 0.1, 100), ("s2", "1", 200, "C", "T", 0.2, 300)])
+        b = _afreq([("s1", "1", 100, "A", "G", 0.1, 50), ("s2", "1", 200, "C", "T", 0.2, 60)])
+        df, _, _ = f3.merge_freqs({"a": a, "b": b}, self._pos().iloc[:2])
+        self.assertEqual(list(df["N:a"]), [100, 300])
+        self.assertEqual(list(df["N:b"]), [50, 60])
+
+    def test_site_below_min_alleles_is_dropped_and_counted(self):
+        # nA < 2 cannot estimate its sampling variance; such a site must leave the panel
+        # loudly (counted), not silently bias every statistic computed over it.
+        a = _afreq([("s1", "1", 100, "A", "G", 0.1, 1),    # single called allele
+                    ("s2", "1", 200, "C", "T", 0.2, 100)])
+        b = _afreq([("s1", "1", 100, "A", "G", 0.1, 50), ("s2", "1", 200, "C", "T", 0.2, 60)])
+        df, nbad, nlow = f3.merge_freqs({"a": a, "b": b}, self._pos().iloc[:2])
+        self.assertEqual((nbad, nlow), (0, 1))
+        self.assertEqual(list(df.index), ["s2"])
 
 
 @_NEEDS_NP
@@ -87,6 +142,8 @@ class TestF3Matrix(unittest.TestCase):
         # Six sites in three 2-site blocks, shaped like real data: the outgroup sits near the
         # ancestral allele and both target and references are shifted derived, so outgroup-f3
         # rises as a profile group moves closer to the target (P1 is the near one, P2 far).
+        # Allele counts are panel-sized, so the correction term (~2.5e-7/site) is invisible
+        # at the 1e-5 the expectations below are stated to.
         rows = {
             "og":     [0.05, 0.95, 0.10, 0.90, 0.15, 0.85],
             "target": [0.60, 0.40, 0.55, 0.45, 0.52, 0.48],
@@ -98,7 +155,7 @@ class TestF3Matrix(unittest.TestCase):
         df = pd.DataFrame(rows)
         df["CHROM_N"] = ["1"] * 6
         df["POS"] = [1, 2, 6_000_001, 6_000_002, 12_000_001, 12_000_002]
-        return df
+        return _with_n(df)
 
     def test_ranking_contrasts_admixture(self):
         res = f3.f3_matrix(self._df(), "og", "target", ["P1", "P2"], ["poolA", "poolB"])
@@ -108,8 +165,8 @@ class TestF3Matrix(unittest.TestCase):
         self.assertEqual([(c["a"], c["b"]) for c in res["contrasts"]], [("P1", "P2")])
         self.assertGreater(res["ranked"][0]["f3"], res["ranked"][1]["f3"])  # P1 shares more drift
         self.assertGreater(res["ranked"][0]["se"], 0)
-        # admixture f3(target; poolA, poolB) = mean (t-A)(t-B): per-site products are
-        # .0384 .0384 .0154 .0154 .0054 .0054 -> mean 0.019733
+        # corrected admixture f3(target; poolA, poolB): per-site products .0384 .0384 .0154
+        # .0154 .0054 .0054, correction ~2.5e-7 -> 0.019733 to 5 places
         adm = res["admixture"]
         self.assertEqual([(r["a"], r["b"]) for r in adm], [("poolA", "poolB")])
         self.assertAlmostEqual(adm[0]["f3"], 0.019733, places=5)
@@ -131,11 +188,59 @@ class TestF3Matrix(unittest.TestCase):
         df["P2"] = df["P1"] + 0.10
         df["CHROM_N"] = ["1"] * 4
         df["POS"] = [1, 2, 6_000_001, 6_000_002]
-        res = f3.f3_matrix(df, "og", "target", ["P1", "P2"], [])
+        res = f3.f3_matrix(_with_n(df), "og", "target", ["P1", "P2"], [])
         self.assertGreater(res["ranked"][0]["se"], 0)
         self.assertGreater(res["ranked"][1]["se"], 0)
         self.assertAlmostEqual(res["contrasts"][0]["f3"], 0.05, places=12)
         self.assertLess(res["contrasts"][0]["se"], 1e-9)
+
+    def test_finite_sample_correction_removes_diploid_target_bias(self):
+        # The review's analytic zero: both sources exact 0.5, target dosages 0/1/1/2 over four
+        # sites (frequencies 0, .5, .5, 1; a single diploid, nA=2). True f3 is 0 at every
+        # site, but the raw product mean is +0.125. Per-site correction pa(1-pa)/(nA-1)
+        # gives .25-.25-.25+.25 -> corrected f3 exactly 0 (all values exact in binary).
+        df = pd.DataFrame({"target": [0.0, 0.5, 0.5, 1.0],
+                           "poolA": [0.5] * 4, "poolB": [0.5] * 4})
+        df["CHROM_N"] = ["1"] * 4
+        df["POS"] = [1, 2, 6_000_001, 6_000_002]
+        _with_n(df)
+        df["N:target"] = 2                      # one diploid: the worst case for the bias
+        res = f3.f3_matrix(df, None, "target", [], ["poolA", "poolB"])
+        self.assertEqual(res["admixture"][0]["f3"], 0.0)
+        # uncorrected mean would be exactly 0.125 -- regression guard on the estimator itself
+        raw = ((df.target - .5) ** 2).mean()
+        self.assertEqual(raw, 0.125)
+        # each block's corrected values net to zero -> SE exactly 0 -> Z must be null
+        # (the old code emitted z = 0/0 = Infinity here, not "no verdict")
+        self.assertEqual(res["admixture"][0]["se"], 0.0)
+        self.assertIsNone(res["admixture"][0]["z"])
+
+    def test_constant_statistic_zero_se_yields_null_z(self):
+        # Everything constant -> per-site statistic constant -> SE exactly 0: the point
+        # estimate stays, Z is reported as null (unavailable), never Infinity.
+        df = pd.DataFrame({"target": [0.5] * 4, "poolA": [0.5] * 4, "poolB": [0.5] * 4})
+        df["CHROM_N"] = ["1"] * 4
+        df["POS"] = [1, 2, 6_000_001, 6_000_002]
+        res = f3.f3_matrix(_with_n(df), None, "target", [], ["poolA", "poolB"])
+        self.assertAlmostEqual(res["admixture"][0]["f3"], -0.25 / (BIG_N - 1), places=12)
+        self.assertEqual(res["admixture"][0]["se"], 0.0)
+        self.assertIsNone(res["admixture"][0]["z"])
+        # and the payload path can serialize it without NaN/Infinity
+        json.dumps([f3._num(v) for v in
+                    (res["admixture"][0]["f3"], res["admixture"][0]["se"],
+                     res["admixture"][0]["z"])], allow_nan=False)
+
+
+@_NEEDS_NP
+class TestWriteTsv(unittest.TestCase):
+    def test_unavailable_rows_write_na(self):
+        with tempfile.TemporaryDirectory() as td:
+            p = pathlib.Path(td) / "out.tsv"
+            f3._write_tsv(p, [{"test": "ok", "f3": 0.5, "SE": 0.1, "Z": 5.0},
+                              {"test": "degenerate", "f3": None, "SE": 0.0, "Z": None}])
+            lines = p.read_text().strip().split("\n")
+        self.assertEqual(lines[0].split("\t"), ["test", "f3", "SE", "Z"])
+        self.assertEqual(lines[2].split("\t"), ["degenerate", "NA", "0.000000", "NA"])
 
 
 if __name__ == "__main__":

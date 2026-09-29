@@ -820,17 +820,39 @@ reveal('timedist',(s,c)=>{
       reveal() figure: the copy is bilingual inline and the whole card hides when D.f3 is null,
       which the sections table already explains. Numbers only; no group names are hardcoded --
       sets, labels and n all come from the payload. ── */
+/* Pure helpers for the f3 card (node-tested in tests/test_f3_card.py). The corrected
+   producer (28) emits null f3/se/z when a statistic is unavailable (zero-SE, non-finite),
+   so every displayed number and verdict comes from the row itself -- Number(null)===0 means
+   the old _sg printed "+0.0" for unavailable rows, and the old note asserted "all positive"
+   about the current sample instead of reading the data. */
+function f3Num(v,d){ if(v==null||!isFinite(v)) return null; return (v>0?'+':'')+Number(v).toFixed(d); }
+function f3Verdict(r){
+  const fin=(v)=>v!=null&&isFinite(v);   // isFinite(null)===true (coerced to 0) -- guard explicitly
+  if(r==null||!fin(r.f3)||!fin(r.se)||!fin(r.z)) return 'unavailable';
+  return (r.f3<0&&Math.abs(r.z)>3)?'sig-neg':'ns';
+}
+function f3Cell(r){ const f=f3Num(r.f3,4),s=f3Num(r.se,4),z=f3Num(r.z,1);
+  if(f==null||s==null) return '—';
+  return f+' ±'+s.replace('+','')+'  (Z='+(z==null?'—':z)+')'; }
+function f3Note(adm){
+  const av=adm.filter(r=>r.f3!=null&&r.se!=null&&isFinite(r.f3)&&isFinite(r.se));
+  if(!av.length) return adm.length?'all-unavailable':'none';
+  if(av.some(r=>f3Verdict(r)==='sig-neg')) return 'has-sig-neg';
+  return 'no-sig-neg';
+}
 const renderF3=()=>{
   const box=document.getElementById('f3card'); if(!box) return;
   const FD=D.f3; if(!FD){box.style.display='none';return}
   const M=FD.modern||null, A=FD.ancient||null, Z=zh();
   const rows=(M&&M.outgroup_f3)||[];
   if(!rows.length&&!(A&&(A.admixture||[]).length)){box.style.display='none';return}
-  const _sg=(v,d)=>(v>0?'+':'')+Number(v).toFixed(d);
+  const _sg=(v,d)=>{const s=f3Num(v,d);return s==null?'—':s;};
   // Ranking bars: the spread between groups is a tiny fraction of the absolute value, so the
   // axis is floored near the data (lo = min - 3*SE); the whiskers carry the real uncertainty.
+  // Rows whose f3/SE are unavailable (null) draw no bar -- they get an explicit 不可用 marker.
   const x0=150,X1=310,top=30,rh=19;
-  const lo=rows.length?Math.min(...rows.map(r=>r.f3-3*r.se)):0, hi=rows.length?Math.max(...rows.map(r=>r.f3+3*r.se)):1;
+  const draw=rows.filter(r=>Number.isFinite(r.f3)&&Number.isFinite(r.se));
+  const lo=draw.length?Math.min(...draw.map(r=>r.f3-3*r.se)):0, hi=draw.length?Math.max(...draw.map(r=>r.f3+3*r.se)):1;
   const X=v=>x0+(X1-x0)*(v-lo)/(hi-lo);
   const adm=(M&&M.admixture||[]).map(r=>({...r,scope:'m'})).concat((A&&A.admixture||[]).map(r=>({...r,scope:'a'})));
   const gM=(M&&M.groups)||{};
@@ -852,6 +874,10 @@ const renderF3=()=>{
     rows.forEach((r,i)=>{const yy=y+i*rh, col=r.kind==='pool'?c.ink:c.data2;
       txt(s,{x:x0-10,y:yy+3,'text-anchor':'end','font-size':8.4,'font-weight':r.kind==='pool'?700:600,fill:c.ink},
         Z?(r.label_zh||r.set):(r.label_en||r.set));
+      if(!Number.isFinite(r.f3)||!Number.isFinite(r.se)){
+        txt(s,{x:X1+10,y:yy+3,'font-size':7.6,'font-weight':700,fill:c.muted},
+          Z?'不可用（SE=0/非有限）':'unavailable');
+        txt(s,{x:X1+62,y:yy+3,'font-size':7,fill:c.muted},'n='+r.n);return}
       el(s,'line',{x1:X(r.f3-r.se),y1:yy,x2:X(r.f3+r.se),y2:yy,stroke:c.faint,'stroke-width':1});
       const b=el(s,'line',{x1:X(Math.max(r.f3-r.se,lo)),y1:yy,x2:X(r.f3),y2:yy,stroke:col,'stroke-width':3,class:'fade',style:`animation-delay:${i*.04}s`});
       tip(b,`${r.set} · f3=${r.f3.toFixed(6)} ±${r.se.toFixed(6)} · Z=${_sg(r.z,1)} · n=${r.n}`);
@@ -875,12 +901,14 @@ const renderF3=()=>{
       txt(s,{x:0,y:yy+3,'font-size':8.4,'font-weight':600,fill:c.ink},
         (r.scope==='a'?(Z?'古参照 · ':'ancient · '):(Z?'现代 · ':'modern · '))+lab);
       txt(s,{x:470,y:yy+3,'font-size':8,'font-weight':700,fill:c.ink},
-        _sg(r.f3,4)+' ±'+r.se.toFixed(4)+'  (Z='+_sg(r.z,1)+')');
+        f3Cell(r));
       const n=(r.scope==='a')?('n='+r.n_a+'/'+r.n_b):('n='+(((gM[r.a]||{}).n)||'—')+'/'+(((gM[r.b]||{}).n)||'—'));
       txt(s,{x:680,y:yy+3,'font-size':7,fill:c.muted},n);
-      tip(el(s,'circle',{cx:462,cy:yy,r:2.4,fill:r.f3<0&&Math.abs(r.z)>3?a.s:c.faint}),
-        r.f3<0&&Math.abs(r.z)>3?(Z?'显著为负：两群混合的证据':'significantly negative: evidence of two-source admixture')
-                               :(Z?'为正：未检出两群混合（受参照分化程度限制）':'positive: no two-source admixture detected (power depends on source divergence)'));});
+      const vd=f3Verdict(r);
+      tip(el(s,'circle',{cx:462,cy:yy,r:2.4,fill:vd==='sig-neg'?a.s:c.faint}),
+        vd==='sig-neg'?(Z?'显著为负：两群混合的证据':'significantly negative: evidence of two-source admixture')
+        :vd==='unavailable'?(Z?'不可用：SE=0 或非有限值，无法给出 Z 与结论':'unavailable: zero SE or non-finite value; no Z, no verdict')
+                           :(Z?'未检出显著为负信号：不构成两群混合证据（功效受参照分化程度限制）':'no significantly negative signal: not evidence of two-source admixture (power depends on source divergence)'));});
     y+=adm.length*18+6;
   }
   foot(s,c,900,Math.max(H-6,y),
@@ -891,9 +919,21 @@ const renderF3=()=>{
                   :`modern: ${fmt(M.sites)} LD-pruned sites · ${M.blocks} ${(FD.block_mb||5)}Mb-block jackknife (1000G)`);
   if(A)bits.push(Z?`古参照：${fmt(A.sites)} 个位点 · ${A.blocks} 块（AADR 区域池，${(A.admixture||[]).map(r=>r.label_zh+' n='+r.n_a+'/'+r.n_b).join('，')}）`
                   :`ancient: ${fmt(A.sites)} sites · ${A.blocks} blocks (AADR region pools, ${(A.admixture||[]).map(r=>r.label_en+' n='+r.n_a+'/'+r.n_b).join(', ')})`);
-  note.textContent=bits.join('  ·  ')+'. '
-   +(Z?'混合 f3 均为正只表示"未检出"两群混合：东亚参照群彼此分化浅，该检验对南北混合的功效本就有限，检不出不等于不存在。'
-      :'All admixture-f3 values being positive only means two-source admixture was not detected: East Asian reference groups are weakly differentiated, the test has little power for north-south admixture, and non-detection is not evidence of absence. ')
+  // The conclusion sentence is derived from the rows (f3Note), never hardcoded to the current
+  // sample's all-positive result; the estimator line discloses what 28 actually computed.
+  const verdict=f3Note(adm);
+  const concl = verdict==='has-sig-neg'
+    ?(Z?'存在显著为负的混合 f3（|Z|>3）：对该对来源构成两群混合信号；幅度解释受参照选择与覆盖限制。'
+       :'At least one admixture-f3 is significantly negative (|Z|>3): a two-source admixture signal for that source pair; magnitude interpretation is limited by reference choice and coverage.')
+    :verdict==='no-sig-neg'
+    ?(Z?'未检出显著为负的混合 f3：这只是"未检出"，不是反证——东亚参照群彼此分化浅，该检验对南北混合的功效本就有限。'
+       :'No admixture-f3 is significantly negative: non-detection, not disproof -- East Asian reference groups are weakly differentiated, and the test has little power for north-south admixture.')
+    :verdict==='all-unavailable'
+    ?(Z?'混合 f3 的标准误为 0 或非有限，无法给出 Z，也就无法给出混合结论。'
+       :'Admixture-f3 standard errors are zero or non-finite: no Z, therefore no admixture verdict.')
+    :'';
+  note.textContent=(bits.join('  ·  ')+(bits.length?'. ':''))+concl
+   +(FD.estimator?((concl?'  ':'')+(Z?'估计量：':'estimator: ')+FD.estimator+'  ·  '):'')
    +(Z?'f3 刻画的是等位基因频率的相对接近程度，不据此做族群或籍贯推断。'
       :'f3 measures relative allele-frequency closeness only; no ethnic or geographic-origin inference is drawn from it.');
 };
