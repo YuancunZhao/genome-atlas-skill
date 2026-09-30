@@ -492,6 +492,10 @@ def _dates_from_raw(raw):
     axis = m.group(3).upper()
     if axis in ("BCE", "BC"):
         lo_bp, hi_bp = 1950 + min(a, b), 1950 + max(a, b)
+    elif axis == "CE":
+        # 复审 P1（AN1/AN6）：CE 年份此前落进"已经是 BP"分支，1000-1200 CE 被当成
+        # 1000-1200 BP；正确换算是 1950-年 → 750-950 BP（CE 越晚 BP 越小）。
+        lo_bp, hi_bp = 1950 - max(a, b), 1950 - min(a, b)
     else:  # 已经是 BP
         lo_bp, hi_bp = min(a, b), max(a, b)
     return lo_bp, hi_bp
@@ -544,7 +548,10 @@ def normalize_metadata(rows, dataset, release):
             "locality": get("locality"),
             "location_id": None,
             "latitude": lat, "longitude": lon,
-            "location_precision": "site" if (lat is not None and lon is not None) else "unknown",
+            # 复审 P1（AN1/AN6）：AADR 只发布坐标本身，不发布精度等级——"有坐标"冒充 site 让
+            # 模板的"未知精度"防护失效。site/region 只能由人工地点覆盖表（30 的细化层）给出；
+            # 这里如实记 unknown，坐标来源单独用 location_source 表达。
+            "location_precision": "unknown",
             "location_source": "anno" if (lat is not None and lon is not None) else None,
             "date_mean_bp": mean,
             "date_sd_bp": sd,
@@ -672,7 +679,9 @@ def load_locations(path):
                     "location_id": lid, "label_zh": (r.get("label_zh") or "").strip(),
                     "label_en": (r.get("label_en") or "").strip(), "locality": (r.get("locality") or "").strip(),
                     "latitude": lat, "longitude": lon,
-                    "precision": (r.get("precision") or "").strip() or ("site" if lat is not None else "unknown"),
+                    # 复审 P1（AN1/AN6）：人工表留空的精度不得因"有坐标"默认成 site——本表头
+                    # 约定精度一律 region；留空=未核定，如实 unknown。
+                    "precision": (r.get("precision") or "").strip() or "unknown",
                     "source_url": (r.get("source_url") or "").strip(), "note": (r.get("note") or "").strip()}
     return out
 

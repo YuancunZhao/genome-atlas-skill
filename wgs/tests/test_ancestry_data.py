@@ -266,7 +266,10 @@ class TestNormalizeMetadata(unittest.TestCase):
         self.assertEqual(rec["mt_hg_raw"], "U5b1a")
         self.assertAlmostEqual(rec["latitude"], 49.81)
         self.assertAlmostEqual(rec["longitude"], 6.40)
-        self.assertEqual(rec["location_precision"], "site")
+        # 复审 P1（AN1/AN6）：AADR 只发布坐标本身，不发布精度——有坐标不再冒充 site，
+        # site/region 只能由人工地点覆盖表给出。
+        self.assertEqual(rec["location_precision"], "unknown")
+        self.assertEqual(rec["location_source"], "anno")
         self.assertEqual(rec["date_mean_bp"], 8025)
         self.assertEqual(rec["date_sd_bp"], 64)
         # 没有提供的可选字段是 None，不是 ""、不是 0
@@ -302,6 +305,31 @@ class TestNormalizeMetadata(unittest.TestCase):
         self.assertEqual((ci["date_min_bp"], ci["date_max_bp"]), (7936, 8171))
         self.assertEqual(ci["date_mean_bp"], 7205, "有实测均值时不得用区间中点覆盖它")
         self.assertEqual(ci["date_basis"], "Direct: IntCal20")
+
+    def test_ce_ranges_convert_on_the_1950_baseline_not_passthrough(self):
+        """复审 P1（AN1/AN6）：CE 年份不得落进"已经是 BP"分支——1000-1200 CE 是 750-950 BP。"""
+        ce, = ad.normalize_metadata([anno_row(gid="C.SG", master="C", iid="C", group="G",
+                                              dmean="..", dsd="..", draw="1000-1200 CE")],
+                                    dataset="AADR", release="v66")
+        self.assertEqual((ce["date_min_bp"], ce["date_max_bp"]), (750, 950),
+                         "1950-1200=750、1950-1000=950；写成 1000-1200 BP 是把 CE 当 BP")
+        self.assertEqual(ce["date_mean_bp"], 850)
+        self.assertEqual(ce["date_basis"], "contextual_range_midpoint")
+        # 乱序区间与 3 位数年份同样换算，不猜方向
+        unordered, = ad.normalize_metadata([anno_row(gid="D.SG", master="D", iid="D", group="G",
+                                                     dmean="..", dsd="..", draw="400-200 CE")],
+                                          dataset="AADR", release="v66")
+        self.assertEqual((unordered["date_min_bp"], unordered["date_max_bp"]), (1550, 1750))
+        # BP 区间原样通过（不重复换算）；BCE 用 1950+年
+        bp, = ad.normalize_metadata([anno_row(gid="E.SG", master="E", iid="E", group="G",
+                                              dmean="..", dsd="..", draw="3000-2500 BP")],
+                                    dataset="AADR", release="v66")
+        self.assertEqual((bp["date_min_bp"], bp["date_max_bp"]), (2500, 3000), "BP 区间只排序，不再换算")
+        # 不可解析（含 2 位数 CE 年份）保持 None，不猜
+        unkn, = ad.normalize_metadata([anno_row(gid="F.SG", master="F", iid="F", group="G",
+                                                dmean="..", dsd="..", draw="50-100 CE")],
+                                      dataset="AADR", release="v66")
+        self.assertIsNone(unkn["date_min_bp"]); self.assertIsNone(unkn["date_max_bp"])
 
     def test_coordinates_out_of_range_or_empty_never_become_zero(self):
         rec, = ad.normalize_metadata([anno_row(gid="A.AG", master="A", iid="A", group="G",
@@ -376,19 +404,25 @@ class TestNormalizeMetadata(unittest.TestCase):
                 ("AADR", "China_Baligang_LN_Longshan", "CN-HA-Baligang", "河南 八里岗", "Baligang, Henan",
                  "Baligang (Dengzhou)", "32.7", "112.1", "site", "https://example.org/x", "corrected to Dengzhou"),
                 ("AADR", "China_Tibet_Kangyu", "CN-XZ-Kangyu", "", "Kangyu", "Kangyu", "", "", "unknown", "", "no coords"),
+                # 复审 P1（AN1/AN6）：留空精度 + 有坐标 → unknown，不得默认成 site
+                ("AADR", "China_Somewhere_IA", "CN-XX-Somewhere", "", "Somewhere", "Somewhere", "34.0", "108.0", "", "", ""),
             ]
             f.write_text("# header comment\n" + "\t".join(cols) + "\n"
                          + "\n".join("\t".join(r) for r in data) + "\n", encoding="utf-8")
             loc = ad.load_locations(f)
-            self.assertEqual(len(loc), 2)
+            self.assertEqual(len(loc), 3)
             a = loc["CN-HA-Baligang"]
             self.assertEqual(a["label_zh"], "河南 八里岗")
             self.assertAlmostEqual(a["latitude"], 32.7)
+            self.assertEqual(a["precision"], "site", "显式给出的精度照抄")
             # 无中文名时保留原始名称：不再有"必须汉字开头"的校验
             b = loc["CN-XZ-Kangyu"]
             self.assertEqual(b["label_zh"], "")
             self.assertIsNone(b["latitude"])
             self.assertEqual(b["precision"], "unknown")
+            c = loc["CN-XX-Somewhere"]
+            self.assertAlmostEqual(c["latitude"], 34.0)
+            self.assertEqual(c["precision"], "unknown", "留空精度不因有坐标冒充 site")
         # 缺列必须报错，而不是静默
         with tempfile.TemporaryDirectory() as td:
             f = pathlib.Path(td) / "bad.tsv"
