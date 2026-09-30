@@ -337,7 +337,15 @@ def check_sections(D):
     dup = {i for i in ids if ids.count(i) > 1}
     if dup:
         fail(f"duplicate section ids: {sorted(dup)}")
-    known_codes = {"no_input", "missing_output", "step_not_run", "insufficient_reads"}
+    # AN7：词表必须等于 30 实际会写进 sections 的全部 reason code，缺一个就会把合法的
+    # 结构化空态（如未运行可选模块的 missing_manifest）判成"未知码"。来源：
+    #   30 的 _MISS_IN/_MISS_OUT/_MISS_STEP（no_input/missing_output/step_not_run）
+    #   + 30 的 _LA_CODES（manifest 准入状态）+ run_all skipped() 的禁用理由
+    #   + insufficient_reads（23 的血型低读段）。收紧或扩充词表时 30 与这里必须同步。
+    known_codes = {"no_input", "missing_output", "step_not_run", "insufficient_reads",
+                   "missing_manifest", "stale_result", "missing_result", "unreadable_result",
+                   "disabled_by_config", "no_segments",
+                   "local_ancestry_not_configured", "aadr_not_configured", "regional_axis_not_configured"}
     for s in secs:
         st = s.get("status")
         if st not in ("ok", "negative", "unavailable"):

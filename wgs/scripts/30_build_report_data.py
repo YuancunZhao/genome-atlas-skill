@@ -113,7 +113,10 @@ else:
 _het_f = W/"03_haplo/mt_heteroplasmy.tsv"
 D["mt_het"] = pd.read_csv(_het_f, sep="\t").to_dict("records") if _het_f.exists() else []
 # --- ancestry
-ps = pd.read_csv(P/"data/ref/all_phase3.psam", sep="\t").rename(columns={"#IID": "IID"})
+# The reference head-count must describe the bundle 04 actually projected from (kg_pfile), not a
+# hard-coded work/data/ref/all_phase3 path: with a configured bundle the two disagree and the
+# reported n_super/n_sub would be about a panel the PCA never used.
+ps = pd.read_csv(KG_PFILE + ".psam", sep="\t").rename(columns={"#IID": "IID"})
 kg = pd.read_csv(W/"04_ancestry/kg.proj.sscore", sep="\t"); me = pd.read_csv(W/"04_ancestry/target.proj.sscore", sep="\t")
 D["pca_global"] = {"pts": [[r.SuperPop, r.Population, round(r.PC1_AVG, 4), round(r.PC2_AVG, 4)] for r in kg.itertuples()], "me": [round(me.PC1_AVG[0], 4), round(me.PC2_AVG[0], 4)]}
 # 复审 P1（AN0/AN2/AN5）：区域视图只属于显式配置了 ref_superpop 的运行。开关关着时旧
