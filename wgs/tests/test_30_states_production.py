@@ -268,3 +268,69 @@ class TestLineageAbsenceShapes(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+@unittest.skipIf(_SKIP, _SKIP)
+class TestOptionalProductAdmission(unittest.TestCase):
+    """复审 H6/AN5 残留：f3_stats.json / lineage_history.json 此前按"文件存在"进场，绕过
+    生产者的 manifest——禁用/失败/换样本的旧文件照样投递。现在 30 走 analysis_state 准入。"""
+
+    @staticmethod
+    def _write_unadmitted_products(W):
+        f3 = W / "04_ancestry/f3"
+        f3.mkdir(parents=True, exist_ok=True)
+        (f3 / "f3_stats.json").write_text(json.dumps(
+            {"sample_id": "TESTSAMPLE", "estimator": "site-mean-corrected", "block_mb": 5,
+             "modern": {"value": 0.01, "se": 0.001}, "ancient": None}) + "\n", encoding="utf-8")
+        (W / "03_haplo/lineage_history.json").write_text(json.dumps(
+            {"y": {"state": "ok", "reported_hg": "Z9"}, "mt": None}) + "\n", encoding="utf-8")
+
+    def test_files_without_manifests_are_not_delivered(self):
+        with tempfile.TemporaryDirectory() as td:
+            cfg = _write_config(td)
+            self._write_unadmitted_products(_write_base(td, y=True, mt=True))
+            r = _run_30(cfg)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            d = _data(td)
+            self.assertIsNone(d["f3"], "无 28 manifest 的 f3_stats.json 不得进场")
+            self.assertEqual(d["lineages"], {"y": None, "mt": None})
+            self.assertIn("f3 result not admitted", r.stderr)
+            self.assertIn("lineage history not admitted", r.stderr)
+
+    def test_files_with_matching_manifests_are_delivered(self):
+        with tempfile.TemporaryDirectory() as td:
+            cfg = _write_config(td)
+            W = _write_base(td, y=True, mt=True)
+            self._write_unadmitted_products(W)
+            (W / "04_ancestry/f3/manifest.json").write_text(json.dumps({
+                "schema_version": "1", "sample_id": "TESTSAMPLE", "analysis_id": "28-f3-stats",
+                "state": "ok", "reason_code": "", "build": "GRCh37", "reference_release": "",
+                "parameters": {"estimator": "site-mean-corrected", "block_mb": 5, "min_group_n": 2},
+                "tool_versions": {}, "input_fingerprints": {}, "outputs": ["f3_stats.json"]}) + "\n",
+                encoding="utf-8")
+            (W / "03_haplo/manifest.json").write_text(json.dumps({
+                "schema_version": "1", "sample_id": "TESTSAMPLE", "analysis_id": "09d-lineage-history",
+                "state": "ok", "reason_code": "", "build": "GRCh37", "reference_release": "",
+                "parameters": {}, "tool_versions": {}, "input_fingerprints": {},
+                "outputs": ["lineage_history.json"]}) + "\n", encoding="utf-8")
+            r = _run_30(cfg)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            d = _data(td)
+            self.assertEqual(d["f3"]["estimator"], "site-mean-corrected")
+            self.assertEqual(d["lineages"]["y"]["reported_hg"], "Z9")
+
+    def test_stale_sample_manifest_is_rejected(self):
+        """换样本留下的旧产物：文件与 manifest 都在，但 sample_id 不符 → 不得投递。"""
+        with tempfile.TemporaryDirectory() as td:
+            cfg = _write_config(td)
+            W = _write_base(td, y=True, mt=True)
+            self._write_unadmitted_products(W)
+            (W / "04_ancestry/f3/manifest.json").write_text(json.dumps({
+                "schema_version": "1", "sample_id": "OTHERSAMPLE", "analysis_id": "28-f3-stats",
+                "state": "ok", "reason_code": "", "build": "GRCh37", "reference_release": "",
+                "parameters": {}, "tool_versions": {}, "input_fingerprints": {},
+                "outputs": ["f3_stats.json"]}) + "\n", encoding="utf-8")
+            r = _run_30(cfg)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            d = _data(td)
+            self.assertIsNone(d["f3"], "他样本的 f3 结果必须判 stale，不得按存在投递")

@@ -594,15 +594,16 @@ _na = _read_tsv(W/"11_aadr/near_ancient.tsv")
 D["ho_near_ancient"] = (_na.to_dict("records")
                          if _AADR_STATE == "ok" and _na is not None and len(_na) else [])
 # --- f3 statistics (28_f3_stats.py). Optional module: null when the step was not run,
-# and the report's f3 card hides itself on a null -- the sections table records why.
-_f3_f = W/"04_ancestry/f3/f3_stats.json"
-if _f3_f.exists():
-    try:
-        D["f3"] = json.loads(_f3_f.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        print("30: f3_stats.json is unreadable; the f3 panel is skipped", file=sys.stderr)
-        D["f3"] = None
+# # and the report's f3 card hides itself on a null -- the sections table records why.
+# 复审 H6/AN5 残留：f3 此前按"文件存在"进场，绕过 28 的 manifest——禁用/失败/换样本的旧
+# f3_stats.json 照样投递。走 analysis_state 准入（state+sample_id），不合格即空态。
+_F3_STATE, _F3_REASON, _F3_DOC = _ad.analysis_state(
+    W/"04_ancestry/f3", {"sample_id": SAMPLE}, names=("f3_stats.json",))
+if _F3_STATE == "ok":
+    D["f3"] = _F3_DOC
 else:
+    print(f"30: f3 result not admitted (state={_F3_STATE}, reason={_F3_REASON}); "
+          "the f3 panel is skipped", file=sys.stderr)
     D["f3"] = None
 # --- AN5（§7 报告契约）：把各分析的结构化结果组装成 D.ancestry / D.lineages。
 # 这是模板与 AN6 要消费的形状；旧键（ho_*/near_eas/…）只作为尚未迁移的视图的过渡，不再各自算一套。
@@ -638,15 +639,17 @@ D["ancestry"] = {"schema_version": 1, "default_analysis_id": _default or
 # near_* 取准入后的分析（stale/missing 一律 None），口径与 D.ancestry 同源，不二次解析文件
 D["near_global"], D["knn_global"] = _near_from(_anc_analyses, "kg-global")
 D["near_eas"], D["knn_eas"] = _near_from(_anc_analyses, "kg-regional")
-# 父母系：以 05/06 的结构化结果 + 04 的历史视图为准（lineage_history.json）
-_lh = None
-_lhf = W/"03_haplo/lineage_history.json"
-if _lhf.exists():
-    try:
-        _lh = json.loads(_lhf.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        _lh = None
-D["lineages"] = {"y": (_lh or {}).get("y"), "mt": (_lh or {}).get("mt")}
+# 父母系：以 05/06 的结构化结果 + 04 的历史视图为准（lineage_history.json）。
+# 复审 H6/AN5 残留：此前按"文件存在"读取，绕过 09d 的状态——现在 09d 会写 manifest
+# （analysis_id=09d-lineage-history），30 走 analysis_state 准入；不合格交付空态并说明原因。
+_LH_STATE, _LH_REASON, _LH_DOC = _ad.analysis_state(
+    W/"03_haplo", {"sample_id": SAMPLE, "analysis_id": "09d-lineage-history"},
+    names=("lineage_history.json",))
+if _LH_STATE != "ok":
+    print(f"30: lineage history not admitted (state={_LH_STATE}, reason={_LH_REASON}); "
+          "D.lineages delivered empty", file=sys.stderr)
+D["lineages"] = {"y": (_LH_DOC or {}).get("y") if _LH_STATE == "ok" else None,
+                 "mt": (_LH_DOC or {}).get("mt") if _LH_STATE == "ok" else None}
 
 # PRS site coverage, for the copy's transferability note
 _pr = D.get("prs") or []
