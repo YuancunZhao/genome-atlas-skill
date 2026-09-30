@@ -186,6 +186,11 @@ def lineage_observations(rows, query, parents, tree_kind, same_tree=True, histor
         if stats is not None and note != "missing":
             stats[note] = stats.get(note, 0) + 1     # 进了比较就记账，包括版本不匹配的那些
         rel = match_lineage(query, node, parents, same_tree=bool(same_tree))
+        if note == "version_mismatch":
+            # 复审 AN4：标签不在当前树节点集（多半来自另一个树版本，如 AADR 的 YFull 12.03）时，
+            # 与查询支系字符串相等不等于版本等价——此前 version_mismatch 只记计数，same_tree=True
+            # 照样可判 exact。未验证版本等价的记录不进默认视图，宁可 unresolved。
+            rel = "unresolved"
         lat, lon = r.get("latitude"), r.get("longitude")
         out.append({
             "record_id": str(r.get("record_id") or ""),
@@ -367,13 +372,29 @@ def _cli(argv=None):
         s = lineage_summary(raw)
         node = s.get("terminal") or s.get("reported_hg")
         key = node if (node and ":" in str(node)) else (f"{kind}:{node}" if node else "")
-        _obs = lineage_observations(rows, key, parents, kind, history=hist, known_nodes=nodes, stats=stats) \
+        # 复审 AN4：树节点集只对 Y 有效（--ytree 是 YFull 树）；mt 没有 correspond 的树文件，
+        # 传 Y 的节点集会把每个 mt 标签都误判 version_mismatch。mt 保持 unverified。
+        _obs = lineage_observations(rows, key, parents, kind, history=hist,
+                                    known_nodes=(nodes if kind == "y" else None), stats=stats) \
             if (rows and key) else []
         _hist = history_view(key, hist, _obs, parents)
         if stats:
             _hist["label_notes"] = dict(stats)
         out[kind] = dict(s, history=_hist)
-    pathlib.Path(a.out).write_text(json.dumps(out, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+    _out_path = pathlib.Path(a.out)
+    _out_path.parent.mkdir(parents=True, exist_ok=True)
+    _out_path.write_text(json.dumps(out, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+    # 复审 H6/AN5 残留：30 此前按"文件存在"读 lineage_history.json，绕过任何状态。写一份
+    # manifest（analysis_id=09d-lineage-history）让 30 走 analysis_state 准入；parameters 只记
+    # 实际输入的 provenance，不用路径字符串冒充内容指纹。
+    try:
+        import ancestry_data as _adm
+        _adm.write_manifest(_out_path.parent / "manifest.json", _adm.build_manifest(
+            a.sample or "", "09d-lineage-history", state="ok",
+            parameters={"history": a.history or "", "rows": _rows_path or "", "ytree": a.ytree or ""},
+            outputs=[_out_path.name]))
+    except Exception as _e:      # manifest 写失败不阻断结果文件，但要留下痕迹
+        print(f"WARNING: could not write the 09d manifest: {_e}", file=sys.stderr)
     print(f"wrote {a.out} (y={out['y']['state']}, mt={out['mt']['state']})")
     return 0
 

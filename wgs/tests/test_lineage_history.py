@@ -2,7 +2,7 @@
 
 纯函数测试：不读真实 YFull/PhyloTree 树、不跑 haplogrep3、不改报告数据。
 """
-import pathlib, sys, unittest
+import json, pathlib, sys, tempfile, unittest
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "scripts"))
 import lineage_history as lh  # noqa: E402
@@ -120,7 +120,6 @@ class TestLineageResult(unittest.TestCase):
 
 class TestObservationsAndRoutes(unittest.TestCase):
     """历史记录与迁移路线：不套用常染色体门槛，不凭证据缺失造故事。"""
-
     ROWS = [
         {"record_id": "X.SG", "individual_id": "X", "master_id": "X", "dataset": "AADR",
          "record_release": "v66", "y_hg_raw": "N-CTS4714", "mt_hg_raw": "A13", "call_rate": 0.49,
@@ -166,6 +165,27 @@ class TestObservationsAndRoutes(unittest.TestCase):
         for k in ("record_id", "node_id", "relation", "locality", "coordinates", "precision",
                   "date_range", "date_basis", "call_source", "publication"):
             self.assertIn(k, o)
+
+    def test_version_mismatched_label_never_claims_exact(self):
+        """复审 AN4：标签不在当前树（version_mismatch）时，与查询字符串相等不等于版本等价。
+
+        旧行为：canonicalize 记 version_mismatch 只进计数，match_lineage 仍按 same_tree=True
+        判 exact——不兼容树标签可以冒充同版本精确匹配。现在一律 unresolved，不进默认视图。
+        """
+        rows = [{"record_id": "V.SG", "master_id": "V", "dataset": "AADR",
+                 "y_hg_raw": "N-CTS4714", "hg_source_tree": "YFull12.03", "call_rate": 0.9,
+                 "locality": "Somewhere"}]
+        stats = {}
+        obs = lh.lineage_observations(rows, "y:N-CTS4714", parents={}, tree_kind="y",
+                                      known_nodes={"y:N-M1845"}, stats=stats)
+        self.assertEqual(stats.get("version_mismatch"), 1)
+        self.assertEqual(obs, [], "未验证版本等价的记录不得冒充 exact 进默认视图")
+        # 对照：同一标签在当前树节点集里（note=none）时，字符串相等才可以说 exact
+        ok_stats = {}
+        ok = lh.lineage_observations(rows, "y:N-CTS4714", parents={}, tree_kind="y",
+                                     known_nodes={"y:N-CTS4714"}, stats=ok_stats)
+        self.assertEqual(ok_stats.get("none"), 1)
+        self.assertEqual([o["relation"] for o in ok], ["exact"])
 
     def test_weak_chain_above_the_terminal_forces_a_step_back(self):
         """真实的 12 / 1 / 0 / 1 / 5 形态：末端那个 5 只是弱链的末尾，不是独立证据。"""
@@ -236,3 +256,46 @@ class TestObservationsAndRoutes(unittest.TestCase):
         ok = lh.history_view("mt:A13", hist, [], parents={})
         self.assertEqual(len(ok["routes"]), 1, "有来源的路线应匹配到查询支系")
         self.assertEqual(lh.history_view("mt:Z9", hist, [], parents={})["routes"], [])
+
+
+class TestCliWritesAdmissibleManifest(unittest.TestCase):
+    """复审 H6/AN5 残留：09d 的 lineage_history.json 此前没有 manifest，30 只能按"文件存在"
+    读取。现在 CLI 写 analysis_id=09d-lineage-history 的 manifest，30 走 analysis_state 准入。
+    """
+
+    def _yard(self, td):
+        yard = pathlib.Path(td) / "03_haplo"
+        yard.mkdir(parents=True)
+        (yard / "y_result.json").write_text(json.dumps({
+            "kind": "y", "state": "ok", "reported_hg": "N-CTS4714", "conservative_hg": "N-M1845",
+            "supported_path": [{"node": "N-CTS4714", "der": 5, "anc": 0, "na": 0}]}), encoding="utf-8")
+        (yard / "mt_result.json").write_text(json.dumps({
+            "kind": "mt", "state": "ok", "reported_hg": "A13",
+            "supported_path": [{"node": "A13", "der": 3, "anc": 0, "na": 0}]}), encoding="utf-8")
+        return yard
+
+    def test_cli_writes_manifest_that_analysis_state_admits(self):
+        import ancestry_data as ad
+        with tempfile.TemporaryDirectory() as td:
+            yard = self._yard(td)
+            out = pathlib.Path(td) / "lineage_history.json"
+            rc = lh._cli(["--yard", str(yard), "--out", str(out), "--sample", "S1",
+                          "--history", ""])
+            self.assertEqual(rc, 0)
+            self.assertTrue(out.exists())
+            man = json.loads((out.parent / "manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(man["analysis_id"], "09d-lineage-history")
+            self.assertEqual(man["state"], "ok")
+            self.assertEqual(man["sample_id"], "S1")
+            self.assertEqual(man["outputs"], ["lineage_history.json"])
+            # 与 30 相同的准入调用：state+sample_id+analysis_id 全部一致才交出 doc
+            state, reason, doc = ad.analysis_state(
+                out.parent, {"sample_id": "S1", "analysis_id": "09d-lineage-history"},
+                names=("lineage_history.json",))
+            self.assertEqual(state, "ok", reason)
+            self.assertEqual(doc["y"]["reported_hg"], "N-CTS4714")
+            # 换样本的旧 manifest 必须被判 stale——存在性读取要修掉的正是这个
+            other = ad.analysis_state(out.parent, {"sample_id": "OTHER", "analysis_id": "09d-lineage-history"},
+                                       names=("lineage_history.json",))
+            self.assertEqual(other[0], "unavailable")
+            self.assertEqual(other[1], "stale_result")

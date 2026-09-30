@@ -69,7 +69,9 @@ else
 fi
 # Lineage history (AN4): consumes 05/06 results and the normalised metadata; runs before 30 so the
 # report reads one file instead of re-deriving the paternal/maternal story from text.
-step 09d lineage history and evidence;                        python3 $S/lineage_history.py --history panel/lineage_history.json --rows $WGS/11_aadr/summary.json --yard $WGS/03_haplo --out $WGS/03_haplo/lineage_history.json --sample "$SAMPLE"
+# 复审 AN4：--ytree 让 canonicalize 的版本准入真正生效（不传时所有标签 unverified，字符串相等
+# 就能冒充 exact）；mt 无对应树文件，lineage_history 内部按 kind 区分。
+step 09d lineage history and evidence;                        python3 $S/lineage_history.py --history panel/lineage_history.json --rows $WGS/11_aadr/summary.json --yard $WGS/03_haplo --out $WGS/03_haplo/lineage_history.json --ytree "$YTREE" --sample "$SAMPLE"
 
 step 10b CYP2D6 star alleles;                                bash  $S/10b_cyrius.sh
 step 10 PharmCAT star alleles, CYP2D6, HLA;                    bash  $S/10_pharmcat.sh
