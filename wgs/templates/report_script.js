@@ -655,6 +655,25 @@ function kindView(records, kind) {
   return (records || []).filter(r => String(r.kind || '') === kind);
 }
 
+/* 地图取景（纯函数，与回归测试同源）：点全部集中在某一区域（本样本全在东亚）时，整幅世界
+   底图把内容压到角落——视口改为跟随当前已落点的包围盒，按其尺寸留边距；跨度下限（70×45
+   经纬度）保住区域上下文，不至于一两个点就放大到街区级。无有效坐标、或点横跨全球时回退
+   全世界。不做经度折叠（本数据集没有跨 180° 的样本），视口始终夹在世界边界内。 */
+function geomapViewport(rows, minW, minH, padFrac) {
+  minW = minW || 70; minH = minH || 45; padFrac = padFrac == null ? 0.25 : padFrac;
+  const pts = (rows || []).filter(r => geoValid(r.latitude, r.longitude))
+                          .map(r => geoXY(r.latitude, r.longitude));
+  if (!pts.length) return { x0: 0, y0: 0, w: 360, h: 180 };
+  const x0 = Math.min(...pts.map(p => p.x)), x1 = Math.max(...pts.map(p => p.x));
+  const y0 = Math.min(...pts.map(p => p.y)), y1 = Math.max(...pts.map(p => p.y));
+  const mx = Math.max(4, padFrac * (x1 - x0)), my = Math.max(4, padFrac * (y1 - y0));
+  const w = Math.min(360, Math.max(minW, (x1 - x0) + 2 * mx));
+  const h = Math.min(180, Math.max(minH, (y1 - y0) + 2 * my));
+  const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+  return { x0: Math.max(0, Math.min(360 - w, cx - w / 2)),
+           y0: Math.max(0, Math.min(180 - h, cy - h / 2)), w, h };
+}
+
 /* 共用地图：底图 + 点 + 选择联动。现代图与古代图只是传入的 locations 不同——同一段绘制逻辑，
    避免两个视图对"精度""无坐标"给出不一致的处理。返回 { placed, unplaced } 计数。 */
 /* AN6 复审：drawGeoMap 自引入以来没有任何调用方（geomap 卡片自绘），却留着一套与卡片不同的
@@ -673,8 +692,10 @@ reveal('geomap',(s,c)=>{
   const rankedAll=groups.filter(g=>g.rank&&!g.small_group)
     .sort((x,y)=>(x.rank-y.rank)||(Number(x.distance_mean||0)-Number(y.distance_mean||0)));
   const VB={w:900,h:470}, pad={l:26,t:26}, mapH=300;
-  const sc=Math.min((VB.w-2*pad.l)/360,(mapH-2*pad.t)/180);
-  const ox=pad.l+((VB.w-2*pad.l)-360*sc)/2, oy=pad.t+((mapH-2*pad.t)-180*sc)/2;
+  const plotW=VB.w-2*pad.l, plotH=mapH-2*pad.t;
+  // sc/ox/oy 随 draw() 里的取景变（见下）；初值=全世界，内容为空时兜底。
+  let sc=Math.min(plotW/360,plotH/180);
+  let ox=pad.l+(plotW-360*sc)/2, oy=pad.t+(plotH-180*sc)/2;
   const P=r=>{const q=geoXY(r.latitude,r.longitude);return {x:ox+q.x*sc, y:oy+q.y*sc};};
   // 年代范围（BP）。0 = 现在，越往左越古老；1950 是 BP 基准。
   const RANGES=[{l:0,h:1000000,zh:'全部',en:'all'},
@@ -698,7 +719,16 @@ reveal('geomap',(s,c)=>{
     const top5=ranked.slice(0,5).map(g=>String(g.label));
     const unplaced=inRange.filter(r=>!geoValid(r.latitude,r.longitude)).length;
     const placed=inRange.filter(r=>geoValid(r.latitude,r.longitude));
-    el(s,'use',{href:'#world_land',x:ox,y:oy,width:360*sc,height:180*sc,fill:c.grid,'fill-opacity':.55,stroke:'none'});
+    // 取景随内容（geomapViewport，与测试同源）：视口装下当前全部已落点并留边距，点因此必在
+    // 绘图区内；放大后底图超出绘图区的部分 clip 掉。视口即该视图内容的诚实范围——不画没数据
+    // 的大洲，也没有把点投出地图。
+    const vp=geomapViewport(placed);
+    sc=Math.min(plotW/vp.w,plotH/vp.h);
+    ox=pad.l+(plotW-vp.w*sc)/2-vp.x0*sc;
+    oy=pad.t+(plotH-vp.h*sc)/2-vp.y0*sc;
+    const _defs=el(s,'defs',{}), _cp=el(_defs,'clipPath',{id:'geomap_plot'});
+    el(_cp,'rect',{x:pad.l,y:pad.t,width:plotW,height:plotH});
+    el(s,'use',{href:'#world_land',x:ox,y:oy,width:360*sc,height:180*sc,fill:c.grid,'fill-opacity':.55,stroke:'none','clip-path':'url(#geomap_plot)'});
     const dists=placed.map(r=>Number(r.distance_to_target)).filter(Number.isFinite);
     const dmax=dists.length?Math.max(...dists):0;
     placed.forEach(r=>{
@@ -810,8 +840,8 @@ reveal('geomap',(s,c)=>{
       : `view: ${_kv.en}`+(kv==='modern'?' (modern references carry no date; see the ancient/all views for the timeline)':` · range: ${R.en}`)
         +` · ${inRange.length} records (${placed.length} placed, ${unplaced} without coordinates) · ${outRange.length} outside · ${noDate.length} with an unknown date (shown under "all", excluded from ranged filtering) · emphasised = five closest · circles = site or unknown precision, squares = region-level · base map Natural Earth 1:110m (public domain)`)
       .replace(/\*\*/g,'');
-    foot(s,c,VB.w,VB.h-6,Z?'筛选只是换个范围查看已算好的结果，不重建 PCA、也不重算排名 · 离线底图，无外部请求'
-                          :'filtering only changes which computed records are shown; no PCA rebuild, no re-ranking · offline base map, no external requests');
+    foot(s,c,VB.w,VB.h-6,Z?'筛选只是换个范围查看已算好的结果，不重建 PCA、也不重算排名 · 底图自动放大到当前视图有内容的区域 · 离线底图，无外部请求'
+                          :'filtering only changes which computed records are shown; no PCA rebuild, no re-ranking · the base map auto-zooms to where the current view has content · offline base map, no external requests');
   };
   draw();
 });
