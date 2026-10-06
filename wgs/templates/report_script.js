@@ -500,9 +500,10 @@ reveal('painting',(s,c)=>{
       el(s,'rect',{x:bx,y:yy,width:w,height:9,rx:1.5,fill:a.n,opacity:.5});
       (seg[ch]||[]).filter(g=>g.hap===h+1).forEach(g=>{
         const gx=bx+w*g.start/D.chrlen[ch], gw=Math.max(1.2,w*(g.end-g.start)/D.chrlen[ch]);
-        // 来源面板 A 是底色；来源面板 B 的片段用强调色；对照面板的片段用中性色（它们只是对照）
+        // 片段色必须与图例色块同源（lg_n 色块 = 实心 --ancn）：面板 A 实心主色（数据层画成
+        // 页面底色 c.bg 等于不可见）、面板 B 强调色、对照面板中性色（它们只是对照）
         const r=el(s,'rect',{x:gx,y:yy,width:gw,height:9,rx:1,
-                             fill:(_P1&&g.anc===_P1)?a.s:(g.anc===_P0?c.bg:c.fd)});
+                             fill:(_P1&&g.anc===_P1)?a.s:(g.anc===_P0?a.n:c.fd)});
         tip(r,`chr${ch}:${fmt(g.start)}-${fmt(g.end)} · ${g.anc}`)})});
     const cen=D.cen[ch]; if(cen) el(s,'line',{x1:bx+w*cen*1e6/D.chrlen[ch],y1:y-2,x2:bx+w*cen*1e6/D.chrlen[ch],y2:y+22,stroke:c.bg,'stroke-width':1.6});
     // A chromosome with no segments has no inference at all (FLARE left a 0-byte file and step 17
