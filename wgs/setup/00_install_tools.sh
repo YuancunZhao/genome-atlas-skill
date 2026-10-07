@@ -37,8 +37,8 @@ mkdir -p "$TOOLS"
 if [ ! -x "$TOOLS/plink2" ]; then
   ARCH=$(uname -m)
   if [ "$ARCH" = "x86_64" ]; then
-    curl -fsSL --retry 3 -o /tmp/p2.zip https://s3.amazonaws.com/plink2-assets/alpha6/plink2_linux_x86_64_20241222.zip
-    unzip -o -q /tmp/p2.zip -d "$TOOLS" && chmod +x "$TOOLS/plink2"
+    _fetch_tool https://s3.amazonaws.com/plink2-assets/alpha6/plink2_linux_x86_64_20241222.zip "$TOOLS/plink2.zip" 5000000
+    unzip -o -q "$TOOLS/plink2.zip" -d "$TOOLS" && chmod +x "$TOOLS/plink2" && rm -f "$TOOLS/plink2.zip"
   else
     echo "plink2 has no aarch64 build: run setup/00b_build_plink2_arm64.sh"
   fi
@@ -60,7 +60,24 @@ tar xzf "$TOOLS/pharmcat/pharmcat-preprocessor-$PC.tar.gz" -C "$TOOLS/pharmcat"
 [ -d "$TOOLS/Cyrius" ] || git clone -q https://github.com/Illumina/Cyrius.git "$TOOLS/Cyrius"
 [ -d "$TOOLS/SMNCopyNumberCaller" ] || git clone -q https://github.com/Illumina/SMNCopyNumberCaller.git "$TOOLS/SMNCopyNumberCaller"
 "$TOOLS/env/bin/pip" install -q -r "$TOOLS/Cyrius/requirements.txt" -r "$TOOLS/pharmcat/preprocessor/requirements.txt"
-[ -x "$TOOLS/haplogrep3" ] || { curl -fsSL --retry 3 -o /tmp/h3.zip https://github.com/genepi/haplogrep3/releases/latest/download/haplogrep3-3.2.2-linux.zip; unzip -o -q /tmp/h3.zip -d "$TOOLS"; chmod +x "$TOOLS/haplogrep3"; }
+# haplogrep3: the upstream tags are v-prefixed (verified: v3.2.2 ships haplogrep3-3.2.2-linux.zip;
+# today's latest is v3.3.2 whose assets are .tar.gz), so the old latest-download + pinned-filename
+# URL no longer resolves. Pin the tag explicitly and verify the archive.
+HV=${HAPLOGREP3_VERSION:-3.2.2}
+if [ ! -x "$TOOLS/haplogrep3" ]; then
+  _fetch_tool "https://github.com/genepi/haplogrep3/releases/download/v$HV/haplogrep3-$HV-linux.zip" "$TOOLS/haplogrep3.zip" 10000000
+  unzip -o -q "$TOOLS/haplogrep3.zip" -d "$TOOLS" && chmod +x "$TOOLS/haplogrep3" && rm -f "$TOOLS/haplogrep3.zip"
+fi
+# 06_mtdna.py runs `classify --tree phylotree-rcrs@17.2`; haplogrep3 resolves tree IDs only against
+# the trees/ directory next to its own jar (a direct path in --tree is rejected, verified 2026-10-07),
+# so a fresh install must fetch the tree through the tool itself, then prove it actually landed:
+# a missing/partial tree would otherwise surface only as a classify failure much later.
+H3TREE="$TOOLS/trees/phylotree-rcrs/17.2"
+[ -f "$H3TREE/tree.yaml" ] || "$TOOLS/haplogrep3" install-tree phylotree-rcrs@17.2
+[ -f "$H3TREE/tree.yaml" ] && [ -s "$H3TREE/rcrs.fasta" ] || {
+  echo "haplogrep3 tree phylotree-rcrs@17.2 missing tree.yaml/rcrs.fasta under $H3TREE after install-tree" >&2
+  exit 1
+}
 # --- Optional cross-check tools (never part of the pipeline; §4: two tools agreeing is not
 # independent validation, it only rules out a copied-wrong table). Installed into the same conda env
 # as everything else, so one environment reproduces the whole tool set.
