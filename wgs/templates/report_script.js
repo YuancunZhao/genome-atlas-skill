@@ -155,7 +155,7 @@ reveal('chromdepth',(s,c)=>{
 });
 
 
-/* ── 01 Y chain (YFull, from O-F438 down) ── */
+/* ── 01 Y chain (YFull path walked by 05 from the tree root; any haplogroup) ── */
 reveal('ychain',(s,c)=>{
   // Only the last six steps are drawn, with the upstream levels collapsed into a dotted stub. The
   // full 24-level walk put an 831-site root node next to 1-site tips, which crushed every label,
