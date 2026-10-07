@@ -728,7 +728,12 @@ reveal('geomap',(s,c)=>{
     oy=pad.t+(plotH-vp.h*sc)/2-vp.y0*sc;
     const _defs=el(s,'defs',{}), _cp=el(_defs,'clipPath',{id:'geomap_plot'});
     el(_cp,'rect',{x:pad.l,y:pad.t,width:plotW,height:plotH});
-    el(s,'use',{href:'#world_land',x:ox,y:oy,width:360*sc,height:180*sc,fill:c.grid,'fill-opacity':.55,stroke:'none','clip-path':'url(#geomap_plot)'});
+    // 取景放大后 ox/oy 常为负（把世界左移出画布）。use 的 x/y 定位+clip 在个别引擎里不被应用，
+    // 底图整体落回原点而点仍在放大位置（人工复核第 3 条截图：北美居左、点悬大西洋）。定位与裁剪
+    // 改挂到 g 上、use 只用 transform 平移缩放——transform 是所有引擎一致执行的定位方式，几何等价。
+    const _mg=el(s,'g',{'clip-path':'url(#geomap_plot)'});
+    el(_mg,'use',{href:'#world_land',x:0,y:0,width:360,height:180,
+      transform:`translate(${ox} ${oy}) scale(${sc})`,fill:c.grid,'fill-opacity':.55,stroke:'none'});
     const dists=placed.map(r=>Number(r.distance_to_target)).filter(Number.isFinite);
     const dmax=dists.length?Math.max(...dists):0;
     placed.forEach(r=>{

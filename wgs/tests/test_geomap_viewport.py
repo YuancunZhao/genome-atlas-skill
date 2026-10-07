@@ -4,7 +4,8 @@
 分不清。geomapViewport 按已落点包围盒取景：留边距、跨度下限 70×45（保区域上下文，不让
 一两个点放大到街区级）、视口夹在世界边界内；无有效坐标或横跨全球回退全世界。纯函数住在
 模板里不能 import（需要 DOM），沿用 node 抽取法；没有 node 时**跳过并说明**——按 §7，
-未执行不等于通过。
+未执行不等于通过。另附源级断言：底图定位必须走 use transform 而非 use 的 x/y——取景后
+x/y 为负，个别引擎不应用负定位，底图落回原点、点悬大洋（人工复核第 3 条）。
 """
 import pathlib, shutil, subprocess, unittest
 
@@ -48,9 +49,17 @@ ok(edge.x0 + edge.w <= 360 + 1e-9 && inside(edge, 70, 179), 'viewport clamps at 
 // —— 点横跨全球 → 回退全世界（无从放大）
 const world = [].concat(...[-170,-60,0,60,170].map(lon => [-60,0,60].map(lat => ({latitude: lat, longitude: lon}))));
 ok(geomapViewport(world).w === 360, 'points spanning the globe -> whole world');
-// —— 生产路径消费（drawGeoMap 的教训：纯函数可以是死代码）：卡片 draw() 必须取景并 clip 底图
+// —— 生产路径消费（drawGeoMap 的教训：纯函数可以是死代码）：卡片 draw() 必须取景并裁剪底图，
+//    且底图定位必须走 transform——use 的 x/y 定位（取景后常为负）在个别引擎里不被应用，
+//    底图落回原点而点留在放大位置（人工复核第 3 条截图：北美居左、点悬大西洋）。
 ok(/geomapViewport\(placed\)/.test(src), 'geomap draw() derives its viewport from the placed rows');
-ok(/clip-path':'url\(#geomap_plot\)'/.test(src), 'base map is clipped to the plot rect (it overflows when zoomed)');
+ok(src.includes("el(s,'g',{'clip-path':'url(#geomap_plot)'})"),
+   'base map is clipped via the wrapper g (it overflows the plot rect when zoomed)');
+ok(src.includes("el(_mg,'use',{href:'#world_land'") &&
+   src.includes('transform:`translate(${ox} ${oy}) scale(${sc})`'),
+   'base map positions/scales via use transform (equivalent geometry on every engine)');
+ok(!src.includes("'use',{href:'#world_land',x:ox"),
+   'use must not position via x/y: negative x/y is dropped back to the origin by some engines');
 console.log(FAIL.length ? 'FAIL\n' + FAIL.join('\n') : 'PASS');
 process.exit(FAIL.length ? 1 : 0);
 """
