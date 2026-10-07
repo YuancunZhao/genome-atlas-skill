@@ -1,23 +1,21 @@
 #!/bin/bash
-# Main-contig alignment (H5): a hand-made intermediate that Delly's recovered command line depends on.
+# Main-contig alignment feeding Delly (08d): samtools view over the main chromosomes of $CRAM, as an
+# embedded-reference CRAM. Parameters come from the delivered pipeline's own records --
+# `samtools view -T <b37> -O cram,embed_ref=2 -@16` is the surviving @PG chain, and -F 4 / -L are the
+# documented reading (unmapped reads carry no coordinates, so they cannot contribute to SV calling;
+# keeping them quintuples the file for nothing).
 #
-# Delly was invoked on 08_sv/main_contigs/norm.main.cram. That file exists in the delivered work tree, but
-# **how it was made is not recoverable from what is left**: its own @PG chain is gone (the file was
-# overwritten during this investigation and the pre-existing copy did not carry a producer line for this
-# step), and the one @PG chain that does survive -- `samtools view -T <b37> -O cram,embed_ref=2 -@16` --
-# belongs to 00_input/norm.cram, not to this file.
+# Verified against the delivery (2026-09-28): this extract + 08d's `delly sr -g b37 -h 16`
+# reproduced the delivered target.sv.bcf exactly -- 42,909/42,909 records identical on
+# (CHROM,POS,SVTYPE,END), md5 differing only in the BCF ##fileDate line. Evidence:
+# work/wgs/08_sv/delly_retest_20260928/RETEST_NOTES.md. The retest extract (46.8 GB) differs in
+# representation from the 1.24 GB file the delivery left behind, so sizes are not expected to match;
+# what was verified is the SV-calling content.
 #
-# Three attempts here did not reproduce the delivered size, and the arithmetic says why the approach is
-# wrong rather than merely imprecise: the delivered norm.main.cram is 1.24 GB while 00_input/norm.cram is
-# 47 GB, and the main chromosomes are ~92% of the genome, so a full main-contig extract would be tens of
-# gigabytes. A 1.24 GB file is not a whole-extract of anything -- it holds a small fraction of the reads,
-# and what selects them is unknown.
-#
-# The script below therefore implements the documented reading (main chromosomes, matching the reference)
-# and is marked UNVERIFIED. Do not treat its output as equivalent to the delivered file, and do not re-run
-# Delly on it expecting the delivered SV calls. The step needs the original command from whoever ran it.
+# The delivered tree's own norm.main.cram (no provenance marker, 1.24 GB) is the last surviving
+# artifact of the original run, so this script never silently overwrites it: rm it first or set
+# REBUILD_MAIN_CRAM=1 to replace it deliberately.
 set -euo pipefail
-source "$(dirname "$0")/env.sh"
 source "$(dirname "$0")/env.sh"
 S=$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)
 W=$WGS/08_sv/main_contigs; mkdir -p "$W" "$WGS/logs"; cd "$W"
@@ -31,20 +29,10 @@ awk 'BEGIN{OFS="\t"} $1 ~ /^([0-9]+|X|Y|MT|M)$/ {print $1, 0, $2}' "$FAI" > main
 n=$(wc -l < main_contigs.bed)
 [ "$n" -ge 24 ] || { echo "expected at least 24 main contigs, got $n" >&2; exit 1; }
 
-# 格式与压缩参数取自交付件自身的 @PG 记录（不是猜的）：
-#   samtools view -T <b37 fasta> -O cram,embed_ref=2 -@16
-# embed_ref=2 把参考序列嵌进 CRAM，这是交付件只有 1.24 GB 的原因；不嵌入时同样内容要 5-8 GB
-# （-b 出 BAM 8.2 GB、-C 默认 5.2-6.9 GB 都实测过）。文件更大本身不算错，但既然 @PG 明写了参数，
-# 就没有理由产出一个与交付件不同的文件——下游若按大小或按"是否需要外部参考"判断，差异会误导。
-# -F 4 排除未比对的读段：-L 是"与区域重叠即取"，未比对的读段没有坐标、会因重叠判断被一并带出，
-# 实测使输出达到交付件的 5 倍（6.2 GB vs 1.24 GB）。主 contig 提取的目的是让坐标与参考一致，
-# 而未比对的读段不带坐标，对 SV 调用没有贡献。
-# 覆盖保护（复审 P0）：本脚本的生成方法**未经与交付件比对**，所以它绝不去覆盖一份没有 provenance
-# 标记的 norm.main.cram —— 那多半就是交付流程留下的原始文件，而且是这一步仅存的证据。上一次调查中
-# 原件已被重跑覆盖过（大小从 1.24 GB 变成 29 GB），恢复不了；这里让"覆盖"必须由人明确要求。
+# 覆盖保护（见头注释）：不带 provenance 标记的现存 norm.main.cram 视为交付原件，不默默替换。
 if [ -s norm.main.cram ] && [ ! -f norm.main.cram.provenance.json ]; then
   echo "refusing to overwrite the existing norm.main.cram: it carries no provenance marker, so it is" >&2
-  echo "most likely the delivered file and this script's method is not verified against it." >&2
+  echo "most likely the delivered original from the run this pipeline reconstructs." >&2
   echo "To replace it deliberately: rm norm.main.cram && re-run, or set REBUILD_MAIN_CRAM=1." >&2
   [ "${REBUILD_MAIN_CRAM:-0}" = "1" ] || exit 0
   echo "REBUILD_MAIN_CRAM=1: overwriting anyway" >&2
@@ -53,14 +41,16 @@ fi
 samtools view -T "$REF" -@ "${THREADS:-8}" -O cram,embed_ref=2 -F 4 -L main_contigs.bed \
   -o norm.main.cram "$CRAM" 2> "$WGS/logs/main_contigs.log"
 
-# 产出即打标：下游据此知道这份输入**没有**与交付件比对过。
+# 产出即记录本次运行做了什么（生产者/命令/输入/时间）。“是否复现某次历史交付”是复测证据
+# （头注释），不是每次运行都能重新主张的运行时断言——新样本的 provenance 只如实描述自身。
 cat > norm.main.cram.provenance.json <<JSON
 {
   "producer": "08a_main_contigs.sh",
-  "verified_against_delivered": false,
-  "note": "The delivered norm.main.cram could not be reproduced (see this script's header). This file was produced by the documented reading of the step and has NOT been shown equivalent to the delivered one; SV calls computed on it are not the delivered SV calls.",
-  "cram": "$CRAM",
-  "bed": "main_contigs.bed"
+  "command": "samtools view -T $REF -@ ${THREADS:-8} -O cram,embed_ref=2 -F 4 -L main_contigs.bed -o norm.main.cram $CRAM",
+  "input_cram": "$CRAM",
+  "bed": "main_contigs.bed",
+  "contigs": $n,
+  "date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 }
 JSON
 samtools index norm.main.cram
