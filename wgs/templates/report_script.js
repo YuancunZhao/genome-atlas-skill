@@ -63,6 +63,35 @@ F.cvn=fmt(D.clinvar_total); F.cvd=D.clinvar_date; F.lof=D.lof.all; F.lofr=D.lof.
 F.rho_i=D.prs_rho.imputed; F.rho_s=D.prs_rho.subset; F.sv=fmt(D.sv_total); F.rohn=D.roh_stats.n; F.rohmb=D.roh_stats.total_mb; F.rohmax=D.roh_stats.max_mb;
 F.yterm=((D.lineages||{}).y||{}).reported_hg||D.y_terminal||"—"; F.yformed=(()=>{const p=_sp((D.lineages||{}).y||{})||[];return p.length?fmt(p[p.length-1].formed):"—";})(); F.mthg=((D.lineages||{}).mt||{}).reported_hg||((D.mt||{}).hg)||"—"; F.mtq=((D.lineages||{}).mt||{}).call_quality||((D.mt||{}).quality)||"—"; F.mtn=((D.mt||{}).found||[]).length; F.mtp=((D.mt||{}).private||[]).length;
 
+/* AN6-③（纯函数，与回归测试同源）：谱系"已知发现"观测 → 统一地点词汇（与地理卡同名字段：
+   latitude/longitude/locality/precision），缺坐标如实分桶不造点；relation/publication/报告年代
+   原样透传——这些观测是该支系的已发表记录，不是本样本的坐标。 */
+function lineageObsPoints(doc){
+  const out={points:[],unlocated:[]};
+  (((doc||{}).history||{}).observations||[]).forEach(o=>{
+    const c=(o||{}).coordinates||{}, dr=((o||{}).date_range||{});
+    const rec={key:String(o.record_id||''), label:String(o.locality||o.record_id||''),
+      latitude:c.latitude, longitude:c.longitude, locality:String(o.locality||''),
+      precision:String(o.precision||'unknown'), relation:String(o.relation||''),
+      date_mean:dr.mean, date_min:dr.min, date_max:dr.max,
+      publication:String(o.publication||'')};
+    if(geoValid(c.latitude,c.longitude)) out.points.push(rec); else out.unlocated.push(rec);
+  });
+  return out;
+}
+
+/* AN6-③（纯函数）：树时间线节点——YFull formed 优先；formed 缺失（含 0/n-a 解析出的 0）退
+   TMRCA 并如实记基准；两者都没有的节点不进时间线（phylotree 的 mt 节点就没有年代）。
+   formed/TMRCA 是树上分叉时间的估计，与观测的报告年代是两套基准，渲染时分开标注。 */
+function lineageTimelineNodes(path){
+  return (path||[]).map(p=>{
+    const f=Number(p.formed), t=Number(p.tmrca);
+    if(Number.isFinite(f)&&f>0) return {node:String(p.node||''), year:f, basis:'formed'};
+    if(Number.isFinite(t)&&t>0) return {node:String(p.node||''), year:t, basis:'tmrca'};
+    return null;
+  }).filter(Boolean);
+}
+
 /* ── AN6 父母系卡片：判定、分支时间线、折叠的背景层、发现记录与路线状态 ─────────────
    树的分叉不是地理迁移，formed/TMRCA 也不是迁移日期（§7）：时间线只画树上的时间，发现记录与
    路线分开列；没有来源路线时明确说"只有分布"，不为任何支系编故事。背景（祖先大支系）默认折叠。 */
@@ -71,20 +100,47 @@ const renderLineageCards=()=>{
   const box=document.getElementById('linecard'); if(!box) return;
   const L=D.lineages||{}, Z=zh();
   const timeline=(path,width)=>{
-    const pts=path.map(p=>({n:p.node,f:Number(p.formed),t:Number(p.tmrca)})).filter(p=>Number.isFinite(p.f));
-    if(!pts.length) return '';
-    const hi=Math.max(...pts.map(p=>p.f)), lo=0, X=v=>18+(width-36)*(1-Math.min(v,hi)/hi);
-    const marks=pts.slice(-8).map(p=>`<line x1="${X(p.f).toFixed(1)}" y1="12" x2="${X(p.f).toFixed(1)}" y2="30" stroke="currentColor" stroke-width=".7" opacity=".5"/>`).join('');
+    const nodes=lineageTimelineNodes(path);
+    if(!nodes.length) return '';
+    const hi=Math.max(...nodes.map(n=>n.year)), X=v=>18+(width-36)*(1-Math.min(v,hi)/hi);
+    const marks=nodes.slice(-8).map(n=>`<line x1="${X(n.year).toFixed(1)}" y1="12" x2="${X(n.year).toFixed(1)}" y2="30" stroke="currentColor" stroke-width=".7" opacity=".5"><title>${_esc(n.node)} ≈${fmt(n.year)} YBP · ${n.basis==='tmrca'?(Z?'TMRCA（formed 未给）':'TMRCA (formed not given)'):'formed'}</title></line>`).join('');
     const ticks=[0,Math.round(hi/2),hi].map(v=>`<text x="${X(v).toFixed(1)}" y="44" font-size="7" text-anchor="middle" fill="currentColor" opacity=".6">${fmt(v)}</text>`).join('');
     return `<svg viewBox="0 0 ${width} 52" width="100%" height="52" role="img">
       <line x1="18" y1="30" x2="${width-18}" y2="30" stroke="currentColor" stroke-width="1" opacity=".45"/>${marks}${ticks}
-      <text x="18" y="9" font-size="7" fill="currentColor" opacity=".6">${Z?'越靠左越古老（年）':'older (years) to the left'}</text></svg>`;
+      <text x="18" y="9" font-size="7" fill="currentColor" opacity=".6">${Z?'树上分叉时间（formed/TMRCA 估计，YBP，越左越古老；不是迁移时间）':'tree split times only (formed/TMRCA estimates, YBP; not migration dates)'}</text></svg>`;
+  };
+  // AN6-③ 发现地图 + 逐条观测：观测是该支系的已发表记录，不是本样本坐标；点=有坐标观测，
+  // 缺坐标如实计数不落点；没有带来源的迁移路线就不画任何箭头（缺证据不画迁移）。底图复用
+  // 全局 #world_land，定位走 use transform（845ead2 的教训），放大取景复用 geomapViewport。
+  const REL_ZH={exact:'精确匹配',descendant:'下游支系',ancestor:'上游支系'}, REL_EN={exact:'exact',descendant:'descendant',ancestor:'ancestor'};
+  const dtOf=r=>{const d=Number(r.date_mean);
+    if(!Number.isFinite(d)) return Z?'年代未知':'no date';
+    if(d<=0) return Z?'现代个体':'modern';
+    const lo=Number(r.date_min), hi=Number(r.date_max);
+    const rng=(Number.isFinite(lo)||Number.isFinite(hi))?`（${Number.isFinite(lo)?fmt(Math.round(lo)):'?'}–${Number.isFinite(hi)?fmt(Math.round(hi)):'?'}）`:'';
+    return `≈${fmt(Math.round(d))} BP${rng}`;};
+  const obsRow=r=>`<div style="font-size:10.5px;opacity:.85">· ${_esc(r.key)} — ${_esc(r.locality)} · ${Z?REL_ZH[r.relation]||r.relation:REL_EN[r.relation]||r.relation} · ${dtOf(r)} · ${Z?'报告年代':'reported date'} · ${_esc(r.publication)||'—'}</div>`;
+  const obsMap=(pts,kind)=>{
+    if(!pts.length) return '';
+    const VBW=420,VBH=150,pl=6,pt0=6,pw=VBW-2*pl,ph=VBH-2*pt0;
+    const vp=geomapViewport(pts);
+    const sc=Math.min(pw/vp.w,ph/vp.h), ox=pl+(pw-vp.w*sc)/2-vp.x0*sc, oy=pt0+(ph-vp.h*sc)/2-vp.y0*sc;
+    const dots=pts.map(r=>{const q=geoXY(r.latitude,r.longitude), x=(ox+q.x*sc).toFixed(1), y=(oy+q.y*sc).toFixed(1);
+      const tt=`${_esc(r.key)} · ${_esc(r.locality)} · ${dtOf(r)} · ${_esc(r.publication)}`;
+      return r.precision==='region'
+        ? `<rect x="${(+x-2.2).toFixed(1)}" y="${(+y-2.2).toFixed(1)}" width="4.4" height="4.4" rx="1" fill="currentColor" opacity=".85"><title>${tt}</title></rect>`
+        : `<circle cx="${x}" cy="${y}" r="2.6" fill="currentColor" opacity=".85"><title>${tt}</title></circle>`;}).join('');
+    return `<svg viewBox="0 0 ${VBW} ${VBH}" width="100%" height="${VBH}" role="img" style="margin-top:6px">
+      <defs><clipPath id="clip-lineage-${kind}"><rect x="${pl}" y="${pt0}" width="${pw}" height="${ph}"/></clipPath></defs>
+      <g clip-path="url(#clip-lineage-${kind})"><use href="#world_land" x="0" y="0" width="360" height="180" transform="translate(${ox.toFixed(1)} ${oy.toFixed(1)}) scale(${sc.toFixed(4)})" fill="currentColor" fill-opacity=".18"/></g>${dots}</svg>
+      <div style="font-size:9.5px;opacity:.65;margin-top:2px">${Z?'点 = 该支系的已发表观测（非本样本坐标）· 圆点 = 精度未知，方框 = 地区级 · 年代为数据集报告年代，与树上 formed/TMRCA 估计分开标注 · 无带来源迁移路线，不画箭头':'points = published observations of this branch (not this sample) · circles = unknown precision, squares = region-level · dates are dataset-reported, kept apart from tree formed/TMRCA estimates · no sourced migration route, so no arrows'}</div>`;
   };
   const card=(kind,lin,label_zh,label_en)=>{
     if(!lin) return '';
     const hg=_esc(lin.reported_hg||'—'), cons=lin.conservative_hg?_esc(lin.conservative_hg):'';
     const path=lin.supported_path||[], unc=(lin.uncertain_nodes||[]).map(u=>_esc(u.node||u));
-    const hist=lin.history||{}, obs=hist.observations||[], routes=hist.routes||[];
+    const hist=lin.history||{}, routes=hist.routes||[], op=lineageObsPoints(lin);
+    const nObs=op.points.length+op.unlocated.length;
     const state=_esc(lin.state||'ok'), why=_esc(lin.reason_code||'');
     const anc=path.filter(p=>!p.rank||true).slice(0,-4).map(p=>_esc(p.node)).filter(Boolean);
     const tail=path.slice(-4).map(p=>_esc(p.node));
@@ -97,8 +153,11 @@ const renderLineageCards=()=>{
       <div style="font-size:11px;margin-top:4px">${Z?'末端四级':'last four levels'}: ${tail.join(' → ')}${unc.length?` · ${Z?'支持位点不足':'weakly supported'}: ${unc.join('、')}`:''}</div>
       <details style="margin-top:6px"><summary style="cursor:pointer;font-size:11px;opacity:.8">${Z?'背景（更早的大支系）':'background (earlier major branches)'}</summary>
         <div style="font-size:11px;margin-top:4px;opacity:.8">${anc.join(' → ')||'—'}</div></details>
-      <div style="font-size:11px;margin-top:6px">${Z?'已发表发现记录':'published records'}: ${obs.length}${obs.length?'':'（'+_esc(hist.history_reason_code||'')+'）'} ·
+      <div style="font-size:11px;margin-top:6px">${Z?'已发表发现记录':'published records'}: ${nObs}${nObs?'':'（'+_esc(hist.history_reason_code||'')+'）'} ·
         ${Z?'迁移路线':'migration routes'}: ${routes.length}${routes.length?'':(Z?'（无有来源的路线，本卡只呈现分布）':' (no sourced route; distribution only)')}</div>
+      ${obsMap(op.points,kind)}
+      ${op.points.map(obsRow).join('')}
+      ${op.unlocated.length?`<div style="font-size:10.5px;opacity:.7">${Z?`另有 ${op.unlocated.length} 条观测无坐标，不落点（已计入上方总数）`:`${op.unlocated.length} observation(s) without coordinates are not placed (counted above)`}</div>`:''}
     </div>`;
   };
   box.innerHTML = card('y', L.y, '父系', "father's line") + card('mt', L.mt, '母系', "mother's line");
