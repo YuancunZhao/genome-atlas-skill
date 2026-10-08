@@ -609,6 +609,49 @@ else:
           "the f3 panel is skipped", file=sys.stderr)
     D["f3"] = None
 # --- AN5（§7 报告契约）：把各分析的结构化结果组装成 D.ancestry / D.lineages。
+def _attach_kg_group_locations(analyses, loc_rows):
+    """AN6 增强（1000G 位置）：给 1000G 分析的**人群组**补采样点坐标。
+
+    坐标来自 panel/kg_population_locations.tsv（IGSR phase3 人群描述 + 采样地，region 级）：
+    一个人群一个点，代表参考样本的采样/来源地，不是任何个体出生地，也不是目标样本的位置。
+    组记录（个体）不落坐标——IGSR 不发布个体地理信息，给个体编点就是造数据。只补、不覆盖：
+    组上已有的坐标（将来 04b 若自带）不动；面板里没有的人群保持无坐标，由
+    group_location_counts 如实计数，不假充全定位。返回定位的组数，供日志核对。
+    """
+    by_pop = {}
+    for r in loc_rows or []:
+        pop = str(r.get("source_id", "")).strip()
+        try:
+            lat, lon = float(r.get("latitude")), float(r.get("longitude"))
+        except (TypeError, ValueError):
+            continue
+        if not (-90 <= lat <= 90 and -180 <= lon <= 180 and pop):
+            continue
+        by_pop[pop] = (r, lat, lon)
+    n_located = 0
+    for a in analyses:
+        if str(a.get("dataset", "")) != "1000G":
+            continue
+        located = unlocated = 0
+        for g in a.get("groups") or []:
+            hit = by_pop.get(str(g.get("group_id") or g.get("label") or "").strip())
+            if hit is None:
+                unlocated += 1
+                continue
+            row, lat, lon = hit
+            if g.get("latitude") is None and g.get("longitude") is None:
+                g["latitude"], g["longitude"] = lat, lon
+                g["location_id"] = str(row.get("location_id") or f"KG:{row.get('source_id')}")
+                g["locality"] = str(row.get("locality") or "")
+                g["location_precision"] = str(row.get("precision") or "region")
+                _zh = str(row.get("label_zh") or "").strip()
+                if _zh:
+                    g["name_zh"] = _zh
+            located += 1
+        a["group_location_counts"] = {"located": located, "unlocated": unlocated}
+        n_located += located
+    return n_located
+
 # 这是模板与 AN6 要消费的形状；旧键（ho_*/near_eas/…）只作为尚未迁移的视图的过渡，不再各自算一套。
 _kg_state, _kg_reason, _kg_doc = _analysis_state(
     W/"04_ancestry",
@@ -627,6 +670,13 @@ for _doc, _st, _rs in ((_AADR_DOC, _AADR_STATE, _AADR_REASON), (_kg_doc, _kg_sta
                               ("analysis_id", "dataset", "reference_release", "scope", "components", "metric",
                                "thresholds", "counts", "target", "records", "groups", "sources")}
                              | {"state": _st, "reason_code": _rs})
+# AN6 增强（§3.2 P1"1000G 没有 records"）：1000G 参考空间的人群组补采样点（region 级）。
+# 04b 不动（manifest/参数不掺显示层）；30 组装时附加，与 AADR 的 location_precision 同一模式。
+_kgl = _read_tsv(pathlib.Path(__file__).resolve().parents[1] / "panel" / "kg_population_locations.tsv",
+                 comment="#", keep_default_na=False)
+_n_kgl = _attach_kg_group_locations(_anc_analyses,
+                                    _kgl.to_dict("records") if _kgl is not None else [])
+print(f"30: kg group sampling-site locations attached for {_n_kgl} groups", file=sys.stderr)
 # 复审 AN6-P1：默认分析原先硬编码挑 AADR。一个只启用 1000G（或禁用了 AADR）的样本，报告仍会宣称
 # 默认分析是 AADR——那是个不存在于本次运行里的选择。改为按**数据顺序取第一个 state=ok 的分析**：
 # 顺序即配置里的启用顺序，state 决定它这次是否真的产出。全都不可用时留空，由消费端如实处理。

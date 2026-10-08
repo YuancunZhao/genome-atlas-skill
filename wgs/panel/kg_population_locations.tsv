@@ -1,0 +1,36 @@
+# 1000 Genomes phase3 人群采样地（AN6 增强：1000G 参考空间的地图点位）。
+# 一个人群一行、一个点：这个点代表**参考样本的采样/来源地**（人群级，region 精度），不是任何
+# 个体出生地，更不是目标样本的位置。IGSR 只发布人群描述，不发布个体地理信息——因此 04b 的
+# 组记录（个体）永远不落坐标，只有人群组拿这里的采样点。
+# 描述本身给出城市的人群（如 Han Chinese in Beijing, China）用城市坐标；描述只到国家/区域的
+# 人群用该区域质心，note 里如实写明，不猜城市。离散人群（STU/ITU 在英国采样）坐标在采样地，
+# 不在祖源地名。人群描述来源：IGSR 数据门户 1000G phase3 人口表（下方 source_url），坐标为
+# 常规地理编码（城市坐标/区域质心），人工整理于 2026-10-08；precision 一律 region。
+# 列：dataset	source_id	location_id	label_zh	label_en	locality	latitude	longitude	precision	source_url	note
+dataset	source_id	location_id	label_zh	label_en	locality	latitude	longitude	precision	source_url	note
+1000G	CHB	KG:CHB	北京汉族	Han Chinese in Beijing, China	Beijing, China	39.9042	116.4074	region	https://www.internationalgenome.org/data-portal/population	superpop=EAS；描述含采样城市
+1000G	JPT	KG:JPT	东京日本人	Japanese in Tokyo, Japan	Tokyo, Japan	35.6895	139.6917	region	https://www.internationalgenome.org/data-portal/population	superpop=EAS；描述含采样城市
+1000G	CHS	KG:CHS	南方汉族	Southern Han Chinese, China	China (south)	26.0	112.5	region	https://www.internationalgenome.org/data-portal/population	superpop=EAS；描述未公布采样城市，坐标=华南地区质心；"南方"是族源认同，不等于采样点已知
+1000G	CDX	KG:CDX	傣族（西双版纳）	Chinese Dai in Xishuangbanna, China	Xishuangbanna, Yunnan, China	22.0017	100.7979	region	https://www.internationalgenome.org/data-portal/population	superpop=EAS；描述含采样地区（景洪一带）
+1000G	KHV	KG:KHV	京族（胡志明市）	Kinh in Ho Chi Minh City, Vietnam	Ho Chi Minh City, Vietnam	10.8231	106.6297	region	https://www.internationalgenome.org/data-portal/population	superpop=EAS；描述含采样城市
+1000G	CEU	KG:CEU	犹他州居民（北/西欧裔）	Utah Residents (CEPH) with Northern and Western European Ancestry	Utah, USA	40.7608	-111.8910	region	https://www.internationalgenome.org/data-portal/population	superpop=EUR；描述含采样州（盐湖城一带）
+1000G	TSI	KG:TSI	托斯卡纳人（意大利）	Toscani in Italia	Tuscany, Italy	43.45	11.15	region	https://www.internationalgenome.org/data-portal/population	superpop=EUR；描述只到意大利，坐标=托斯卡纳大区质心
+1000G	FIN	KG:FIN	芬兰人	Finnish in Finland	Finland	62.5	26.0	region	https://www.internationalgenome.org/data-portal/population	superpop=EUR；描述只到国家，坐标=芬兰质心（非采样城市）
+1000G	GBR	KG:GBR	英格兰与苏格兰的英国人	British in England and Scotland	England and Scotland, UK	54.5	-2.8	region	https://www.internationalgenome.org/data-portal/population	superpop=EUR；描述只到英格兰+苏格兰，坐标=该区域质心
+1000G	IBS	KG:IBS	伊比利亚人（西班牙）	Iberian Population in Spain	Spain	40.2	-3.7	region	https://www.internationalgenome.org/data-portal/population	superpop=EUR；描述只到国家，坐标=西班牙质心
+1000G	YRI	KG:YRI	约鲁巴人（伊巴丹）	Yoruba in Ibadan, Nigeria	Ibadan, Nigeria	7.3775	3.9470	region	https://www.internationalgenome.org/data-portal/population	superpop=AFR；描述含采样城市
+1000G	LWK	KG:LWK	卢希亚人（Webuye）	Luhya in Webuye, Kenya	Webuye, Kenya	0.6167	34.7667	region	https://www.internationalgenome.org/data-portal/population	superpop=AFR；描述含采样城镇
+1000G	GWD	KG:GWD	曼丁卡人（冈比亚西部）	Gambian in Western Divisions, Mandinka	Western Gambia	13.25	-16.65	region	https://www.internationalgenome.org/data-portal/population	superpop=AFR；描述含采样分区
+1000G	MSL	KG:MSL	门德人（塞拉利昂）	Mende in Sierra Leone	Sierra Leone	8.45	-11.75	region	https://www.internationalgenome.org/data-portal/population	superpop=AFR；描述只到国家，坐标=塞拉利昂质心；门德人聚居于东南部
+1000G	ESN	KG:ESN	埃桑人（尼日利亚）	Esan in Nigeria	Nigeria (Edo State)	6.40	6.00	region	https://www.internationalgenome.org/data-portal/population	superpop=AFR；描述只到国家，坐标=埃多州一带（区域质心，非采样城市）
+1000G	ASW	KG:ASW	非裔美国人（西南部）	Americans of African Ancestry in SW USA	Southwestern USA	32.8	-97.3	region	https://www.internationalgenome.org/data-portal/population	superpop=AFR；描述只到美国西南部，坐标=该区域质心；离散人群，采样地非祖源地
+1000G	ACB	KG:ACB	非洲加勒比人（巴巴多斯）	African Caribbeans in Barbados	Barbados	13.18	-59.55	region	https://www.internationalgenome.org/data-portal/population	superpop=AFR；描述含采样岛屿
+1000G	MXL	KG:MXL	墨西哥裔（洛杉矶）	Mexican Ancestry in Los Angeles, CA	Los Angeles, CA, USA	34.0522	-118.2437	region	https://www.internationalgenome.org/data-portal/population	superpop=AMR；描述含采样城市；离散人群
+1000G	PUR	KG:PUR	波多黎各人	Puerto Ricans in Puerto Rico	Puerto Rico	18.22	-66.59	region	https://www.internationalgenome.org/data-portal/population	superpop=AMR；描述含采样岛屿
+1000G	CLM	KG:CLM	哥伦比亚人（麦德林）	Colombians in Medellín, Colombia	Medellín, Colombia	6.2442	-75.5812	region	https://www.internationalgenome.org/data-portal/population	superpop=AMR；描述含采样城市
+1000G	PEL	KG:PEL	秘鲁人（利马）	Peruvians in Lima, Peru	Lima, Peru	-12.0464	-77.0428	region	https://www.internationalgenome.org/data-portal/population	superpop=AMR；描述含采样城市
+1000G	GIH	KG:GIH	古吉拉特印度裔（休斯顿）	Gujarati Indian in Houston, TX	Houston, TX, USA	29.7604	-95.3698	region	https://www.internationalgenome.org/data-portal/population	superpop=SAS；描述含采样城市；离散人群，采样地非祖源地
+1000G	PJL	KG:PJL	旁遮普人（拉合尔）	Punjabi in Lahore, Pakistan	Lahore, Pakistan	31.5497	74.3436	region	https://www.internationalgenome.org/data-portal/population	superpop=SAS；描述含采样城市
+1000G	BEB	KG:BEB	孟加拉人	Bengali in Bangladesh	Bangladesh	23.70	90.40	region	https://www.internationalgenome.org/data-portal/population	superpop=SAS；描述只到国家，坐标=孟加拉国质心
+1000G	STU	KG:STU	斯里兰卡泰米尔人（英国）	Sri Lankan Tamil in the UK	United Kingdom	54.2	-2.9	region	https://www.internationalgenome.org/data-portal/population	superpop=SAS；离散人群：在英国采样，坐标=英国质心，不在斯里兰卡
+1000G	ITU	KG:ITU	泰卢固印度裔（英国）	Indian Telugu in the UK	United Kingdom	54.2	-2.9	region	https://www.internationalgenome.org/data-portal/population	superpop=SAS；离散人群：在英国采样，坐标=英国质心，不在印度
