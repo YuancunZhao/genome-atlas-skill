@@ -674,6 +674,24 @@ function geomapViewport(rows, minW, minH, padFrac) {
            y0: Math.max(0, Math.min(180 - h, cy - h / 2)), w, h };
 }
 
+/* AN6 增强②（1000G 位置）：1000G 参考空间没有个体记录（04b 只发布人群组），地图点改为
+   **人群采样点**——一组一点（30 从 panel/kg_population_locations.tsv 附到组上，region 级）。
+   点代表参考人群的采样/来源地，不代表任何个体出生地，更不是目标样本的位置；面板里没有
+   坐标的人群保持不落点，由 unlocated 计数如实交代。字段与记录点同词表
+   （latitude/longitude/locality/location_precision），取景/渲染/精度提示因此同一套。纯函数。 */
+function kgGroupPoints(a){
+  const out={points:[],unlocated:[]};
+  analysisGroups(a).forEach(g=>{
+    if(geoValid(g.latitude,g.longitude)){
+      out.points.push({key:String(g.location_id||('KG:'+g.group_id)), label:String(g.label||g.group_id||''),
+        latitude:g.latitude, longitude:g.longitude, locality:String(g.locality||''),
+        precision:String(g.location_precision||'region'), n:g.n, d:Number(g.distance_mean),
+        name_zh:g.name_zh||'', kind:String(g.kind||'modern'), group:g});
+    } else out.unlocated.push(g);
+  });
+  return out;
+}
+
 /* 共用地图：底图 + 点 + 选择联动。现代图与古代图只是传入的 locations 不同——同一段绘制逻辑，
    避免两个视图对"精度""无坐标"给出不一致的处理。返回 { placed, unplaced } 计数。 */
 /* AN6 复审：drawGeoMap 自引入以来没有任何调用方（geomap 卡片自绘），却留着一套与卡片不同的
@@ -683,14 +701,18 @@ function geomapViewport(rows, minW, minH, padFrac) {
    位置是**参考样本的来源地**，不是把目标样本投成某个坐标（§7）。筛选只是换一个查看已算好的
    结果：不重建 PCA，也不在前端重算任何排名。时间轴左古右今，同时给出 BP 与公元（BP 基准 1950）。*/
 reveal('geomap',(s,c)=>{
-  // 复审 AN6-P1：原先固定优先 AADR，不看数据说哪一份是默认。现在按 default_analysis_id 选；它为空
+  // 复审 AN6-P1：原先固定优先 AADR，不看数据说哪份是默认。现在按 default_analysis_id 选；它为空
   // （没有任何分析处于 ok）时不画，而不是拿另一份数据集的位置冒充当前结果。
   const A=(D.ancestry&&D.ancestry.analyses)||[], Z=zh();
   const _defId=(D.ancestry&&D.ancestry.default_analysis_id)||'';
-  const a=(_defId&&A.find(x=>String(x.analysis_id)===String(_defId)))|| (_defId?null:A[0]) || {};
-  const groups=analysisGroups(a);
-  const rankedAll=groups.filter(g=>g.rank&&!g.small_group)
-    .sort((x,y)=>(x.rank-y.rank)||(Number(x.distance_mean||0)-Number(y.distance_mean||0)));
+  // 参考空间切换（AN6 增强②）：每个 state=ok 的分析即一个可选空间（AADR 古今参照 / 1000G 全球
+  // / 1000G 区域），默认下标取 default_analysis_id；切换只换一批**已算好的**结果查看，不重算
+  // 任何统计。只有一个空间（或全不可用）时不显示切换行，单空间报告与原实现一致。
+  const SPACES=A.filter(x=>String(x.state||'')==='ok');
+  const spaceLabel=(x)=>String((x||{}).dataset||'')==='1000G'
+    ?(String((x||{}).scope||'')==='regional'?(Z?'1000G 区域参考':'1000G regional'):(Z?'1000G 全球参考':'1000G global'))
+    :(Z?'AADR 古今参照':'AADR modern + ancient');
+  let sa=Math.max(0,SPACES.findIndex(x=>String(x.analysis_id)===String(_defId)));
   const VB={w:900,h:470}, pad={l:26,t:26}, mapH=300;
   const plotW=VB.w-2*pad.l, plotH=mapH-2*pad.t;
   // sc/ox/oy 随 draw() 里的取景变（见下）；初值=全世界，内容为空时兜底。
@@ -711,14 +733,35 @@ reveal('geomap',(s,c)=>{
   const draw=()=>{
     clearEl(s);
     const R=RANGES[cur];
-    // 选取走 geomapRows/kindView（与测试同一份纯函数）：不合格记录不进视图；"全部"下无年代者
-    // 也显示——现代参考个体普遍没有年代，不能被古代时间轴藏起来。
-    const { inRange, outRange, noDate } = geomapRows(kindView(a.records, kv), R.l, R.h);
+    // 空间随切换变（AN6 增强②）：a/groups/排名每帧按当前空间重取；无空间可用时退回原来的
+    // default/首分析兜底（不拿别的数据集冒充）。
+    const a=(SPACES.length?SPACES[sa]:((_defId&&A.find(x=>String(x.analysis_id)===String(_defId)))||A[0]))||{};
+    const kgSpace=String(a.dataset||'')==='1000G';
+    const groups=analysisGroups(a);
+    const rankedAll=groups.filter(g=>g.rank&&!g.small_group)
+      .sort((x,y)=>(x.rank-y.rank)||(Number(x.distance_mean||0)-Number(y.distance_mean||0)));
+    // 统一点对象（AN6 增强②）：AADR 用记录（坐标来自 .anno，key=record_id），1000G 用人群采样点
+    // （kgGroupPoints，key=location_id，带 n 与组均值距离）。两者字段同词表，下面的取景/渲染/
+    // 精度提示因此同一套；kg 空间无年代，年龄范围/时间轴不参与。
+    let placed=[], unplaced=0, inRange=0, outRange=0, noDate=0;
+    if(kgSpace){
+      const gp=kgGroupPoints(a);
+      placed=kindView(gp.points,kv); unplaced=gp.unlocated.length; inRange=placed.length;
+    }else{
+      // 选取走 geomapRows/kindView（与测试同一份纯函数）：不合格记录不进视图；"全部"下无年代者
+      // 也显示——现代参考个体普遍没有年代，不能被古代时间轴藏起来。
+      const sel=geomapRows(kindView(a.records||[], kv), R.l, R.h);
+      inRange=sel.inRange.length; outRange=sel.outRange.length; noDate=sel.noDate.length;
+      placed=sel.inRange.filter(r=>geoValid(r.latitude,r.longitude)).map(r=>({
+        key:String(r.record_id||''), label:String(r.source_population_id||r.label||''),
+        latitude:r.latitude, longitude:r.longitude, locality:String(r.locality||''),
+        precision:r.location_precision, date:r.date_mean_bp, dist:Number(r.distance_to_target),
+        n:null, group:null, rec:r}));
+      unplaced=sel.inRange.filter(r=>!geoValid(r.latitude,r.longitude)).length;
+    }
     // 分层视图下排名/前五名/列表也只看该层：现代主图标现代群体，古代图标古代群体。
     const ranked=(kv==='all'?rankedAll:rankedAll.filter(g=>String(g.kind||'')===kv));
     const top5=ranked.slice(0,5).map(g=>String(g.label));
-    const unplaced=inRange.filter(r=>!geoValid(r.latitude,r.longitude)).length;
-    const placed=inRange.filter(r=>geoValid(r.latitude,r.longitude));
     // 取景随内容（geomapViewport，与测试同源）：视口装下当前全部已落点并留边距，点因此必在
     // 绘图区内；放大后底图超出绘图区的部分 clip 掉。视口即该视图内容的诚实范围——不画没数据
     // 的大洲，也没有把点投出地图。
@@ -734,17 +777,17 @@ reveal('geomap',(s,c)=>{
     const _mg=el(s,'g',{'clip-path':'url(#geomap_plot)'});
     el(_mg,'use',{href:'#world_land',x:0,y:0,width:360,height:180,
       transform:`translate(${ox} ${oy}) scale(${sc})`,fill:c.grid,'fill-opacity':.55,stroke:'none'});
-    const dists=placed.map(r=>Number(r.distance_to_target)).filter(Number.isFinite);
+    const dists=placed.map(p=>Number(p.dist)).filter(Number.isFinite);
     const dmax=dists.length?Math.max(...dists):0;
-    placed.forEach(r=>{
-      const p=P(r), lab=String(r.source_population_id||r.label||''), rid=String(r.record_id||'');
-      const isSel=sel&&String(r.record_id||'')===sel;
+    placed.forEach(pt=>{
+      const p=P(pt), lab=String(pt.label||''), rid=String(pt.key||'');
+      const isSel=sel&&String(pt.key||'')===sel;
       const isTop=top5.includes(lab)||isSel;
       // 精度未知不冒充遗址级（AN6）：site/region 是元数据给的判定，缺了就是未知——形状仍可画，
-      // 但提示与图例如实说"未知"，不因"有坐标"就当成 site。
-      const prec=r.location_precision, site=prec==='site', region=prec==='region';
+      // 但提示与图例如实说"未知"，不因"有坐标"就当成 site。1000G 人群采样点一律 region（30 附）。
+      const prec=pt.precision, site=prec==='site', region=prec==='region';
       const precTxt=site?(Z?'遗址级':'site'):(region?(Z?'地区级':'region'):(Z?'精度未知':'precision unknown'));
-      const t=dmax>0&&Number.isFinite(Number(r.distance_to_target))?Math.min(1,Number(r.distance_to_target)/dmax):1;
+      const t=dmax>0&&Number.isFinite(Number(pt.dist))?Math.min(1,Number(pt.dist)/dmax):1;
       const op=isSel?1:(isTop?1:(0.18+0.5*(1-t)));
       const n=region?el(s,'rect',{x:p.x-(isTop?3.4:2),y:p.y-(isTop?3.4:2),width:isTop?6.8:4,height:isTop?6.8:4,rx:1,fill:isTop?c.hero:c.data,'fill-opacity':op,stroke:c.bg,'stroke-width':.4,class:'pop'})
                   :el(s,'circle',{cx:p.x,cy:p.y,r:isTop?4:2.1,fill:isTop?c.hero:c.data,'fill-opacity':op,stroke:c.bg,'stroke-width':.4,class:'pop'});
@@ -752,28 +795,55 @@ reveal('geomap',(s,c)=>{
       const pick=()=>{ sel=(sel===rid)?null:rid; draw(); };
       n.addEventListener('click',pick);
       n.addEventListener('keydown',(e)=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();pick()}});
-      tip(n,`${lab||r.record_id} · ${r.locality||''} ${precTxt}`+
-            (Number.isFinite(Number(r.date_mean_bp))?` · ${fmt(Math.round(r.date_mean_bp))} BP`:'')+
-            (Number.isFinite(Number(r.distance_to_target))?` · d=${Number(r.distance_to_target).toFixed(4)}`:''));
+      tip(n,`${lab||rid} · ${pt.locality||''} ${precTxt}`+
+            (Number.isFinite(Number(pt.date))?` · ${fmt(Math.round(pt.date))} BP`:'')+
+            (Number.isFinite(Number(pt.dist))?` · d=${Number(pt.dist).toFixed(4)}`:'')+
+            (pt.n!=null?` · n=${pt.n}`:''));
     });
-    // 前五名标注：按 member_ids+location_id 找代表点（AN6）——同组多遗址时按 label 找"首个点"
-    // 会标到别的遗址上；member_ids 缺席的旧数据才退回 label 匹配。
+    // 前五名标注：1000G 空间直接锚定该人群自己的采样点（一组一点）；AADR 仍按 member_ids+
+    // location_id 找代表点（AN6）——同组多遗址时按 label 找"首个点"会标到别的遗址上，
+    // member_ids 缺席的旧数据才退回 label 匹配。
     ranked.slice(0,5).forEach((g,i)=>{
       const ids=new Set((g.member_ids||[]).map(String));
-      const hit=placed.find(r=>ids.has(String(r.record_id))&&String(r.location_id||'')===String(g.location_id||''))
-             || placed.find(r=>ids.has(String(r.record_id)))
-             || placed.find(r=>String(r.source_population_id)===String(g.label));
+      const hit=kgSpace?placed.find(p=>p.group===g)
+             :placed.find(p=>p.rec&&ids.has(String(p.rec.record_id))&&String(p.rec.location_id||'')===String(g.location_id||''))
+             || placed.find(p=>p.rec&&ids.has(String(p.rec.record_id)))
+             || placed.find(p=>String(p.label)===String(g.label));
       if(!hit) return;
       const p=P(hit);
       txt(s,{x:p.x+6,y:p.y-3-i*9,'font-size':8,'font-weight':700,fill:c.ink,stroke:c.bg,'stroke-width':2.2,'paint-order':'stroke'},
-          `${g.rank}. ${ANC_ZH[g.label]||g.label} · n=${g.n}`);
+          `${g.rank}. ${ANC_ZH[g.label]||hit.name_zh||g.label} · n=${g.n}`);
     });
     txt(s,{x:pad.l,y:16,'font-size':8,'font-weight':600,fill:c.faint,'letter-spacing':'.06em'},
-        Z?'参考样本的来源地（不是目标样本的坐标）':'WHERE THE REFERENCE SAMPLES COME FROM (NOT THE TARGET)');
-    // ── 视图选择（AN6 批一）：现代群体主图 / 古代 / 全部。可聚焦 + Enter；只换查看层，不重算。
+        (Z?'参考样本的来源地（不是目标样本的坐标）':'WHERE THE REFERENCE SAMPLES COME FROM (NOT THE TARGET)')
+        +(SPACES.length>1?(Z?` · 参考空间：${spaceLabel(a)}`:` · space: ${spaceLabel(a)}`):''));
+    // ── 参考空间切换（AN6 增强②）：一行空间按钮（地图与时间轴之间）。可聚焦 + Enter；只换
+    // 已算好的分析结果，不重算统计；切换即清空选中（各空间的点键不同，不让旧选择悬空）。
+    if(SPACES.length>1){
+      const bw=Math.min(160,(VB.w-2*pad.l)/SPACES.length-6), sy2=mapH+6;
+      SPACES.forEach((x,i)=>{
+        const x0=pad.l+i*(bw+6), on=i===sa;
+        const b=el(s,'rect',{x:x0,y:sy2,width:bw,height:16,rx:2,fill:on?c.hero:'none',stroke:on?c.hero:c.grid,'stroke-width':on?0:.8,class:'fade'});
+        b.setAttribute('tabindex','0'); b.setAttribute('role','button');
+        const go=()=>{ if(sa!==i){sa=i;sel=null;
+          // 1000G 空间只有现代人群：从 AADR 的古代/全部视图切过去时回到现代主图。
+          if(String((SPACES[i]||{}).dataset||'')==='1000G'&&kv!=='modern')kv='modern';
+          draw();} };
+        b.addEventListener('click',go);
+        b.addEventListener('keydown',(e)=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();go()}});
+        txt(s,{x:x0+bw/2,y:sy2+11,'text-anchor':'middle','font-size':7.5,'font-weight':700,fill:on?c.bg:c.ink},spaceLabel(x));
+      });
+    }
+    // ── 视图选择（AN6 批一）：现代群体主图 / 古代 / 全部。只显示当前空间**实际存在**的层——
+    // 1000G 空间只有现代人群组，古代/全部按钮不出现（点了也只有空图，那不是诚实的选项）。
+    // 可聚焦 + Enter；只换查看层，不重算。
+    const kindsPresent=new Set();
+    (kgSpace?analysisGroups(a):(a.records||[])).forEach(x=>kindsPresent.add(String(x.kind||'')));
+    const KINDS_HERE=KINDS.filter(v=>v.k==='all'?kindsPresent.size>1:kindsPresent.has(v.k));
+    if(!KINDS_HERE.some(v=>v.k===kv)) kv='modern';
     const bx0=pad.l+40, bx1=VB.w-pad.l-40, by=bandY;
-    KINDS.forEach((v,i)=>{
-      const x0=bx0+i*((bx1-bx0)/KINDS.length), w=(bx1-bx0)/KINDS.length-8, y=by+28;
+    KINDS_HERE.forEach((v,i)=>{
+      const x0=bx0+i*((bx1-bx0)/KINDS_HERE.length), w=(bx1-bx0)/KINDS_HERE.length-8, y=by+28;
       const on=v.k===kv;
       const b=el(s,'rect',{x:x0,y:y,width:w,height:18,rx:2,fill:on?c.hero:'none',stroke:on?c.hero:c.grid,'stroke-width':on?0:.8,
                            class:'fade'});
@@ -783,7 +853,7 @@ reveal('geomap',(s,c)=>{
       b.addEventListener('keydown',(e)=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();go()}});
       txt(s,{x:x0+w/2,y:y+12.5,'text-anchor':'middle','font-size':8,'font-weight':700,fill:on?c.bg:c.ink},Z?v.zh:v.en);
     });
-    if(kv!=='modern'){
+    if(kv!=='modern'&&!kgSpace){
       // ── 时间带：左古右今；BP 与公元并列（BP 基准 1950）。现代参考个体没有年代——时间轴与
       // 年代范围是古代/全部视图的事，现代主图不带（AN6 批一：古代时间筛选是独立视图）。
       el(s,'line',{x1:bx0,y1:by,x2:bx1,y2:by,stroke:c.grid,'stroke-width':1.2});
@@ -817,17 +887,21 @@ reveal('geomap',(s,c)=>{
     if(LBOX){
       LBOX.textContent='';
       ranked.slice(0,12).forEach(g=>{
-        // 与地图共用同一个 sel（稳定 ID），两边互选；行的定位点按 member_ids+location_id 找
-        // （AN6）——同组多遗址时按 label 取首个会把选中带到别的遗址。member_ids 缺席才退回 label。
-        const ids=new Set((g.member_ids||[]).map(String));
-        const hits=placed.filter(r=>ids.has(String(r.record_id))&&String(r.location_id||'')===String(g.location_id||''));
-        const fallback=!hits.length?placed.filter(r=>String(r.source_population_id)===String(g.label)):[];
-        const cand=hits.length?hits:fallback;
-        const rid=cand.length?String(cand[0].record_id||''):'';
+        // 与地图共用同一个 sel（稳定 ID），两边互选。1000G 空间人群自带采样点（一组一点）；
+        // AADR 的行按 member_ids+location_id 找（AN6）——同组多遗址时按 label 取首个会把选中
+        // 带到别的遗址。member_ids 缺席才退回 label。
+        let cand;
+        if(kgSpace){ cand=placed.filter(p=>p.group===g); }
+        else{
+          const ids=new Set((g.member_ids||[]).map(String));
+          const hits=placed.filter(p=>p.rec&&ids.has(String(p.rec.record_id))&&String(p.rec.location_id||'')===String(g.location_id||''));
+          cand=hits.length?hits:placed.filter(p=>String(p.label)===String(g.label));
+        }
+        const rid=cand.length?String(cand[0].key||''):'';
         const row=document.createElement('div');
         row.tabIndex=0; row.setAttribute('role','button');
         row.style.cssText='cursor:pointer;padding:1px 3px;border-radius:3px'+(rid&&rid===sel?';background:currentColor;opacity:.14':'');
-        row.textContent=`${g.rank}. ${ANC_ZH[g.label]||g.label} · n=${g.n}`+
+        row.textContent=`${g.rank}. ${ANC_ZH[g.label]||(cand[0]&&cand[0].name_zh)||g.label} · n=${g.n}`+
           (rid?` · d=${Number(g.distance_mean).toFixed(4)}`:(Z?' · 未定位':' · unplaced'));
         const pick=()=>{ if(!rid) return; sel=(sel===rid)?null:rid; draw(); };
         row.addEventListener('click',pick);
@@ -839,11 +913,18 @@ reveal('geomap',(s,c)=>{
     // 现代视图没有年代维度，计数照给但时间轴说明换成视图说明（AN6 批一）。
     const note=document.getElementById('geomap_note');
     const _kv=KINDS.find(v=>v.k===kv)||KINDS[0];
-    if(note) note.textContent=(Z
+    if(note) note.textContent=(kgSpace
+      ? (Z?`参考空间：${spaceLabel(a)}——一个人群一个采样点（地区级），代表参考人群的采样/来源地，`
+           +'不是个体出生地，也不是目标样本的位置；无年代维度。'
+           +`已定位 ${placed.length} 个人群、${unplaced} 个无坐标不落点 · 深色 = 距离最近的前五名 · 方框 = 地区级 · 底图 Natural Earth 1:110m（public domain）`
+         : `space: ${spaceLabel(a)} -- one sampling-site point per population (region-level): where the reference `
+           +'population was sampled, not any individual birthplace and not the target; no dates in this space. '
+           +`${placed.length} populations placed, ${unplaced} without coordinates · emphasised = five closest · squares = region-level · base map Natural Earth 1:110m (public domain)`)
+      : (Z
       ? `视图：${_kv.zh}`+(kv==='modern'?'（现代参考无年代，时间轴与年代范围见"古代/全部"视图）':` · 范围：${R.zh}`)
-        +` · 命中 ${inRange.length} 条（其中 ${placed.length} 条已定位、${unplaced} 条缺坐标不落点）· 范围外 ${outRange.length} 条 · 年代未知 ${noDate.length} 条（"全部"下照常显示，其余范围不计入筛选）· 深色 = 距离最近的前五名 · 圆点 = 遗址级或精度未知，方框 = 地区级 · 底图 Natural Earth 1:110m（public domain）`
+        +` · 命中 ${inRange} 条（其中 ${placed.length} 条已定位、${unplaced} 条缺坐标不落点）· 范围外 ${outRange} 条 · 年代未知 ${noDate} 条（"全部"下照常显示，其余范围不计入筛选）· 深色 = 距离最近的前五名 · 圆点 = 遗址级或精度未知，方框 = 地区级 · 底图 Natural Earth 1:110m（public domain）`
       : `view: ${_kv.en}`+(kv==='modern'?' (modern references carry no date; see the ancient/all views for the timeline)':` · range: ${R.en}`)
-        +` · ${inRange.length} records (${placed.length} placed, ${unplaced} without coordinates) · ${outRange.length} outside · ${noDate.length} with an unknown date (shown under "all", excluded from ranged filtering) · emphasised = five closest · circles = site or unknown precision, squares = region-level · base map Natural Earth 1:110m (public domain)`)
+        +` · ${inRange} records (${placed.length} placed, ${unplaced} without coordinates) · ${outRange} outside · ${noDate} with an unknown date (shown under "all", excluded from ranged filtering) · emphasised = five closest · circles = site or unknown precision, squares = region-level · base map Natural Earth 1:110m (public domain)`))
       .replace(/\*\*/g,'');
     foot(s,c,VB.w,VB.h-6,Z?'筛选只是换个范围查看已算好的结果，不重建 PCA、也不重算排名 · 底图自动放大到当前视图有内容的区域 · 离线底图，无外部请求'
                           :'filtering only changes which computed records are shown; no PCA rebuild, no re-ranking · the base map auto-zooms to where the current view has content · offline base map, no external requests');
