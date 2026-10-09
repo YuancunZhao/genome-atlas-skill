@@ -112,6 +112,14 @@ def _str(cfg, key, default=""):
     return "" if v is None else str(v)
 
 
+def _opt_int(cfg, key):
+    """可选整数：没写/留空返回 None（= 该规则不配置、不生效），写了就必须是整数。"""
+    v = cfg.get(key)
+    if v is None or (isinstance(v, str) and not v.strip()):
+        return None
+    return _int(cfg, key, 0)
+
+
 def chromosome_lengths(candidates, fallback=None, log=print, build=None):
     """从 FASTA 索引（`.fai`）读染色体长度；读不到才用内置表，并**明确告警**。
 
@@ -265,6 +273,12 @@ def read_options(cfg):
         "calibration_seed": _int(cfg, "local_ancestry_calibration_seed", 1),
         # ---- lineage history (optional evidence file)
         "lineage_history_file": _str(cfg, "lineage_history_file", ""),
+        # AN4(a)：人工复核是样本私有的，写在自己的 work 目录（缺省 03_haplo/lineage_review.json），
+        # 配置可指到别处；solid/tail 阈值同样来自**本样本的 config**——此前 5/4 是从首个样本的
+        # 路径归纳后硬编码的，等于把一个样本的分辨率极限泛化成所有样本的规则，故无默认值。
+        "lineage_review_file": _str(cfg, "lineage_review_file", ""),
+        "lineage_solid_min": _opt_int(cfg, "lineage_solid_min"),
+        "lineage_tail_levels": _opt_int(cfg, "lineage_tail_levels"),
     }
 
 

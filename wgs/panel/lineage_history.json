@@ -23,16 +23,8 @@
   "why_two_versions": "The two sides come from different places: 05 classifies the sample against the tree this project downloaded, while the ancient-DNA panel ships labels that the AADR authors computed with whatever tree existed at their release (12.03, Lazaridis et al. Science 2022). They are not inconsistent by accident, and neither can be replaced by the other.",
   "handling": "canonicalize() maps a stored label onto a node of the current tree: alias table first, then membership in the tree. A label that is absent from the tree is reported as version_mismatch (kept, counted, and excluded from the default view) -- never silently treated as an unrelated branch. Fill 'aliases' when a node is renamed between versions."
  },
- "reviewed_calls": {
-  "y:N-CTS4714": {
-   "conservative_hg": "N-M1845",
-   "reason": "N-CTS4714 rests on 1-5 supporting sites per level below N-M1845 (N-M1928 has no independent site, N-Y125475 is a structural branch), so the branch below N-M1845 is at the resolution limit of short reads. Conservative fallback recorded by hand; it applies to this branch, not to the classifier.",
-   "reviewed_by": "manual",
-   "tree_source": "YFull",
-   "tree_version": "12.03",
-   "sample_id": "26D04799891"
-  }
- },
+ "reviewed_calls_note": "Per-sample manual reviews live in the sample's own work directory (03_haplo/lineage_review.json by default, or the path in config lineage_review_file) -- never in this shared panel. A review is one sample's conclusion, bound to the terminal-SNP table (evidence_sha256) and the project tree version it was checked against; 05 only applies it when sample, tree and evidence all match. This file deliberately ships an empty reviewed_calls.",
+ "reviewed_calls": {},
  "parents": {},
  "aliases": {},
  "routes": []

@@ -161,6 +161,11 @@ AADR_ANNOTATION = OPT["aadr_annotation"]
 # AN4 查询扩展：history 面板路径进配置（config.yaml 可覆盖）；未配置时用仓库自带的
 # panel/lineage_history.json——那是随仓库发布的通用面板（别名/树边/路线），不是任何样本的私人数据。
 LINEAGE_HISTORY_FILE = OPT["lineage_history_file"] or str(ROOT / "panel" / "lineage_history.json")
+# AN4(a)：本样本的人工复核文件与保守阈值。复核是样本私有的（住在 work 目录）；solid/tail
+# 无默认值——不配置就不启用弱链规则，而不是沿用从首个样本归纳的 5/4。
+LINEAGE_REVIEW_FILE = OPT["lineage_review_file"]
+LINEAGE_SOLID = OPT["lineage_solid_min"]
+LINEAGE_TAIL = OPT["lineage_tail_levels"]
 ANALYSIS_ID = str(_g("analysis_id", ""))                          # optional; empty = derived from inputs
 
 def rel(p):

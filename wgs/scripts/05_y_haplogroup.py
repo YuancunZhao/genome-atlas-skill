@@ -7,7 +7,7 @@ import sys, pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from wgsconfig import *  # noqa: F401,F403 -- P, W, REF, TOOLS, SAMPLE, THREADS ...
 
-import json, csv, subprocess, collections, os, sys
+import json, csv, subprocess, collections, hashlib, os, sys
 import pandas as pd
 P = str(P); W = f"{P}/wgs/03_haplo"; CRAM = READS if os.path.exists(READS) else f"{P}/wgs/00_input/{SAMPLE}.cram"; REF = FASTA
 # 1. SNP index: name -> (pos, anc, der)
@@ -147,30 +147,46 @@ open(f"{W}/y_haplogroup_yfull.txt", "w").write("\n".join(lines) + "\n"); print("
 
 # --- structured result (7.3 Lineage). The text above stays as the audit trail; step 30 reads this
 # file instead of regex-matching the text, which is how an empty path became an IndexError("'SAMPLE'
-# is not in list") and a 1-5 site branch looked like a confirmed terminal.
+# is not list") and a 1-5 site branch looked like a confirmed terminal.
 import json as _json
 import lineage_history as _lh
 TREE_VERSION = open(f"{P}/data/ref/ytree/current_version.txt").read().strip()
 # The conservative call is a rule, not a per-sample exception: walk the path from the end and fall back
 # to the deepest node that still has solid support. Nodes that rest on a handful of sites are recorded
 # as uncertain and never treated as a proven terminal on their own.
-SOLID = 5
-TAIL = 4          # 分辨率判据只看末端四级（与 HANDOFF 记录的"末端四级分辨率有限"一致）
+# AN4-a：solid/tail 阈值来自本样本的 config（lineage_solid_min / lineage_tail_levels）——此前硬编码
+# 的 5/4 是从首个样本的路径（12/1/0/1/5）归纳出来的，把它当默认等于把一个样本的分辨率极限写进
+# 所有样本。未配置时不启用弱链规则（resolutions 记为 config），conservative 只能来自复核记录。
+SOLID = LINEAGE_SOLID
+TAIL = LINEAGE_TAIL
+# AN4-a：人工复核是**样本私有**记录，写在本样本的 work 目录（缺省 03_haplo/lineage_review.json，
+# config lineage_review_file 可指到别处），不再读共享 panel——panel 是所有样本共用的文件，把私人
+# 复核写进去等于把一个样本的结论发布成公共规则。复核记录还必须绑定它核对过的证据（末端 SNP 表
+# 的 sha256）与当时的项目树版本；绑定对不上就不套用，宁可没有 conservative 落点。
+_REVIEW_PATH = (pathlib.Path(LINEAGE_REVIEW_FILE) if LINEAGE_REVIEW_FILE
+                else pathlib.Path(W) / "lineage_review.json")
+_REVIEW = _lh.load_review(_REVIEW_PATH) if _REVIEW_PATH.exists() else {}
+_EVID = pathlib.Path(W) / "y_terminal_snps.tsv"
+_EVID_SHA = (hashlib.sha256(_EVID.read_bytes()).hexdigest() if _EVID.exists() else None)
 # 复核结论优先（§7：conservative 来自证据或带理由的复核记录）；没有复核记录时退回通用规则
 # conservative_from_path（连续弱链 → 上一级），并把来源写清楚，免得两种来源被当成一回事。
-_HIST = _lh.load_history(_json.loads((pathlib.Path(__file__).resolve().parents[1] / "panel" /
-                                      "lineage_history.json").read_text(encoding="utf-8")))
-# 只在本样本与复核记录标注的 sample_id 相符时才采用该记录（复审 AN4）：否则一个样本的人工结论
-# 会顺着支系名传播给所有同支系样本。被拒绝时把原因打到 stderr，便于发现"记录其实没生效"。
+# 只在样本、树版本、证据指纹都与记录一致时才采用（复审 AN4 + AN4-a）；被拒绝时把原因打到
+# stderr，便于发现"记录其实没生效"。
 _CONC_REJECT = []
-_CONS, _CONS_WHY = _lh.reviewed_call(_HIST, "y", path[-1][0] if path else None, sample_id=SAMPLE,
-                                     log=_CONC_REJECT.append)
+_CONS, _CONS_WHY = _lh.reviewed_call(_REVIEW, "y", path[-1][0] if path else None, sample_id=SAMPLE,
+                                      tree_version=TREE_VERSION, evidence_sha=_EVID_SHA,
+                                      log=_CONC_REJECT.append)
 for _m in _CONC_REJECT:
     print(f"NOTE: {_m}", file=sys.stderr)
 _if_reviewed = _CONS is not None
 if _CONS:
-    _CONS_SRC = "reviewed:" + str(((_HIST.get("reviewed_calls") or {}).get(
-        "y:" + str(path[-1][0]), {}) or {}).get("tree_version") or _HIST.get("tree_source") or "manual")
+    _CONS_SRC = "reviewed:" + str(((_REVIEW.get("reviewed_calls") or {}).get(
+        "y:" + str(path[-1][0]), {}) or {}).get("tree_version") or "manual")
+elif SOLID is None or TAIL is None:
+    _CONS = None
+    _CONS_SRC = "none"
+    _CONS_WHY = "no reviewed call matched and no lineage_solid_min/lineage_tail_levels configured; " \
+                 "the weak-chain rule has no sample-independent default"
 else:
     _CONS = _lh.conservative_from_path(path, solid=SOLID, tail=TAIL)
     _CONS_SRC = f"rule:weak_chain_in_last_{TAIL}_levels(solid={SOLID})"
@@ -190,8 +206,10 @@ else:
                                for b, d, a, o, f, t in path],
             # 只标末端四级：主干上支持位点少的节点（HIJK/K2 等）是因为那些 SNP 不属于本样本的
             # 谱系或未覆盖，不是"分辨率不确定"；HANDOFF 记录的分辨率极限正是末端四级。
-            "uncertain_nodes": [{"node": b, "reason": f"only {d} supporting site(s); below the {SOLID}-site floor"}
-                                for b, d, a, o, f, t in path[-TAIL:] if d < SOLID],
+            # 阈值未配置（AN4-a：不拿一个样本的 5/4 当默认）时没有判断依据，不标 uncertain。
+            "uncertain_nodes": ([{"node": b, "reason": f"only {d} supporting site(s); below the {SOLID}-site floor"}
+                                 for b, d, a, o, f, t in path[-TAIL:] if d < SOLID]
+                                if (SOLID is not None and TAIL is not None) else []),
             "conflicts": [], "route_review": "automatic"}
 _json.dump(_res, open(f"{W}/y_result.json", "w"), ensure_ascii=False, indent=1)
 print(f"wrote {W}/y_result.json: reported={_res.get('reported_hg')} conservative={_res.get('conservative_hg')} "

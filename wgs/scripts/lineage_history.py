@@ -217,7 +217,7 @@ def lineage_observations(rows, query, parents, tree_kind, same_tree=True, histor
     return out
 
 
-def conservative_from_path(path, solid=5, tail=4):
+def conservative_from_path(path, solid, tail):
     """没有复核记录时的通用保守落点。
 
     判据不是"某个节点的支持数够不够"，而是"它是否位于末端一条弱链的末尾"。本项目的真实路径是
@@ -225,9 +225,14 @@ def conservative_from_path(path, solid=5, tail=4):
     极限，5 只是这段弱链的末尾，不是独立证据。只看单节点阈值会把它当成可靠的末端（这正是第一版
     规则错的地方）。所以：末端 tail 级里若有支持不足的节点，就从最靠上的那个再往上退一级。
 
+    solid/tail 是**每次运行自己的配置**（config 的 lineage_solid_min / lineage_tail_levels），
+    不是函数默认值：此前硬编码的 5/4 是从这个样本的真实路径归纳出来的，把它当通用默认等于把
+    一个样本的分辨率极限写进所有样本（AN4-a）。未配置（None）时本规则不生效——没有复核记录
+    也没有配置阈值，就没有 conservative_hg，不硬造一个。
+
     path 每项至少含 (node, der, ...)。
     """
-    if not path:
+    if not path or solid is None or tail is None:
         return None
     seg = list(path[-tail:]) if tail and tail > 0 else list(path)
     weak = [i for i, p in enumerate(seg) if int(p[1]) < int(solid)]
@@ -238,8 +243,25 @@ def conservative_from_path(path, solid=5, tail=4):
     return str(path[pos - 1][0]) if pos > 0 else None
 
 
-def reviewed_call(history, kind, reported_hg, sample_id=None, log=None):
-    """带理由的复核记录（panel/lineage_history.json 的 reviewed_calls）优先于任何自动规则。
+def load_review(path):
+    """读本样本的人工复核文件（缺省 03_haplo/lineage_review.json，或 config lineage_review_file）。
+
+    复核记录是**样本私有**的（它核对的是这个样本的末端 SNP 表和当时的树版本），所以它住在 work
+    目录、不进共享 panel——panel/lineage_history.json 的 reviewed_calls 只保留空表。文件可以不
+    存在：没有复核就没有 conservative_hg 的复核来源，仅此而已，不报错不阻断。
+    """
+    try:
+        doc = json.loads(pathlib.Path(path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {"reviewed_calls": {}}
+    recs = {str(k): dict(v) for k, v in ((doc or {}).get("reviewed_calls") or {}).items()
+            if isinstance(v, dict)}
+    return {"reviewed_calls": recs}
+
+
+def reviewed_call(review, kind, reported_hg, sample_id=None, tree_version=None, evidence_sha=None,
+                  log=None):
+    """带理由的复核记录（reviewed_calls）优先于任何自动规则——但只在它核对过的东西与本次运行一致时。
 
     §7 要求 conservative_hg 来自实际证据或带理由的复核记录，而不是"树里最深节点"或某个阈值。
     键形如 `y:N-CTS4714`。
@@ -247,13 +269,18 @@ def reviewed_call(history, kind, reported_hg, sample_id=None, log=None):
     **样本限定（复审 AN4）**：键只写支系，所以一个样本的人工复核结论会被**任何**调出同一支系的
     新样本继承——那是把一个样本的判断当成通用规则。因此记录里必须写明 sample_id，且只在**当前样本
     与之相符**时才生效；没有 sample_id 的旧记录一律不套用（并说明原因），由调用方回退到通用规则。
+
+    **证据/树版本绑定（AN4-a）**：人工复核是对着**这个样本的末端 SNP 表**（evidence_sha256）和
+    **当时的项目树版本**（tree_version）做的。记录必须带这两个绑定字段，且调用方必须传本次运行的
+    对应值；绑定缺失或对不上都不套用——对着旧证据/旧树做的结论不是本次运行的结论，宁可没有
+    conservative_hg。
     """
-    hist = history or {}
+    recs = (review or {}).get("reviewed_calls") or {}
     node = str(reported_hg or "")
     if not node:
         return None, None
     key = node if ":" in node else f"{kind}:{node}"
-    rec = (hist.get("reviewed_calls") or {}).get(key)
+    rec = recs.get(key)
     if not isinstance(rec, dict) or not rec.get("conservative_hg"):
         return None, None
     owner = rec.get("sample_id")
@@ -267,6 +294,18 @@ def reviewed_call(history, kind, reported_hg, sample_id=None, log=None):
         if log:
             log(f"reviewed call for {key} belongs to {owner}, not to this sample; "
                 f"falling back to the generic rule")
+        return None, None
+    rtv = str(rec.get("tree_version") or "")
+    if not tree_version or not rtv or rtv != str(tree_version):
+        if log:
+            log(f"reviewed call for {key} was recorded under tree {rtv or '<unrecorded>'}, "
+                f"this run classifies on {tree_version or '<unknown>'}; not applied")
+        return None, None
+    rsha = str(rec.get("evidence_sha256") or "")
+    if not evidence_sha or not rsha or rsha != str(evidence_sha):
+        if log:
+            log(f"reviewed call for {key} is bound to different caller evidence "
+                f"(recorded ...{rsha[-8:] if rsha else 'none'}, this run ...{str(evidence_sha)[-8:] if evidence_sha else 'none'}); not applied")
         return None, None
     return str(rec["conservative_hg"]), str(rec.get("reason") or "reviewed by hand")
 

@@ -205,30 +205,42 @@ class TestObservationsAndRoutes(unittest.TestCase):
                           "唯一一级就弱，且上面没有别的：保守落点为空而不是硬报它")
 
     def test_reviewed_call_beats_any_automatic_rule(self):
-        """复核记录优先于自动规则——但只在**它属于这个样本**时（复审 AN4）。
+        """复核记录优先于自动规则——但只在**它属于这个样本、且绑定对得上**时（复审 AN4 + AN4-a）。
 
-        旧版本不带样本就返回结论，那会让一个样本的人工判断顺着支系名传播给所有同支系样本。
+        旧版本不带样本就返回结论，那会让一个样本的人工判断顺着支系名传播给所有同支系样本；
+        AN4-a 再加两层绑定：记录写明它核对过的末端 SNP 表（evidence_sha256）与项目树版本
+        （tree_version），调用方传本次运行的对应值，全部一致才生效。
         """
         hist = lh.load_history({"schema_version": 1, "reviewed_calls": {
             "y:N-CTS4714": {"conservative_hg": "N-M1845", "reason": "1-5 sites per level below",
-                            "sample_id": "S1"}}})
-        self.assertEqual(lh.reviewed_call(hist, "y", "N-CTS4714", sample_id="S1"),
-                         ("N-M1845", "1-5 sites per level below"))
-        self.assertEqual(lh.reviewed_call(hist, "y", "N-CTS4714", sample_id="S1")[0],
-                         lh.reviewed_call(hist, "y", "y:N-CTS4714", sample_id="S1")[0],
+                            "sample_id": "S1", "tree_version": "14.06.0",
+                            "evidence_sha256": "a" * 64}}})
+        got = lh.reviewed_call(hist, "y", "N-CTS4714", sample_id="S1",
+                               tree_version="14.06.0", evidence_sha="a" * 64)
+        self.assertEqual(got, ("N-M1845", "1-5 sites per level below"))
+        self.assertEqual(lh.reviewed_call(hist, "y", "y:N-CTS4714", sample_id="S1",
+                                          tree_version="14.06.0", evidence_sha="a" * 64)[0],
+                         lh.reviewed_call(hist, "y", "N-CTS4714", sample_id="S1",
+                                          tree_version="14.06.0", evidence_sha="a" * 64)[0],
                          "带/不带 kind 前缀的键等价")
-        self.assertEqual(lh.reviewed_call(hist, "mt", "A13", sample_id="S1"), (None, None), "别的支系不受影响")
-        self.assertEqual(lh.reviewed_call({}, "y", "N-CTS4714", sample_id="S1"), (None, None))
+        self.assertEqual(lh.reviewed_call(hist, "mt", "A13", sample_id="S1",
+                                          tree_version="14.06.0", evidence_sha="a" * 64), (None, None),
+                         "别的支系不受影响")
+        self.assertEqual(lh.reviewed_call({}, "y", "N-CTS4714", sample_id="S1",
+                                          tree_version="14.06.0", evidence_sha="a" * 64), (None, None))
 
     def test_a_review_belongs_to_one_sample_not_to_the_branch(self):
         """同支系的**另一个**样本不得继承本样本的复核结论——这是 AN4 的核心。"""
         hist = lh.load_history({"schema_version": 1, "reviewed_calls": {
-            "y:N-CTS4714": {"conservative_hg": "N-M1845", "reason": "reviewed for S1", "sample_id": "S1"}}})
+            "y:N-CTS4714": {"conservative_hg": "N-M1845", "reason": "reviewed for S1", "sample_id": "S1",
+                            "tree_version": "14.06.0", "evidence_sha256": "a" * 64}}})
         said = []
-        got = lh.reviewed_call(hist, "y", "N-CTS4714", sample_id="S2", log=said.append)
+        got = lh.reviewed_call(hist, "y", "N-CTS4714", sample_id="S2",
+                               tree_version="14.06.0", evidence_sha="a" * 64, log=said.append)
         self.assertEqual(got, (None, None), "S2 调出同一支系也不得套用 S1 的结论")
         self.assertTrue(any("belongs to S1" in m for m in said), said)
-        self.assertEqual(lh.reviewed_call(hist, "y", "N-CTS4714", sample_id=None), (None, None),
+        self.assertEqual(lh.reviewed_call(hist, "y", "N-CTS4714", sample_id=None,
+                                          tree_version="14.06.0", evidence_sha="a" * 64), (None, None),
                          "未指明样本时不套用")
 
     def test_an_unmarked_review_is_not_a_generic_rule(self):
@@ -236,7 +248,8 @@ class TestObservationsAndRoutes(unittest.TestCase):
         hist = lh.load_history({"schema_version": 1, "reviewed_calls": {
             "y:N-CTS4714": {"conservative_hg": "N-M1845", "reason": "no owner recorded"}}})
         said = []
-        self.assertEqual(lh.reviewed_call(hist, "y", "N-CTS4714", sample_id="S1", log=said.append), (None, None))
+        self.assertEqual(lh.reviewed_call(hist, "y", "N-CTS4714", sample_id="S1", log=said.append),
+                         (None, None))
         self.assertTrue(any("no sample_id" in m for m in said), said)
 
     def test_no_routes_without_evidence(self):
@@ -385,6 +398,101 @@ class TestObservationSourceTiers(unittest.TestCase):
             self.assertEqual(h["query"]["source_kind"], "summary")
             self.assertIn("screened", h["query"]["note"])
             self.assertEqual([o["record_id"] for o in h["observations"]], ["K.SG"])
+
+
+class TestReviewBindingAndThresholds(unittest.TestCase):
+    """AN4-a：人工复核绑定输入证据/当前树版本；solid/tail 不再从当前样本泛化；每样本复核与
+    共享 panel 分离。旧代码上这些用例全部失败。"""
+
+    REC = {"conservative_hg": "N-M1845", "reason": "resolution limit below N-M1845",
+           "sample_id": "S1", "tree_version": "14.06.0", "evidence_sha256": "a" * 64}
+
+    def _hist(self, **kw):
+        rec = dict(self.REC); rec.update(kw)
+        return lh.load_history({"schema_version": 1, "reviewed_calls": {"y:N-CTS4714": rec}})
+
+    def test_review_recorded_under_a_different_tree_is_not_applied(self):
+        """复核是对着某个树版本做的：树换了，结论不能原样照搬。"""
+        said = []
+        got = lh.reviewed_call(self._hist(), "y", "N-CTS4714", sample_id="S1",
+                               tree_version="15.01.0", evidence_sha="a" * 64, log=said.append)
+        self.assertEqual(got, (None, None))
+        self.assertTrue(any("recorded under tree 14.06.0" in m for m in said), said)
+
+    def test_review_without_a_recorded_tree_version_is_not_applied(self):
+        said = []
+        got = lh.reviewed_call(self._hist(tree_version=""), "y", "N-CTS4714", sample_id="S1",
+                               tree_version="14.06.0", evidence_sha="a" * 64, log=said.append)
+        self.assertEqual(got, (None, None), "没写树版本的记录没有绑定，不套用")
+        self.assertTrue(any("unrecorded" in m for m in said), said)
+
+    def test_caller_that_cannot_state_the_tree_cannot_use_the_review(self):
+        """调用方不知道自己跑的是哪个树版本（tree_version=None）：无法核对绑定，不套用。"""
+        got = lh.reviewed_call(self._hist(), "y", "N-CTS4714", sample_id="S1",
+                               tree_version=None, evidence_sha="a" * 64)
+        self.assertEqual(got, (None, None))
+
+    def test_review_bound_to_different_evidence_is_not_applied(self):
+        """复核核对的是某一份末端 SNP 表：输入证据换了（重新测序/换 BAM），结论不能照搬。"""
+        said = []
+        got = lh.reviewed_call(self._hist(), "y", "N-CTS4714", sample_id="S1",
+                               tree_version="14.06.0", evidence_sha="b" * 64, log=said.append)
+        self.assertEqual(got, (None, None))
+        self.assertTrue(any("bound to different caller evidence" in m for m in said), said)
+        said2 = []
+        self.assertEqual(lh.reviewed_call(self._hist(evidence_sha256=""), "y", "N-CTS4714",
+                                          sample_id="S1", tree_version="14.06.0",
+                                          evidence_sha="a" * 64, log=said2.append), (None, None),
+                         "记录没写证据指纹 = 没有绑定，不套用")
+        self.assertEqual(lh.reviewed_call(self._hist(), "y", "N-CTS4714", sample_id="S1",
+                                          tree_version="14.06.0", evidence_sha=None), (None, None),
+                         "调用方没有证据指纹 = 无法核对，不套用")
+
+    def test_load_review_reads_a_per_sample_file_and_tolerates_absence(self):
+        """复核文件是样本私有的 work 产物：load_review 读它，文件不存在/坏 JSON 都是空复核，不阻断。"""
+        with tempfile.TemporaryDirectory() as td:
+            p = pathlib.Path(td) / "lineage_review.json"
+            p.write_text(json.dumps({"reviewed_calls": {"y:N": dict(self.REC)}}), encoding="utf-8")
+            self.assertIn("y:N", lh.load_review(p)["reviewed_calls"])
+            self.assertEqual(lh.load_review(pathlib.Path(td) / "absent.json")["reviewed_calls"], {})
+            bad = pathlib.Path(td) / "bad.json"
+            bad.write_text("{not json", encoding="utf-8")
+            self.assertEqual(lh.load_review(bad)["reviewed_calls"], {})
+
+    def test_conservative_rule_has_no_sample_derived_defaults(self):
+        """solid/tail 必须显式传入（来自本样本 config）：函数不藏 5/4 默认——那是从首个样本的
+        12/1/0/1/5 路径归纳的，把它当默认等于把一个样本的分辨率极限写进所有样本。"""
+        import inspect
+        params = list(inspect.signature(lh.conservative_from_path).parameters.values())
+        for p in params[1:]:                    # path 之后的 solid/tail 都不得有默认值
+            self.assertIs(p.default, inspect.Parameter.empty,
+                         f"{p.name} 必须显式配置，不设默认")
+        path = [("N-M1845", 12, 0, 0), ("N-CTS4714", 5, 0, 0)]
+        self.assertIsNone(lh.conservative_from_path(path, None, 4),
+                          "未配置 solid：规则不生效，不硬造保守落点")
+        self.assertIsNone(lh.conservative_from_path(path, 5, None),
+                          "未配置 tail：规则不生效")
+
+    def test_step05_reads_the_per_sample_review_not_the_shared_panel(self):
+        """接线：05 读 work 目录的复核文件（配置可覆盖），不再读共享 panel；阈值来自 wgsconfig。"""
+        src = (pathlib.Path(__file__).resolve().parents[1] / "scripts" / "05_y_haplogroup.py").read_text(
+            encoding="utf-8")
+        self.assertNotIn('"panel" /', src, "05 不得再读共享 panel")
+        self.assertIn("lineage_review.json", src)
+        self.assertIn("LINEAGE_REVIEW_FILE", src)
+        self.assertIn("SOLID = LINEAGE_SOLID", src)
+        self.assertIn("TAIL = LINEAGE_TAIL", src)
+        self.assertNotIn("SOLID = 5", src, "样本归纳出的阈值不得硬编码")
+        self.assertIn("tree_version=TREE_VERSION", src, "复核必须按当前树版本核对")
+        self.assertIn("evidence_sha=_EVID_SHA", src, "复核必须按末端 SNP 表指纹核对")
+
+    def test_shared_panel_carries_no_private_review(self):
+        """共享 panel 的 reviewed_calls 必须为空：私人样本的复核住在样本自己的 work 目录。"""
+        panel = json.loads((pathlib.Path(__file__).resolve().parents[1] / "panel" /
+                            "lineage_history.json").read_text(encoding="utf-8"))
+        self.assertEqual(panel.get("reviewed_calls"), {})
+        self.assertTrue(str(panel.get("reviewed_calls_note", "")).strip(),
+                       "panel 要说明复核去哪了，避免后人再把私人记录写回来")
 
 
 class TestRunAllWiring(unittest.TestCase):
