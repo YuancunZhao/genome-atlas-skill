@@ -71,7 +71,17 @@ fi
 # report reads one file instead of re-deriving the paternal/maternal story from text.
 # 复审 AN4：--ytree 让 canonicalize 的版本准入真正生效（不传时所有标签 unverified，字符串相等
 # 就能冒充 exact）；mt 无对应树文件，lineage_history 内部按 kind 区分。
-step 09d lineage history and evidence;                        python3 $S/lineage_history.py --history panel/lineage_history.json --rows $WGS/11_aadr/summary.json --yard $WGS/03_haplo --out $WGS/03_haplo/lineage_history.json --ytree "$YTREE" --sample "$SAMPLE"
+# AN4 查询扩展：history 面板来自 LINEAGE_HISTORY_FILE（env.sh→config.yaml 可覆盖），观测来源
+# 不再写死 09b 筛过的 summary——完整元数据（08 产物）优先，AADR 禁用时退到已配置 .anno；两者
+# 皆无时 09d 自行报"历史资料不可用"，而不是把"没查过"写成"数据集没有记录"。
+_LHSRC=""
+if [ -f "$WGS/11_aadr/reference_metadata.tsv" ]; then
+  _LHSRC="--metadata $WGS/11_aadr/reference_metadata.tsv"
+elif [ -n "$AADR_ANNO" ] && [ -f "$AADR_ANNO" ]; then
+  _LHSRC="--anno $AADR_ANNO"
+fi
+step 09d lineage history and evidence;                        python3 $S/lineage_history.py --history "$LINEAGE_HISTORY_FILE" $_LHSRC --yard $WGS/03_haplo --out $WGS/03_haplo/lineage_history.json --ytree "$YTREE" --sample "$SAMPLE"
+unset _LHSRC
 
 step 10b CYP2D6 star alleles;                                bash  $S/10b_cyrius.sh
 step 10 PharmCAT star alleles, CYP2D6, HLA;                    bash  $S/10_pharmcat.sh

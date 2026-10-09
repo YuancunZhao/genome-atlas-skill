@@ -258,6 +258,167 @@ class TestObservationsAndRoutes(unittest.TestCase):
         self.assertEqual(lh.history_view("mt:Z9", hist, [], parents={})["routes"], [])
 
 
+class TestObservationSourceTiers(unittest.TestCase):
+    """AN4 查询扩展：观测来源分三层（完整元数据 > 已配置 .anno > 09b 筛选 summary），
+    且"没查过"绝不写成"数据集没有记录"。
+
+    旧行为：CLI 只读 11_aadr/summary.json（08/09 的 PCA 筛选子集），AADR 关闭时缺查询或沿用
+    旧 summary；来源缺失时 history_view 照样报 distribution_only/no_records_in_this_dataset——
+    把"从来没查过"冒充"查过、没有"。这些用例在旧代码上全部失败。
+    """
+
+    METADATA_COLS = ("record_id\tindividual_id\tmaster_id\tdataset\treference_release\t"
+                     "genotype_representation\ty_hg_raw\tmt_hg_raw\tlocality\tlatitude\tlongitude\t"
+                     "location_precision\tdate_mean_bp\tdate_min_bp\tdate_max_bp\thg_source_tree\t"
+                     "publication\n")
+
+    def _yard(self, td):
+        yard = pathlib.Path(td) / "03_haplo"
+        yard.mkdir(parents=True, exist_ok=True)
+        (yard / "y_result.json").write_text(json.dumps({
+            "kind": "y", "state": "ok", "reported_hg": "N-CTS4714",
+            "supported_path": [{"node": "N-CTS4714", "der": 5, "anc": 0, "na": 0}]}), encoding="utf-8")
+        return yard
+
+    def _write_metadata(self, td, rows):
+        p = pathlib.Path(td) / "reference_metadata.tsv"
+        p.write_text(self.METADATA_COLS + "".join("\t".join(str(c) for c in r) + "\n" for r in rows),
+                     encoding="utf-8")
+        return p
+
+    def test_full_metadata_is_preferred_over_the_screened_summary(self):
+        """完整元数据里的记录（09b 筛选会丢的那种）必须能被查到——这正是"未读完整元数据"要修的。"""
+        with tempfile.TemporaryDirectory() as td:
+            yard = self._yard(td)
+            # 两行：一行在 summary 里也有；一行低覆盖、只存在于完整元数据（09b 的 PCA 筛选会丢）
+            meta = self._write_metadata(td, [
+                ("Keep.SG", "Keep", "Keep", "AADR", "v66", "SG", "N-CTS4714", "", "Site", "30.0", "110.0",
+                 "site", "3300", "3000", "3600", "YFull12.03", "pub"),
+                ("ScreenedOut.DG", "ScreenedOut", "ScreenedOut", "AADR", "v66", "DG", "N-CTS4714", "",
+                 "Other", "31.0", "111.0", "region", "", "", "", "YFull12.03", "pub"),
+            ])
+            out = pathlib.Path(td) / "lineage_history.json"
+            rc = lh._cli(["--yard", str(yard), "--out", str(out), "--sample", "S1",
+                          "--history", "", "--metadata", str(meta)])
+            self.assertEqual(rc, 0)
+            doc = json.loads(out.read_text(encoding="utf-8"))
+            q = doc["y"]["history"]["query"]
+            self.assertEqual(q["source_kind"], "reference_metadata")
+            self.assertEqual(q["n_rows"], 2)
+            self.assertEqual(q["state"], "ok")
+            self.assertEqual(sorted(o["record_id"] for o in doc["y"]["history"]["observations"]),
+                             ["Keep.SG", "ScreenedOut.DG"],
+                             "完整元数据里被 09b 筛掉的记录也要能查到")
+            # 数值列从 TSV 字符串转回来了（模板要拿它们做投影）
+            obs = [o for o in doc["y"]["history"]["observations"] if o["record_id"] == "Keep.SG"][0]
+            self.assertEqual(obs["coordinates"], {"latitude": 30.0, "longitude": 110.0})
+            self.assertEqual(obs["date_range"]["mean"], 3300)
+
+    def test_anno_tier_queries_when_aadr_pca_is_off(self):
+        """AADR 关闭（08/09b 没跑、没有 reference_metadata.tsv）时，已配置 .anno 仍可查询。"""
+        with tempfile.TemporaryDirectory() as td:
+            yard = self._yard(td)
+            anno = pathlib.Path(td) / "panel.anno"
+            anno.write_text(
+                "Genetic ID\tPersistent Genetic ID\tIndividual ID\tLocality\tLatitude\tLongitude\t"
+                "Date mean in BP\tDate standard deviation in BP\tFull Date\tMethod for Determining Date\t"
+                "Suffices\tY haplogroup in terminal\tmtDNA haplogroup\tPublication abbreviation\n"
+                "I1.SG\tI1\tI1\tSite\t30\t110\t3300\t150\t3000-3600 calBCE\tradiocarbon\tSG\t"
+                "N-CTS4714\t\t pub\n",
+                encoding="utf-8")
+            out = pathlib.Path(td) / "lineage_history.json"
+            rc = lh._cli(["--yard", str(yard), "--out", str(out), "--sample", "S1",
+                          "--history", "", "--anno", str(anno)])
+            self.assertEqual(rc, 0)
+            doc = json.loads(out.read_text(encoding="utf-8"))
+            q = doc["y"]["history"]["query"]
+            self.assertEqual((q["source_kind"], q["state"]), ("anno", "ok"))
+            self.assertEqual(q["n_rows"], 1)
+            self.assertEqual([o["record_id"] for o in doc["y"]["history"]["observations"]], ["I1.SG"])
+
+    def test_anno_missing_required_columns_is_unreadable_not_an_empty_dataset(self):
+        """.anno 缺必需列：如实报"来源不可读"，不是静默空数据集。"""
+        with tempfile.TemporaryDirectory() as td:
+            yard = self._yard(td)
+            anno = pathlib.Path(td) / "broken.anno"
+            anno.write_text("Some\tOther\tColumns\nx\ty\tz\n", encoding="utf-8")
+            out = pathlib.Path(td) / "lineage_history.json"
+            rc = lh._cli(["--yard", str(yard), "--out", str(out), "--sample", "S1",
+                          "--history", "", "--anno", str(anno)])
+            self.assertEqual(rc, 0)
+            h = json.loads(out.read_text(encoding="utf-8"))["y"]["history"]
+            self.assertEqual(h["query"]["state"], "unreadable")
+            self.assertEqual(h["history_state"], "unavailable")
+            self.assertEqual(h["history_reason_code"], "history_source_unreadable")
+            self.assertEqual(h["observations"], [])
+
+    def test_no_source_at_all_is_not_available_not_no_records(self):
+        """没有任何可查来源：历史资料不可用。旧行为报 no_records_in_this_dataset——把没查过写成没有记录。"""
+        with tempfile.TemporaryDirectory() as td:
+            yard = self._yard(td)                    # 没有 11_aadr/，没有 .anno，没有 summary
+            out = pathlib.Path(td) / "lineage_history.json"
+            rc = lh._cli(["--yard", str(yard), "--out", str(out), "--sample", "S1", "--history", ""])
+            self.assertEqual(rc, 0)
+            h = json.loads(out.read_text(encoding="utf-8"))["y"]["history"]
+            self.assertEqual(h["query"]["state"], "not_available")
+            self.assertEqual(h["history_state"], "unavailable")
+            self.assertEqual(h["history_reason_code"], "history_source_not_available")
+            self.assertNotEqual(h["history_reason_code"], "no_records_in_this_dataset",
+                                "没查过不等于数据集没有记录")
+            man = json.loads((out.parent / "manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(man["parameters"]["source_kind"], "none")
+            self.assertEqual(man["parameters"]["query_state"], "not_available")
+
+    def test_summary_tier_is_labelled_as_the_screened_subset(self):
+        """显式 --rows（09b summary）仍可用，但 query 必须说明它是筛选子集，不是完整数据集。"""
+        with tempfile.TemporaryDirectory() as td:
+            yard = self._yard(td)
+            summary = pathlib.Path(td) / "summary.json"
+            summary.write_text(json.dumps({"records": [
+                {"record_id": "K.SG", "master_id": "K", "y_hg_raw": "N-CTS4714",
+                 "locality": "Site", "latitude": 30.0, "longitude": 110.0}]}), encoding="utf-8")
+            out = pathlib.Path(td) / "lineage_history.json"
+            rc = lh._cli(["--yard", str(yard), "--out", str(out), "--sample", "S1",
+                          "--history", "", "--rows", str(summary)])
+            self.assertEqual(rc, 0)
+            h = json.loads(out.read_text(encoding="utf-8"))["y"]["history"]
+            self.assertEqual(h["query"]["source_kind"], "summary")
+            self.assertIn("screened", h["query"]["note"])
+            self.assertEqual([o["record_id"] for o in h["observations"]], ["K.SG"])
+
+
+class TestRunAllWiring(unittest.TestCase):
+    """接线断言：run_all 用配置的 LINEAGE_HISTORY_FILE，观测来源给完整元数据/.anno，
+    不再写死 panel 路径、不再只喂 09b 的 summary。"""
+
+    REPO = pathlib.Path(__file__).resolve().parents[1]
+
+    def _09d_block(self):
+        text = (self.REPO / "run_all.sh").read_text(encoding="utf-8")
+        i = text.find("step 09d")
+        self.assertGreater(i, 0, "run_all.sh must still run step 09d")
+        return text[i:text.find("\n", text.find("--sample", i))]
+
+    def test_run_all_uses_config_and_full_metadata_not_hardcoded_paths(self):
+        block = self._09d_block()
+        self.assertIn('--history "$LINEAGE_HISTORY_FILE"', block)
+        self.assertNotIn("panel/lineage_history.json", block, "history 面板路径来自配置，不写死")
+        self.assertNotIn("--rows", block, "run_all 不再把 09b 筛选 summary 当观测来源")
+        run_all = (self.REPO / "run_all.sh").read_text(encoding="utf-8")
+        self.assertIn("--metadata $WGS/11_aadr/reference_metadata.tsv", run_all)
+        self.assertIn("--anno $AADR_ANNO", run_all)
+
+    def test_env_sh_exports_the_lineage_paths(self):
+        env = (self.REPO / "scripts" / "env.sh").read_text(encoding="utf-8")
+        self.assertIn('"LINEAGE_HISTORY_FILE"', env)
+        self.assertIn('"AADR_ANNO"', env)
+
+    def test_wgsconfig_falls_back_to_the_shipped_panel(self):
+        """config 未覆盖时回到仓库自带 panel（通用面板，不是私人数据）；覆盖则用覆盖值。"""
+        src = (self.REPO / "scripts" / "wgsconfig.py").read_text(encoding="utf-8")
+        self.assertIn('OPT["lineage_history_file"] or str(ROOT / "panel" / "lineage_history.json")', src)
+
+
 class TestCliWritesAdmissibleManifest(unittest.TestCase):
     """复审 H6/AN5 残留：09d 的 lineage_history.json 此前没有 manifest，30 只能按"文件存在"
     读取。现在 CLI 写 analysis_id=09d-lineage-history 的 manifest，30 走 analysis_state 准入。

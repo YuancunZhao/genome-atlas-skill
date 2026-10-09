@@ -15,6 +15,10 @@ Three jobs, all shaped by the same rule: never turn missing evidence into a find
   deliberately does *not* apply the autosomal call-rate gate: a 0.49-coverage ancient genome with a
   published mt label is evidence about that lineage, while the autosomal gate is about PCA. Routes are
   only ever shown when a versioned, sourced route exists; otherwise the view says it is a distribution.
+* `observation_source` decides where the records come from and records whether the query happened at
+  all: the full 08-normalised metadata first, the configured .anno when AADR PCA is off, the 09b
+  summary (a screened subset) only as an explicit fallback. A query that never ran is reported as
+  "history source not available" -- never as "the dataset has no records".
 
 Y and mt names are namespaced (`y:`, `mt:`) because the same label can exist in both trees.
 """
@@ -267,6 +271,96 @@ def reviewed_call(history, kind, reported_hg, sample_id=None, log=None):
     return str(rec["conservative_hg"]), str(rec.get("reason") or "reviewed by hand")
 
 
+# ---------------------------------------------------------------- 观测来源（AN4：完整元数据独立查询）
+
+# reference_metadata.tsv 是 pandas 写的：数值列在 TSV 里都成了字符串。历史视图要拿这些字段做
+# 坐标/年代（模板还要做投影运算），在这里转回数值；转不动的按缺失处理，不猜。
+_NUMERIC_FIELDS = ("latitude", "longitude", "date_mean_bp", "date_min_bp", "date_max_bp")
+
+
+def _coerce_numeric(row):
+    for k in _NUMERIC_FIELDS:
+        v = row.get(k)
+        if v is None or str(v).strip() == "":
+            row[k] = None
+            continue
+        try:
+            f = float(v)
+            row[k] = int(f) if f.is_integer() else f
+        except (TypeError, ValueError):
+            row[k] = None
+    return row
+
+
+def read_metadata_tsv(path):
+    """读 08/09b 规范化后写出的 reference_metadata.tsv（**完整**元数据，未过 08/09 的 PCA 筛选）。"""
+    import csv
+    with open(path, newline="", encoding="utf-8") as fh:
+        return [_coerce_numeric(dict(r)) for r in csv.DictReader(fh, delimiter="\t")]
+
+
+def read_anno_records(path):
+    """AADR PCA 关闭（08/09b 没跑）时直接读已配置的 .anno——历史查询不随 PCA 禁用而失效。
+
+    复用 ancestry_data.normalize_metadata：08/09b 用同一函数写 reference_metadata.tsv，这里用
+    同一函数读 .anno，字段名不会漂。.anno 缺必需列时 normalize_metadata 抛 ValueError，由
+    调用方按"来源不可读"处理（如实报错，不静默变成空数据集）。
+    """
+    import csv
+    import ancestry_data as ad
+    with open(path, newline="", encoding="utf-8") as fh:
+        raw = [{(k or "").strip(): v for k, v in r.items()} for r in csv.DictReader(fh, delimiter="\t")]
+    return ad.normalize_metadata(raw, dataset="AADR", release="from-anno")
+
+
+def observation_source(metadata="", anno="", rows="", yard=""):
+    """决定观测记录从哪里来，并如实记录"到底查没查、查的是什么"。
+
+    优先级：--metadata（08 的完整元数据）> --anno（已配置注释文件，AADR 禁用时也能查）>
+    --rows（09b 的 summary——那一份经过 08/09 的 PCA 筛选，只剩面板里的记录；保留作显式回退，
+    并在 query.note 里说明它是筛选子集）。都没给时用缺省位置：yard 旁的 11_aadr/
+    reference_metadata.tsv，再退 11_aadr/summary.json。**都没有 = 没查过**，state=not_available：
+    没查过不等于数据集没有记录，这个状态会一路带到 history_state，报告按"历史资料不可用"呈现。
+
+    返回 (rows, query)，query = {state: ok|unreadable|not_available, source_kind, source, n_rows, note}。
+    """
+    def _q(state, kind, path, rows_list, note=""):
+        return rows_list, {"state": state, "source_kind": kind, "source": str(path or ""),
+                           "n_rows": len(rows_list), "note": str(note)}
+
+    _SCREENED = "09b summary rows: screened by the 08/09 PCA filters, not the full dataset"
+    for path, kind, reader, note in (
+        (metadata, "reference_metadata", read_metadata_tsv, ""),
+        (anno, "anno", read_anno_records, ""),
+        (rows, "summary", None, _SCREENED),
+    ):
+        p = str(path or "")
+        if not p or not pathlib.Path(p).exists():
+            continue
+        try:
+            if kind == "summary":
+                doc = json.loads(pathlib.Path(p).read_text(encoding="utf-8"))
+                return _q("ok", kind, p, list(doc.get("records") or []), note)
+            return _q("ok", kind, p, reader(p), note)
+        except (OSError, ValueError, json.JSONDecodeError) as e:
+            return _q("unreadable", kind, p, [], f"{type(e).__name__}: {e}")
+    _meta_default = str(pathlib.Path(yard).parent / "11_aadr" / "reference_metadata.tsv")
+    if pathlib.Path(_meta_default).exists():
+        try:
+            return _q("ok", "reference_metadata", _meta_default, read_metadata_tsv(_meta_default))
+        except (OSError, ValueError) as e:
+            return _q("unreadable", "reference_metadata", _meta_default, [], f"{type(e).__name__}: {e}")
+    _sum_default = str(pathlib.Path(yard).parent / "11_aadr" / "summary.json")
+    if pathlib.Path(_sum_default).exists():
+        try:
+            doc = json.loads(pathlib.Path(_sum_default).read_text(encoding="utf-8"))
+            return _q("ok", "summary", _sum_default, list(doc.get("records") or []), _SCREENED)
+        except (OSError, json.JSONDecodeError) as e:
+            return _q("unreadable", "summary", _sum_default, [], f"{type(e).__name__}: {e}")
+    return _q("not_available", "none", "", [],
+              "no reference_metadata.tsv / configured .anno / 09b summary was available to query")
+
+
 HISTORY_STATES = ("ok", "distribution_only", "unavailable")
 
 
@@ -294,9 +388,19 @@ def load_history(doc):
             "sources": list(d.get("sources") or [])}
 
 
-def history_view(query, history, observations, parents, same_tree=True):
-    """历史视图：观测 + 与查询支系匹配的路线；没有路线时明说是分布视图，不造故事。"""
+def history_view(query, history, observations, parents, same_tree=True, source=None):
+    """历史视图：观测 + 与查询支系匹配的路线；没有路线时明说是分布视图，不造故事。
+
+    `source` 是 observation_source 的查询记录。**没查过不等于数据集没有记录**（7.1）：来源缺失/
+    不可读时视图整体 unavailable 并带原因；只有真正查过而一无所获，才可以说 no_records_in_this_dataset。
+    """
     hist = history or {}
+    base = {"tree_source": hist.get("tree_source", ""), "tree_version": hist.get("tree_version", ""),
+            "sources": list(hist.get("sources") or []), "query": (dict(source) if source else None)}
+    if source is not None and str(source.get("state")) != "ok":
+        # 查询从未发生（not_available）或读了但读不出来（unreadable）：历史资料不可用，而不是空数据集。
+        rc = "history_source_unreadable" if source.get("state") == "unreadable" else "history_source_not_available"
+        return dict(base, history_state="unavailable", history_reason_code=rc, routes=[], observations=[])
     walk = dict(parents or hist.get("parents") or {})
     matched, seen = [], set()
     for r in (hist.get("routes") or []):
@@ -312,12 +416,9 @@ def history_view(query, history, observations, parents, same_tree=True):
     elif obs:
         state, reason = "distribution_only", "no_sourced_route_for_this_branch"
     else:
-        # 没有记录不等于该支系历史上不存在（7.1）：这是分布视图的常态，不是"不可用"。
+        # 查过了、该支系一条相关记录都没有：这是分布视图的常态（7.1），不是"不可用"。
         state, reason = "distribution_only", "no_records_in_this_dataset"
-    return {"history_state": state, "history_reason_code": reason,
-            "routes": matched, "observations": obs,
-            "tree_source": hist.get("tree_source", ""), "tree_version": hist.get("tree_version", ""),
-            "sources": list(hist.get("sources") or [])}
+    return dict(base, history_state=state, history_reason_code=reason, routes=matched, observations=obs)
 
 
 # ---------------------------------------------------------------- CLI（可单独运行，AN4 要求）
@@ -325,13 +426,17 @@ def history_view(query, history, observations, parents, same_tree=True):
 def _cli(argv=None):
     import argparse
     ap = argparse.ArgumentParser(description="lineage history helper (AN4)")
-    ap.add_argument("--history", default="", help="panel/lineage_history.json")
+    ap.add_argument("--history", default="", help="panel/lineage_history.json（LINEAGE_HISTORY_FILE）")
     ap.add_argument("--yard", default="", help="03_haplo (where y_result.json / mt_result.json live)")
     ap.add_argument("--out", required=True, help="where to write lineage_history.json")
     ap.add_argument("--sample", default="")
     ap.add_argument("--ytree", default="", help="YFull current_tree.json, for node-membership checks")
-    ap.add_argument("--rows", default="", help="JSON with the AADR records (11_aadr/summary.json); "
-                                              "their y_hg_raw/mt_hg_raw are what the observations are built from")
+    ap.add_argument("--metadata", default="",
+                    help="11_aadr/reference_metadata.tsv (08's FULL normalised metadata); preferred source")
+    ap.add_argument("--anno", default="",
+                    help="configured AADR .anno, normalised in-place when AADR PCA (08/09b) never ran")
+    ap.add_argument("--rows", default="",
+                    help="09b summary.json (a SCREENED subset of the metadata); explicit fallback only")
     a = ap.parse_args(argv)
 
     hist = load_history(json.loads(pathlib.Path(a.history).read_text(encoding="utf-8"))
@@ -341,23 +446,18 @@ def _cli(argv=None):
     stats = {}
     if nodes:
         print(f"tree nodes loaded: {len(nodes)}")
-    # 复审 AN4-P1：observations 此前恒为空列表（history_view(key, hist, [], parents)），于是报告里的
-    # "已发表发现记录 / 迁移路线"永远是空占位——不是"没有记录"，而是**从来没查过**。这里读入 AADR 的
-    # 记录（含 y_hg_raw/mt_hg_raw），交给 lineage_observations 去筛。查不到就如实报 0，并把原因带上。
-    rows = []
-    # 缺省指向 11_aadr 的结果：单独运行本步时也不必记住路径，而它正是观测的来源。
-    _rows_path = a.rows or str(pathlib.Path(a.yard).parent / "11_aadr" / "summary.json")
-    if _rows_path:
-        _rp = pathlib.Path(_rows_path)
-        if _rp.exists():
-            try:
-                _doc = json.loads(_rp.read_text(encoding="utf-8"))
-                rows = _doc.get("records") or []
-                print(f"observation source: {_rp.name}, {len(rows)} record(s)")
-            except (json.JSONDecodeError, OSError) as e:
-                print(f"WARNING: could not read {_rp}: {e}; observations will be empty", file=sys.stderr)
-        else:
-            print(f"WARNING: {_rp} not found; observations will be empty (has 09b run?)", file=sys.stderr)
+    # 复审 AN4-P1：observations 此前恒为空列表，于是报告里的"已发表发现记录 / 迁移路线"永远是空
+    # 占位——不是"没有记录"，而是**从来没查过**。AN4 查询扩展：观测默认来自 08 的完整元数据
+    # （reference_metadata.tsv，未过 08/09 的 PCA 筛选），AADR 禁用时退到已配置 .anno；09b 的
+    # summary 只是显式回退（它是筛选子集）。没查过/读不出来都记入 query 状态，报告按"历史资料
+    # 不可用"呈现——绝不写成"数据集没有记录"。
+    rows, _query = observation_source(metadata=a.metadata, anno=a.anno, rows=a.rows, yard=a.yard)
+    if _query["state"] == "ok":
+        print(f"observation source: {_query['source_kind']} ({_query['source']}), "
+              f"{_query['n_rows']} record(s)" + (f"; note: {_query['note']}" if _query["note"] else ""))
+    else:
+        print(f"WARNING: observation source {_query['state']} ({_query['note']}); "
+              "history views will be delivered as unavailable, not as an empty dataset", file=sys.stderr)
     out = {"y": None, "mt": None}
     for kind in ("y", "mt"):
         p = pathlib.Path(a.yard) / f"{kind}_result.json"
@@ -377,7 +477,7 @@ def _cli(argv=None):
         _obs = lineage_observations(rows, key, parents, kind, history=hist,
                                     known_nodes=(nodes if kind == "y" else None), stats=stats) \
             if (rows and key) else []
-        _hist = history_view(key, hist, _obs, parents)
+        _hist = history_view(key, hist, _obs, parents, source=_query)
         if stats:
             _hist["label_notes"] = dict(stats)
         out[kind] = dict(s, history=_hist)
@@ -385,13 +485,15 @@ def _cli(argv=None):
     _out_path.parent.mkdir(parents=True, exist_ok=True)
     _out_path.write_text(json.dumps(out, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
     # 复审 H6/AN5 残留：30 此前按"文件存在"读 lineage_history.json，绕过任何状态。写一份
-    # manifest（analysis_id=09d-lineage-history）让 30 走 analysis_state 准入；parameters 只记
-    # 实际输入的 provenance，不用路径字符串冒充内容指纹。
+    # manifest（analysis_id=09d-lineage-history）让 30 走 analysis_state 准入；parameters 记
+    # 观测来源的实际 provenance（层级/行数/查询状态），不用路径字符串冒充内容指纹。
     try:
         import ancestry_data as _adm
         _adm.write_manifest(_out_path.parent / "manifest.json", _adm.build_manifest(
             a.sample or "", "09d-lineage-history", state="ok",
-            parameters={"history": a.history or "", "rows": _rows_path or "", "ytree": a.ytree or ""},
+            parameters={"history": a.history or "", "ytree": a.ytree or "",
+                        "source_kind": _query["source_kind"], "source": _query["source"],
+                        "n_rows": _query["n_rows"], "query_state": _query["state"]},
             outputs=[_out_path.name]))
     except Exception as _e:      # manifest 写失败不阻断结果文件，但要留下痕迹
         print(f"WARNING: could not write the 09d manifest: {_e}", file=sys.stderr)

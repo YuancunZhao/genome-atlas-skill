@@ -36,6 +36,8 @@ out = {
   "MIN_GROUP_N": str(c.MIN_GROUP_N), "CALIB_N": str(c.CALIB_N), "CALIB_SEED": str(c.CALIB_SEED),
   "CALIB_POPS": ",".join(c.CALIB_POPS), "CALIB_CHROMS": ",".join(c.CALIB_CHROMS),
   "AADR_MODERN": ",".join(c.AADR_MODERN), "AADR_ANCIENT_PREFIX": ",".join(c.AADR_ANCIENT_PREFIX),
+  # AN4 查询扩展：09d 的 history 面板与 AADR 注释文件走配置，run_all 不再写死路径。
+  "LINEAGE_HISTORY_FILE": c.LINEAGE_HISTORY_FILE, "AADR_ANNO": c.AADR_ANNOTATION,
 }
 for k, v in out.items():
     print(f"export {k}={shlex.quote(v)}")

@@ -158,7 +158,9 @@ CALIB_CHROMS = OPT["calibration_chroms"]
 CALIB_N = OPT["calibration_n"]
 CALIB_SEED = OPT["calibration_seed"]
 AADR_ANNOTATION = OPT["aadr_annotation"]
-LINEAGE_HISTORY_FILE = OPT["lineage_history_file"]
+# AN4 查询扩展：history 面板路径进配置（config.yaml 可覆盖）；未配置时用仓库自带的
+# panel/lineage_history.json——那是随仓库发布的通用面板（别名/树边/路线），不是任何样本的私人数据。
+LINEAGE_HISTORY_FILE = OPT["lineage_history_file"] or str(ROOT / "panel" / "lineage_history.json")
 ANALYSIS_ID = str(_g("analysis_id", ""))                          # optional; empty = derived from inputs
 
 def rel(p):
