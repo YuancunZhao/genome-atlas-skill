@@ -2,20 +2,24 @@
 
 §3.2 P1 点名"1000G 没有 records"——kg 分析只有人群组，组上没有坐标，地图层无从下点。
 修复分两层，都不碰 04b（其 manifest/参数不掺显示层）：
-- panel/kg_population_locations.tsv：IGSR phase3 人群描述 + 采样地（region 级），描述含城市
-  的用城市坐标、只到国家/区域的用区域质心并在 note 声明，离散人群坐标在采样地不在祖源地；
+- 人群采样点（IGSR phase3 人群描述 + 采样地，region 级），描述含城市的用城市坐标、只到
+  国家/区域的用区域质心并在 note 声明，离散人群坐标在采样地不在祖源地；
 - 30 组装时把采样点附到 kg 分析的**人群组**（latitude/longitude/location_id/locality/
   location_precision/name_zh——与 AADR 记录同名字段，模板可用同一套几何与精度词表），并写
   group_location_counts。个体记录永远不落坐标：IGSR 不发布个体地理信息。
 
+地点表迁移（2026-10-09）：kg 采样点行已并入唯一人工地理覆盖表 panel/ancestry_locations.tsv
+（dataset=1000G），原 panel/kg_population_locations.tsv 删除——本测试从统一表按 dataset 过滤
+读 kg 行，并断言 30 的接线读统一表。
+
 测试两层都对着生产件：面板文件直接解析校验；`_attach_kg_group_locations` 本体从 30 的源
-文本抽出真跑（stdlib-only，本地/服务器都执行）；另加接线断言（30 必须真调用该函数并读该
-panel），防"辅助函数留着、组装另写一套"。旧代码上这些用例全部失败（函数/文件/接线不存在）。
+文本抽出真跑（stdlib-only，本地/服务器都执行）；另加接线断言（30 必须真调用该函数并读统一
+panel 的 1000G 行），防"辅助函数留着、组装另写一套"。旧代码上这些用例全部失败。
 """
 import csv, io, pathlib, py_compile, re, subprocess, sys, unittest
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
-PANEL = REPO / "panel" / "kg_population_locations.tsv"
+PANEL = REPO / "panel" / "ancestry_locations.tsv"
 B30 = REPO / "scripts" / "30_build_report_data.py"
 
 PHASE3_POPS = {
@@ -32,7 +36,8 @@ _COLS = ["dataset", "source_id", "location_id", "label_zh", "label_en",
 def _rows():
     lines = [ln for ln in PANEL.read_text(encoding="utf-8").splitlines()
              if ln.strip() and not ln.startswith("#")]
-    return list(csv.DictReader(io.StringIO("\n".join(lines)), delimiter="\t"))
+    all_rows = list(csv.DictReader(io.StringIO("\n".join(lines)), delimiter="\t"))
+    return [r for r in all_rows if r.get("dataset") == "1000G"]
 
 
 def _fn():
@@ -47,7 +52,7 @@ def _fn():
 
 
 class TestPanelFile(unittest.TestCase):
-    """面板文件自身可核查：26 人群齐全、坐标合法、精度一律 region、双语与采样地非空。"""
+    """面板（统一表的 1000G 行）自身可核查：26 人群齐全、坐标合法、精度一律 region、双语与采样地非空。"""
 
     def test_all_26_phase3_populations_present_once_with_valid_coords(self):
         rows = _rows()
@@ -128,12 +133,15 @@ class TestAttachFunction(unittest.TestCase):
 
 
 class TestWiring(unittest.TestCase):
-    """接线断言：30 必须真调用该函数并读该 panel（防死代码/防旁路），且能通过编译。"""
+    """接线断言：30 必须真调用该函数并读统一表的 1000G 行（防死代码/防旁路/防旧表复活）。"""
 
-    def test_30_calls_the_function_with_the_panel(self):
+    def test_30_calls_the_function_with_the_unified_panel(self):
         src = B30.read_text(encoding="utf-8")
         self.assertIn("_attach_kg_group_locations(_anc_analyses", src)
-        self.assertIn("panel\" / \"kg_population_locations.tsv", src)
+        self.assertIn('panel" / "ancestry_locations.tsv', src)
+        self.assertIn('_kgl_loc["dataset"].astype(str) == "1000G"', src,
+                      "kg 采样点必须来自统一表按 dataset=1000G 过滤，不得另读旁路面板")
+        self.assertNotIn("kg_population_locations", src, "旧 kg 面板引用必须清干净")
         py_compile.compile(str(B30), doraise=True, cfile="/tmp/_30_kgl.pyc")
 
 

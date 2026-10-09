@@ -6,10 +6,10 @@ Inputs already produced by earlier steps:
   modern:  04_ancestry/kg.common.{psam,pvar} + 04_ancestry/prune.prune.in
            + 02_complete/{SAMPLE}.1kg / target.1kg (the target's 1kg-space genotypes)
   ancient: 11_aadr/aadr.{bed,bim,fam} + 11_aadr/prune.prune.in
-           + panel/aadr_site_regions.tsv (fam FID -> region north/south)
+           + panel/ancestry_locations.tsv (source_id -> region north/south via its note)
 
-Group definitions live in panel/f3_groups.tsv (modern) and the region column of
-aadr_site_regions.tsv (ancient); nothing sample-specific is written here.
+Group definitions live in panel/f3_groups.tsv (modern) and the region token of
+ancestry_locations.tsv notes (ancient); nothing sample-specific is written here.
 
 Writes:
   04_ancestry/f3/f3_results.tsv    modern tests (one row per test, f3/SE/Z)
@@ -41,6 +41,7 @@ C; outgroup-f3 rises with shared drift between the target and the profiled group
 import json
 import math
 import pathlib
+import re
 import subprocess
 import sys
 
@@ -288,14 +289,29 @@ def modern_block(groups):
 
 
 # ---------------------------------------------------------------- ancient block
+def regions_from_locations(loc):
+    """source_id -> 'north'/'south' (else '') from the unified manual table's note token.
+
+    地点表迁移（§3.2 P1 AN1/AN6）：旧的独立区域表已删除，南北区域判定的唯一出处是
+    ancestry_locations.tsv 的 note `region=north|south`（秦岭—淮河界）。没有该 token 的行——
+    非 China 前缀、跨区域聚合（region=unclassified）、1000G 采样地行——一律 ''，池分组本来就
+    把 '' 当不可分类跳过，与旧表空 region 行为一致（迁移时 94 行逐值比对过）。
+    """
+    out = {}
+    for sid, note in zip(loc["source_id"].astype(str), loc["note"].astype(str)):
+        m = re.search(r"region=(north|south)\b", str(note))
+        out[sid] = m.group(1) if m else ""
+    return out
+
+
 def ancient_block():
     d11 = W / "11_aadr"
     for f in ("aadr.bed", "aadr.bim", "aadr.fam", "prune.prune.in"):
         if not (d11 / f).exists():
             print(f"28: ancient input {f} missing (11_aadr); skipping ancient f3", file=sys.stderr)
             return None
-    reg = pd.read_csv(PANEL / "aadr_site_regions.tsv", sep="\t", comment="#", dtype=str)
-    region_of = dict(zip(reg.label, reg.region.fillna("")))
+    loc = pd.read_csv(PANEL / "ancestry_locations.tsv", sep="\t", comment="#", dtype=str)
+    region_of = regions_from_locations(loc)
     fam = pd.read_csv(d11 / "aadr.fam", sep=r"\s+", header=None,
                       names=["FID", "IID", "PAT", "MAT", "SEX", "PHENO"], dtype=str)
     anc = fam[(fam.IID != SAMPLE) & (fam.FID != SAMPLE)]

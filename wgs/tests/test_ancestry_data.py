@@ -621,3 +621,55 @@ class TestGroupSummaries(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class TestLocationTableSingleTruth(unittest.TestCase):
+    """地点表迁移（§3.2 P1 AN1/AN6 项，2026-10-09）：ancestry_locations.tsv 是唯一人工地理覆盖表。
+
+    aadr_site_regions.tsv（南北区域 94 行）与 kg_population_locations.tsv（1000G 采样点 26 行）
+    的内容已分别并入统一表（AADR 行 region 在 note token、kg 行 dataset=1000G），两张旧表删除，
+    消费者 28（f3 区域池）与 30（区域/中文名/精度/kg 采样点）全部改读统一表。本守卫防止任何
+    一张旧表或其引用悄悄回来——两份手工地理真值就是当初点名的缺陷。"""
+
+    PANEL = pathlib.Path(__file__).resolve().parents[1] / "panel"
+    RETIRED = ("aadr_site_regions.tsv", "kg_population_locations.tsv")
+
+    def test_unified_table_exists_and_retired_tables_are_gone(self):
+        self.assertTrue((self.PANEL / "ancestry_locations.tsv").exists(),
+                        "统一人工地理覆盖表必须在")
+        for gone in self.RETIRED:
+            self.assertFalse((self.PANEL / gone).exists(),
+                             f"{gone} 已并入 ancestry_locations.tsv，不得再出现（两份手工真值）")
+
+    def test_no_script_reads_a_retired_table(self):
+        scripts = pathlib.Path(__file__).resolve().parents[1] / "scripts"
+        for p in sorted(scripts.glob("*.py")) + sorted(scripts.glob("*.sh")):
+            src = p.read_text(encoding="utf-8")
+            for gone in ("aadr_site_regions", "kg_population_locations"):
+                self.assertNotIn(gone, src, f"{p.name} 仍引用已删除的 {gone}")
+
+    def test_30_scopes_aadr_side_enrichment_to_aadr_rows(self):
+        """统一表混住两个 dataset 后，30 的 AADR 侧 enrichment 必须按 dataset 过滤。
+
+        真实样本证据：AADR 面板里有 308 个 1000G 现代个体（CHB/CHS/CDX），不过滤时 kg 采样行
+        会把它们精化成 region、亲和力行吃进 kg 中文名——迁移变成了未经验证的行为变更。"""
+        src = (pathlib.Path(__file__).resolve().parents[1] / "scripts" / "30_build_report_data.py"
+               ).read_text(encoding="utf-8")
+        self.assertIn('_loc_aadr = _loc[_loc["dataset"].astype(str) == "AADR"]', src,
+                      "AADR 区域/中文名/精度 enrichment 只认 dataset=AADR 行")
+        self.assertIn("if _loc_aadr is not None and len(_loc_aadr)", src)
+
+    def test_unified_table_carries_both_datasets(self):
+        """统一表同时承载 AADR 覆盖行与 1000G 采样地行（dataset 列区分），不是只迁了一半。"""
+        rows = [ln.split("\t") for ln in
+                (self.PANEL / "ancestry_locations.tsv").read_text(encoding="utf-8").splitlines()
+                if ln.strip() and not ln.startswith("#") and not ln.startswith("dataset\t")]
+        datasets = {r[0] for r in rows if len(r) == 11}
+        self.assertIn("AADR", datasets)
+        self.assertIn("1000G", datasets)
+        aadr = sum(1 for r in rows if r[0] == "AADR")
+        kg = sum(1 for r in rows if r[0] == "1000G")
+        self.assertEqual((aadr, kg), (94, 26), "AADR 94 行 + 1000G 26 行，迁移后不得缺行")
+        # AADR 行的南北区域判定藏在 note 的 region= token 里（28 靠它分池）
+        with_region = [r for r in rows if r[0] == "AADR" and "region=north" in r[10] or r[0] == "AADR" and "region=south" in r[10]]
+        self.assertEqual(len(with_region), 72, "北 42 + 南 30（旧表行数），token 不得丢")

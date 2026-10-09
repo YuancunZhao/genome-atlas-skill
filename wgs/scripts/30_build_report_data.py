@@ -490,8 +490,6 @@ if _AADR_STATE == "ok" and _pa is not None and len(_pa):
     # are not the same statistic: the nearest genome (BaiyangcunM13.SG, d=0.0033) belongs to a group
     # averaging 0.0495, 15x further out. Emit one table sorted by d, carrying kind/n/date/region, so
     # the figure can put modern and ancient on a single axis and label which is which.
-    _reg_tsv = _read_tsv(pathlib.Path(__file__).resolve().parents[1] / "panel" / "aadr_site_regions.tsv",
-                         comment="#", keep_default_na=False)
     # --- the affinity ranking is read from 09b's structured result (AN2). Step 30 assembles; it does
     # not re-group, re-threshold or recompute distances, because a second implementation is exactly how
     # the report and the summary drift apart. `region` and the Chinese name are the one hand-curated
@@ -505,9 +503,17 @@ if _AADR_STATE == "ok" and _pa is not None and len(_pa):
             _sum = None
     _loc = _read_tsv(pathlib.Path(__file__).resolve().parents[1]/"panel"/"ancestry_locations.tsv",
                      comment="#", keep_default_na=False)
+    # 地点表迁移后统一表同时承载 AADR 覆盖行与 1000G 采样地行（dataset 列区分）。这一层是
+    # **AADR 分析的**人工区域/中文名/精度 enrichment——语义上只认 AADR 行，必须按 dataset 过滤；
+    # 不过滤会让 1000G 行"借道"改 AADR 记录（AADR 面板里 CHB/CHS/CDX 等 308 个 1000G 现代个体
+    # 会被 kg 采样行精化成 region、亲和力行吃进 kg 中文名——那是行为变更，不是迁移）。kg 采样点
+    # 在 AN5 段按 dataset=1000G 自行取行，与此处互不越界。
+    _loc_aadr = None
+    if _loc is not None and len(_loc) and {"dataset", "source_id"} <= set(_loc.columns):
+        _loc_aadr = _loc[_loc["dataset"].astype(str) == "AADR"]
     _region, _zhname = {}, {}
-    if _loc is not None and len(_loc):
-        for r in _loc.itertuples():
+    if _loc_aadr is not None and len(_loc_aadr):
+        for r in _loc_aadr.itertuples():
             sid = str(getattr(r, "source_id", ""))
             note = str(getattr(r, "note", "") or "")
             m = re.search(r"region=(north|south|unclassified)", note)
@@ -560,8 +566,8 @@ if _AADR_STATE == "ok" and _pa is not None and len(_pa):
         # AN6：记录级精度按人工表细化。AADR 只区分"有坐标/没坐标"，而 panel/ancestry_locations.tsv
         # 明确标了哪些来源只到地区级（province）——省级来源不该在地图上显示成一个精确遗址。
         _prec = {}
-        if _loc is not None and len(_loc) and {"source_id", "precision"} <= set(_loc.columns):
-            for _sid, _pr in zip(_loc["source_id"], _loc["precision"]):
+        if _loc_aadr is not None and len(_loc_aadr) and {"source_id", "precision"} <= set(_loc_aadr.columns):
+            for _sid, _pr in zip(_loc_aadr["source_id"], _loc_aadr["precision"]):
                 if str(_pr).strip():
                     _prec[str(_sid).strip()] = str(_pr).strip()
         # 注意：这里必须改 **ancestry 实际使用的那个对象**。30 里 AADR 的 summary.json 被读了两遍
@@ -612,7 +618,8 @@ else:
 def _attach_kg_group_locations(analyses, loc_rows):
     """AN6 增强（1000G 位置）：给 1000G 分析的**人群组**补采样点坐标。
 
-    坐标来自 panel/kg_population_locations.tsv（IGSR phase3 人群描述 + 采样地，region 级）：
+    坐标来自 panel/ancestry_locations.tsv 的 dataset=1000G 行（IGSR phase3 人群描述 + 采样地，
+    region 级；地点表迁移后是唯一人工地理覆盖表的一部分）：
     一个人群一个点，代表参考样本的采样/来源地，不是任何个体出生地，也不是目标样本的位置。
     组记录（个体）不落坐标——IGSR 不发布个体地理信息，给个体编点就是造数据。只补、不覆盖：
     组上已有的坐标（将来 04b 若自带）不动；面板里没有的人群保持无坐标，由
@@ -672,8 +679,14 @@ for _doc, _st, _rs in ((_AADR_DOC, _AADR_STATE, _AADR_REASON), (_kg_doc, _kg_sta
                              | {"state": _st, "reason_code": _rs})
 # AN6 增强（§3.2 P1"1000G 没有 records"）：1000G 参考空间的人群组补采样点（region 级）。
 # 04b 不动（manifest/参数不掺显示层）；30 组装时附加，与 AADR 的 location_precision 同一模式。
-_kgl = _read_tsv(pathlib.Path(__file__).resolve().parents[1] / "panel" / "kg_population_locations.tsv",
-                 comment="#", keep_default_na=False)
+# 地点表迁移：kg 采样点与 AADR 覆盖同住 panel/ancestry_locations.tsv（唯一人工地理覆盖表，
+# dataset 列区分）——不能依赖上文 AADR 门控块里的 _loc（AADR 禁用时它不会被赋值），这里按
+# dataset=1000G 自行过滤同一张表。
+_kgl_loc = _read_tsv(pathlib.Path(__file__).resolve().parents[1] / "panel" / "ancestry_locations.tsv",
+                      comment="#", keep_default_na=False)
+_kgl = None
+if _kgl_loc is not None and len(_kgl_loc) and {"dataset", "source_id"} <= set(_kgl_loc.columns):
+    _kgl = _kgl_loc[_kgl_loc["dataset"].astype(str) == "1000G"]
 _n_kgl = _attach_kg_group_locations(_anc_analyses,
                                     _kgl.to_dict("records") if _kgl is not None else [])
 print(f"30: kg group sampling-site locations attached for {_n_kgl} groups", file=sys.stderr)

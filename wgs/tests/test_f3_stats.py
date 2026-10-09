@@ -243,5 +243,52 @@ class TestWriteTsv(unittest.TestCase):
         self.assertEqual(lines[2].split("\t"), ["degenerate", "NA", "0.000000", "NA"])
 
 
+@_NEEDS_NP
+class TestRegionsFromLocations(unittest.TestCase):
+    """地点表迁移：28 的南北区域池改从统一人工表 ancestry_locations.tsv 的 note token 取。
+
+    旧行为读已删除的独立区域表的 region 列；迁移后 region=north|south 藏在 note 里，
+    其余（无 token / region=unclassified / 1000G 采样地行）一律 ''——池分组本来就跳过 ''，
+    与旧表空 region 行为一致。取图测试用真实统一表的行形状。"""
+
+    def test_note_token_extraction(self):
+        loc = pd.DataFrame([
+            {"source_id": "China_Baligang_BA_EasternZhou",
+             "note": "省份=河南；region=north；八里岗遗址在河南淅川，淮河以北的河南境"},
+            {"source_id": "China_Taiwan_Han", "note": "省份=台湾；非 China_ 前缀不参与南北池"},   # 无 token
+            {"source_id": "China_IA", "note": "region=unclassified；跨区域聚合标签，区域不适用"},
+            {"source_id": "KHV", "note": "superpop=EAS；描述含采样城市"},                          # 1000G 行
+            {"source_id": "China_Baoj", "note": "省份=陕西；region=south；宝鸡在秦岭—淮河以南"},
+        ])
+        self.assertEqual(f3.regions_from_locations(loc),
+                         {"China_Baligang_BA_EasternZhou": "north",
+                          "China_Taiwan_Han": "", "China_IA": "", "KHV": "",
+                          "China_Baoj": "south"})
+
+    def test_real_unified_table_maps_the_94_aadr_rows(self):
+        """对真实统一表整表跑一遍：有 region= 的恰为北 42 + 南 30，与迁移前逐行一致。"""
+        panel = pathlib.Path(__file__).resolve().parents[1] / "panel" / "ancestry_locations.tsv"
+        loc = pd.read_csv(panel, sep="\t", comment="#", dtype=str, keep_default_na=False)
+        reg = f3.regions_from_locations(loc)
+        aadr = [k for k in reg if loc.set_index("source_id").loc[k, "dataset"] == "AADR"]
+        north = sum(1 for k in aadr if reg[k] == "north")
+        south = sum(1 for k in aadr if reg[k] == "south")
+        self.assertEqual((north, south), (42, 30), "迁移前 94 行的区域判定必须原样保留")
+        # 统一表里的 1000G 行永远不带 region token：采样地不是南北池成员
+        kg = [k for k in reg if loc.set_index("source_id").loc[k, "dataset"] == "1000G"]
+        self.assertTrue(kg and all(reg[k] == "" for k in kg))
+
+
+class TestAncientRegionSource(unittest.TestCase):
+    """源级接线（不依赖 numpy）：28 必须读统一表，且不得再引用任何已删除的旧表。"""
+
+    def test_28_reads_the_unified_location_table(self):
+        src = (pathlib.Path(__file__).resolve().parents[1] / "scripts" / "28_f3_stats.py"
+               ).read_text(encoding="utf-8")
+        self.assertIn('PANEL / "ancestry_locations.tsv"', src)
+        self.assertNotIn("aadr_site_regions", src)
+        self.assertNotIn("kg_population_locations", src)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
