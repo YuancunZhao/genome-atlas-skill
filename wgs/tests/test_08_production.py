@@ -241,6 +241,22 @@ class TestDedupStaysInsideTheAvailablePanel(unittest.TestCase):
                              {"P.SG", "P.HO"},
                              "reference_metadata.tsv 必须带全部原始表示，不是去重后的子集")
 
+    def test_ok_manifest_records_the_annotation_content_sha(self):
+        """复审 §3.2 P1 AN1（缓存绑定）：ok manifest 必须记录实际规范化的 .anno 内容指纹。
+        09d 拿它与当前配置注释比对；没这份指纹，旧 metadata 换了注释也照样被当成当前查询。"""
+        import hashlib
+        with tempfile.TemporaryDirectory() as td:
+            cfg = _write_config(td)
+            _write_panel(td)
+            bin_dir = _write_bcftools(td, "ok")
+            r = _run_08(cfg, bin_dir)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            anno = pathlib.Path(td) / "work/data/ref/aadr/panel.anno"
+            want = hashlib.sha256(anno.read_bytes()).hexdigest()[:12]
+            m = _manifest(td)
+            self.assertEqual(m["parameters"].get("annotation_sha"), want,
+                             "记录的是实际读的 .anno 的内容指纹（file_sha 同款 12 位）")
+
     def test_dedup_still_applies_when_both_representations_are_available(self):
         """两种表示都在 .ind 时仍去重（一人一份基因型）：修可用性排序不得顺手取消去重。"""
         with tempfile.TemporaryDirectory() as td:

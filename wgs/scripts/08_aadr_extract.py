@@ -200,7 +200,8 @@ pd.DataFrame({"iid":iids,"label":labels,"kind":kinds,"date":list(keep2.date_mean
               "call_rate":list(keep2.call_rate)+[None],"geno_row":list(keep2.geno_row)+[-1]}).to_csv(f"{W}/samples.tsv",sep="\t",index=False)
 ad.write_manifest(f"{W}/manifest.json", ad.build_manifest(
     SAMPLE,"08-aadr-extract",state="ok",reference_release=RELEASE,
-    parameters={"aadr_prefix":PREF,"annotation":ANNO,"modern":AADR_MODERN,"ancient_prefix":AADR_ANCIENT_PREFIX,
+    parameters={"aadr_prefix":PREF,"annotation":ANNO,"annotation_sha":ad.file_sha(ANNO),
+                "modern":AADR_MODERN,"ancient_prefix":AADR_ANCIENT_PREFIX,
                 "unmatched_modern":_um["modern"],"unmatched_ancient_prefix":_um["ancient_prefix"],
                 "min_call_rate_ancient":MIN_CR_ANCIENT,"min_projection_snps":MIN_PROJECTION_SNPS},
     input_fingerprints={"geno_size":os.path.getsize(f"{PREF}.geno"),"n_snp":int(n_snp),"n_ind":int(n_ind)},

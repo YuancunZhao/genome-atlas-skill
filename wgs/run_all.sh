@@ -77,8 +77,11 @@ fi
 _LHSRC=""
 if [ -f "$WGS/11_aadr/reference_metadata.tsv" ]; then
   _LHSRC="--metadata $WGS/11_aadr/reference_metadata.tsv"
-elif [ -n "$AADR_ANNO" ] && [ -f "$AADR_ANNO" ]; then
-  _LHSRC="--anno $AADR_ANNO"
+fi
+# 复审 §3.2 P1 AN1（缓存绑定）：metadata 是缓存不是无条件优先——把配置的注释一并传给 09d，
+# 它用 08 manifest 的 annotation_sha 与当前注释内容比对；对不上就规范化当前 .anno，不再查旧地点。
+if [ -n "$AADR_ANNO" ] && [ -f "$AADR_ANNO" ]; then
+  _LHSRC="$_LHSRC --anno $AADR_ANNO"
 fi
 step 09d lineage history and evidence;                        python3 $S/lineage_history.py --history "$LINEAGE_HISTORY_FILE" $_LHSRC --yard $WGS/03_haplo --out $WGS/03_haplo/lineage_history.json --ytree "$YTREE/current_tree.json" --sample "$SAMPLE"
 unset _LHSRC

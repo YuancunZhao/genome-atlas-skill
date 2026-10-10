@@ -597,6 +597,8 @@ class TestObservationSourceTiers(unittest.TestCase):
             self.assertEqual(q["n_rows"], 1)
             self.assertEqual([o["record_id"] for o in doc["y"]["history"]["observations"]], ["I1.SG"])
 
+
+
     def test_anno_missing_required_columns_is_unreadable_not_an_empty_dataset(self):
         """.anno 缺必需列：如实报"来源不可读"，不是静默空数据集。"""
         with tempfile.TemporaryDirectory() as td:
@@ -646,6 +648,97 @@ class TestObservationSourceTiers(unittest.TestCase):
             self.assertEqual(h["query"]["source_kind"], "summary")
             self.assertIn("screened", h["query"]["note"])
             self.assertEqual([o["record_id"] for o in h["observations"]], ["K.SG"])
+
+
+_ANNO_HEADER = ("Genetic ID\tPersistent Genetic ID\tIndividual ID\tLocality\tLatitude\tLongitude\t"
+                "Date mean in BP\tDate standard deviation in BP\tFull Date\tMethod for Determining Date\t"
+                "Suffices\tY haplogroup in terminal\tmtDNA haplogroup\tPublication abbreviation\n")
+
+
+class TestMetadataCacheIsBoundToTheCurrentAnnotation(unittest.TestCase):
+    """复审 §3.2 P1 AN1：observation_source 优先任何存在的 metadata，未验证当前注释身份。
+
+    复现：旧 reference_metadata.tsv（按注释 A 规范化）+ 换了配置的注释 B —— 查的还是旧地点。
+    缓存必须绑定注释内容：08 的 ok manifest 记录 annotation_sha；09d 拿它与当前配置注释比对，
+    对不上（或没记录）就直接规范化当前 .anno。A→B→A：换回 A 时 metadata 指纹重新对上、
+    优先用缓存。"""
+
+    def _anno_file(self, td, name, gid, locality):
+        p = pathlib.Path(td) / name
+        p.write_text(_ANNO_HEADER +
+                     f"{gid}.SG\t{gid}\t{gid}\t{locality}\t30\t110\t3300\t150\t3000-3600 calBCE\t"
+                     f"radiocarbon\tSG\tN-CTS4714\t\tpub\n", encoding="utf-8")
+        return p
+
+    def _meta_file(self, td, gid, locality, annotation_sha=None):
+        """旧链留下的 reference_metadata.tsv + 同目录 08 manifest（可选带 annotation_sha）。"""
+        d = pathlib.Path(td) / "11_aadr"
+        d.mkdir(parents=True, exist_ok=True)
+        meta = d / "reference_metadata.tsv"
+        meta.write_text(TestObservationSourceTiers.METADATA_COLS +
+                        f"{gid}.SG\t{gid}\t{gid}\tAADR\tv66\tSG\tN-CTS4714\t\t{locality}\t"
+                        f"30.0\t110.0\tsite\t3300\t3000\t3600\tYFull12.03\tpub\n", encoding="utf-8")
+        params = {"aadr_prefix": "panel"} | ({"annotation_sha": annotation_sha}
+                                             if annotation_sha else {})
+        (d / "manifest.json").write_text(json.dumps({
+            "schema_version": "1", "sample_id": "S1", "analysis_id": "08-aadr-extract",
+            "state": "ok", "parameters": params}), encoding="utf-8")
+        return meta
+
+    def _query(self, td, meta, anno):
+        import hashlib
+        yard = TestObservationSourceTiers()._yard(td)
+        out = pathlib.Path(td) / "lineage_history.json"
+        rc = lh._cli(["--yard", str(yard), "--out", str(out), "--sample", "S1",
+                      "--history", "", "--metadata", str(meta), "--anno", str(anno)])
+        assert rc == 0
+        doc = json.loads(out.read_text(encoding="utf-8"))
+        return doc["y"]["history"]["query"], doc["y"]["history"]["observations"]
+
+    def test_stale_metadata_is_not_preferred_over_the_configured_annotation(self):
+        """旧 metadata（按注释 A 规范化，locality=OldSite）+ 当前配置注释 B（NewSite）：
+        必须查 B，不能沿用旧地点。"""
+        with tempfile.TemporaryDirectory() as td:
+            import hashlib
+            anno_a = self._anno_file(td, "old.anno", "OLD", "OldSite")
+            sha_a = hashlib.sha256(anno_a.read_bytes()).hexdigest()[:12]
+            meta = self._meta_file(td, "OLD", "OldSite", annotation_sha=sha_a)
+            anno_b = self._anno_file(td, "current.anno", "NEW", "NewSite")
+            q, obs = self._query(td, meta, anno_b)
+            self.assertEqual((q["source_kind"], q["state"]), ("anno", "ok"),
+                             "缓存身份对不上当前注释时改查当前 .anno，不是继续用旧 metadata")
+            self.assertIn("annotation", q["note"], "note 要说明为什么不用缓存")
+            self.assertEqual([o["record_id"] for o in obs], ["NEW.SG"],
+                             "查到的是当前注释里的记录，不是旧地点的 OLD.SG")
+
+    def test_metadata_sha_matching_the_current_annotation_is_preferred(self):
+        """A→B→A 的最后一跳：注释换回 A 时，指纹重新对上——优先用缓存（省一次全量规范化）。"""
+        with tempfile.TemporaryDirectory() as td:
+            import hashlib
+            anno_a = self._anno_file(td, "a.anno", "OLD", "OldSite")
+            sha_a = hashlib.sha256(anno_a.read_bytes()).hexdigest()[:12]
+            meta = self._meta_file(td, "OLD", "OldSite", annotation_sha=sha_a)
+            q, obs = self._query(td, meta, anno_a)
+            self.assertEqual((q["source_kind"], q["state"]), ("reference_metadata", "ok"))
+            self.assertEqual([o["record_id"] for o in obs], ["OLD.SG"])
+
+    def test_manifest_without_a_recorded_sha_cannot_prove_currency(self):
+        """修复前的旧 manifest 没记 annotation_sha：证明不了缓存身份，保守退回当前 .anno。"""
+        with tempfile.TemporaryDirectory() as td:
+            meta = self._meta_file(td, "OLD", "OldSite")            # 无 annotation_sha
+            anno_b = self._anno_file(td, "current.anno", "NEW", "NewSite")
+            q, obs = self._query(td, meta, anno_b)
+            self.assertEqual((q["source_kind"], q["state"]), ("anno", "ok"))
+            self.assertEqual([o["record_id"] for o in obs], ["NEW.SG"])
+
+    def test_run_all_passes_the_configured_anno_alongside_the_metadata(self):
+        """接线：metadata 存在时 run_all 也要把配置的 AADR_ANNO **追加**给 09d 做身份比对
+        （elif 只会在没有 metadata 时才传 anno——那正是查不到换注释的场景）。"""
+        run_all = (pathlib.Path(__file__).resolve().parents[1] / "run_all.sh").read_text(
+            encoding="utf-8")
+        self.assertIn('--metadata $WGS/11_aadr/reference_metadata.tsv', run_all)
+        self.assertIn('$_LHSRC --anno $AADR_ANNO', run_all,
+                      "09d 需要当前配置注释才能验证 metadata 缓存身份")
 
 
 class TestReviewBindingAndThresholds(unittest.TestCase):

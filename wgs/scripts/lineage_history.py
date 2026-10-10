@@ -457,6 +457,15 @@ def read_anno_records(path):
     return ad.normalize_metadata(raw, dataset="AADR", release="from-anno")
 
 
+def _metadata_annotation_sha(metadata_path):
+    """08 在 metadata 同目录 manifest.json 里记录的注释内容指纹；读不到/没记录 = 无法证明。"""
+    import ancestry_data as ad
+    m = ad.read_manifest(pathlib.Path(metadata_path).parent / "manifest.json")
+    if not m or m.get("analysis_id") != "08-aadr-extract" or m.get("state") != "ok":
+        return ""
+    return str((m.get("parameters") or {}).get("annotation_sha") or "")
+
+
 def observation_source(metadata="", anno="", rows="", yard=""):
     """决定观测记录从哪里来，并如实记录"到底查没查、查的是什么"。
 
@@ -466,34 +475,60 @@ def observation_source(metadata="", anno="", rows="", yard=""):
     reference_metadata.tsv，再退 11_aadr/summary.json。**都没有 = 没查过**，state=not_available：
     没查过不等于数据集没有记录，这个状态会一路带到 history_state，报告按"历史资料不可用"呈现。
 
+    缓存身份（复审 §3.2 P1 AN1）：metadata 层是缓存，**不是无条件优先**。同时配置了 .anno 时，
+    先核对 08 manifest 记录的 annotation_sha 与当前注释的内容指纹：对不上（或没记录——修复前
+    的旧 manifest）就证明不了这份缓存出自当前配置的注释，直接规范化当前 .anno，note 说明原因。
+    指纹对上（注释换回同一份，A→B→A 的最后一跳）才用缓存，省一次全量规范化。
+
     返回 (rows, query)，query = {state: ok|unreadable|not_available, source_kind, source, n_rows, note}。
     """
     def _q(state, kind, path, rows_list, note=""):
         return rows_list, {"state": state, "source_kind": kind, "source": str(path or ""),
                            "n_rows": len(rows_list), "note": str(note)}
 
+    _anno_p = str(anno or "")
+    _anno_ok = bool(_anno_p) and pathlib.Path(_anno_p).is_file()
+
+    def _metadata_tier(p):
+        """metadata 层：身份可证（或无注释可比对）才读；否则改查当前 .anno。"""
+        import ancestry_data as _ad
+        if _anno_ok:
+            recorded, current = _metadata_annotation_sha(p), _ad.file_sha(_anno_p)
+            if recorded != current:
+                note = (f"existing metadata not bound to the current annotation "
+                        f"(recorded sha {recorded or 'none'} != {current}); "
+                        f"normalised the configured .anno directly")
+                try:
+                    return _q("ok", "anno", _anno_p, read_anno_records(_anno_p), note)
+                except (OSError, ValueError) as e:
+                    return _q("unreadable", "anno", _anno_p, [], f"{type(e).__name__}: {e}")
+        try:
+            return _q("ok", "reference_metadata", p, read_metadata_tsv(p))
+        except (OSError, ValueError) as e:
+            return _q("unreadable", "reference_metadata", p, [], f"{type(e).__name__}: {e}")
+
     _SCREENED = "09b summary rows: screened by the 08/09 PCA filters, not the full dataset"
-    for path, kind, reader, note in (
-        (metadata, "reference_metadata", read_metadata_tsv, ""),
-        (anno, "anno", read_anno_records, ""),
-        (rows, "summary", None, _SCREENED),
-    ):
+    for path, kind, note in ((metadata, "reference_metadata", ""), (anno, "anno", "")):
         p = str(path or "")
         if not p or not pathlib.Path(p).exists():
             continue
+        if kind == "reference_metadata":
+            return _metadata_tier(p)
         try:
-            if kind == "summary":
-                doc = json.loads(pathlib.Path(p).read_text(encoding="utf-8"))
-                return _q("ok", kind, p, list(doc.get("records") or []), note)
-            return _q("ok", kind, p, reader(p), note)
-        except (OSError, ValueError, json.JSONDecodeError) as e:
+            return _q("ok", kind, p, read_anno_records(p), note)
+        except (OSError, ValueError) as e:
             return _q("unreadable", kind, p, [], f"{type(e).__name__}: {e}")
+    if rows:
+        p = str(rows)
+        if pathlib.Path(p).exists():
+            try:
+                doc = json.loads(pathlib.Path(p).read_text(encoding="utf-8"))
+                return _q("ok", "summary", p, list(doc.get("records") or []), _SCREENED)
+            except (OSError, json.JSONDecodeError) as e:
+                return _q("unreadable", "summary", p, [], f"{type(e).__name__}: {e}")
     _meta_default = str(pathlib.Path(yard).parent / "11_aadr" / "reference_metadata.tsv")
     if pathlib.Path(_meta_default).exists():
-        try:
-            return _q("ok", "reference_metadata", _meta_default, read_metadata_tsv(_meta_default))
-        except (OSError, ValueError) as e:
-            return _q("unreadable", "reference_metadata", _meta_default, [], f"{type(e).__name__}: {e}")
+        return _metadata_tier(_meta_default)
     _sum_default = str(pathlib.Path(yard).parent / "11_aadr" / "summary.json")
     if pathlib.Path(_sum_default).exists():
         try:
