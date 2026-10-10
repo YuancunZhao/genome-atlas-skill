@@ -74,6 +74,41 @@ def _analysis(aid, scope, groups):
             "groups": groups, "nearest_individuals": {groups[0]["label"]: 2}}
 
 
+_AADR_GROUP = {"group_id": "Han", "label": "Han", "kind": "modern", "n": 2, "rank": 1,
+               "small_group": False, "distance_mean": 0.010, "member_ids": ["HAN1", "HAN2"]}
+_AADR_ANCIENT_GROUP = {"group_id": "China_MLBA", "label": "China_MLBA", "kind": "ancient", "n": 2,
+                       "rank": 1, "small_group": False, "distance_mean": 0.020,
+                       "member_ids": ["ANC1", "ANC2"]}
+
+
+def _add_aadr_module(td, aadr_cfg, groups):
+    """11_aadr：09b 形状的 summary.json + 参数与配置一致的 ok manifest。
+
+    没有真实的 08/09 产物文件——30 的期望指纹从**当前文件**重算，文件不存在即 ""/0，
+    manifest 按同样值记录（准入比较的是两侧一致，不是文件存在）。groups 控制 modern/ancient
+    两侧的群体汇总；modern 为空即复现"AADR 只选古代/现代侧全被筛掉"。"""
+    w = pathlib.Path(td) / "work/wgs/11_aadr"
+    w.mkdir(parents=True, exist_ok=True)
+    (w / "summary.json").write_text(json.dumps({
+        "schema_version": 1, "analysis_id": "aadr-human-origins", "dataset": "AADR",
+        "reference_release": "v66.p1", "scope": "global", "state": "ok", "reason_code": "",
+        "components": [1, 2, 3, 4], "metric": "mean_individual_pc_distance",
+        "thresholds": {}, "counts": {}, "target": None, "records": [],
+        "groups": groups, "sources": []}, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+    (w / "manifest.json").write_text(json.dumps({
+        "schema_version": "1", "sample_id": "TESTSAMPLE", "analysis_id": "09b-aadr-summary",
+        "state": "ok", "reason_code": "", "build": "GRCh37", "reference_release": "v66.p1",
+        "parameters": {"min_call_rate_modern": 0.95, "min_call_rate_ancient": 0.5,
+                       "min_projection_snps": 10000, "min_group_n": 2,
+                       "ancient_prefix": list(aadr_cfg.get("aadr_ancient_prefix", [])),
+                       "modern_groups": list(aadr_cfg.get("aadr_modern", [])),
+                       "prune_sha": "", "prune_sites": 0,
+                       "aadr_prefix": str(aadr_cfg["aadr_prefix"]), "annotation": "",
+                       "proj_sha": "", "samples_sha": ""},
+        "tool_versions": {}, "input_fingerprints": {}, "outputs": []}) + "\n", encoding="utf-8")
+    return w
+
+
 def _write_base(td, y=True, mt=True, regional=False):
     """合成 30 的必读输入。y/mt/regional 决定对应形态的文件是否存在。"""
     W = pathlib.Path(td) / "work" / "wgs"
@@ -243,6 +278,79 @@ class TestEurRegional(unittest.TestCase):
             self.assertEqual(d["pop"]["n_sub"], 2)
             self.assertEqual(d["near_eas"], {"GBR": 0.02})
             self.assertEqual(d["near_global"], {"CHB": 0.012, "CHS": 0.031})
+
+
+@unittest.skipIf(_SKIP, _SKIP)
+class TestDefaultAnalysisSelection(unittest.TestCase):
+    """复审 §3.2 P1 AN2/AN5：默认主分析按 §7.3 契约显式选择——有效现代 AADR → 已配置区域
+    1000G → 全球 1000G。
+
+    旧实现按数据顺序取第一个 state=ok：04b 的 spaces 把 global 排在 regional 前，于是
+    AADR 不可用但区域已配置且 ok 时默认仍是 global；AADR 只选古代（现代侧没有群体汇总，
+    无论因只配了古代前缀还是现代组全被门槛筛掉）时也冒称有效现代主空间。"""
+
+    def _aadr_cfg(self, td, **over):
+        cfg = {"aadr_prefix": str(pathlib.Path(td) / "work/data/ref/aadr/panel"),
+               "aadr_modern": ["Han"], "aadr_ancient_prefix": ["China_"]}
+        cfg.update(over)
+        return cfg
+
+    def test_valid_modern_aadr_wins_over_regional_and_global(self):
+        """守卫：AADR 现代侧有群体汇总时仍是默认——修选择顺序不得把有效 AADR 挤掉。"""
+        with tempfile.TemporaryDirectory() as td:
+            cfg = _write_config(td, **{"ref_superpop": "EUR"}, **self._aadr_cfg(td))
+            _write_base(td, y=False, mt=False, regional=True)
+            _add_aadr_module(td, self._aadr_cfg(td),
+                             {"modern": [dict(_AADR_GROUP)], "ancient": []})
+            r = _run_30(cfg)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertEqual(_data(td)["ancestry"]["default_analysis_id"], "aadr-human-origins")
+
+    def test_regional_beats_global_when_aadr_is_not_delivered(self):
+        """AADR 没有产物（未配置）时：已配置且 ok 的区域优先于全球——不是 04b 的书写顺序。"""
+        with tempfile.TemporaryDirectory() as td:
+            cfg = _write_config(td, **{"ref_superpop": "EUR"})   # 无 aadr_* → 11_aadr 不存在
+            _write_base(td, y=False, mt=False, regional=True)
+            r = _run_30(cfg)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            anc = _data(td)["ancestry"]
+            ids = {a["analysis_id"]: a["state"] for a in anc["analyses"]}
+            self.assertEqual(ids, {"kg-global": "ok", "kg-regional": "ok"})
+            self.assertEqual(anc["default_analysis_id"], "kg-regional",
+                             "AADR 不可用时默认应是已配置区域，不是排在前的 global")
+
+    def test_ancient_only_aadr_is_not_a_valid_modern_space(self):
+        """AADR ok 但 groups.modern 为空（只配了古代前缀）：不得越过区域冒称默认现代空间。"""
+        with tempfile.TemporaryDirectory() as td:
+            ac = self._aadr_cfg(td, aadr_modern=[])
+            cfg = _write_config(td, **{"ref_superpop": "EUR"}, **ac)
+            _write_base(td, y=False, mt=False, regional=True)
+            _add_aadr_module(td, ac, {"modern": [], "ancient": [dict(_AADR_ANCIENT_GROUP)]})
+            r = _run_30(cfg)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            anc = _data(td)["ancestry"]
+            self.assertEqual(anc["default_analysis_id"], "kg-regional",
+                             "仅古代的 AADR 不是有效现代空间；区域与全球都在时选区域")
+
+    def test_ancient_only_aadr_with_global_only_falls_to_global(self):
+        """仅古代 AADR + 未配置区域：退到全球，仍不得选 AADR。"""
+        with tempfile.TemporaryDirectory() as td:
+            ac = self._aadr_cfg(td, aadr_modern=[])
+            cfg = _write_config(td, **ac)                          # 无 ref_superpop → global-only
+            _write_base(td, y=False, mt=False, regional=False)
+            _add_aadr_module(td, ac, {"modern": [], "ancient": [dict(_AADR_ANCIENT_GROUP)]})
+            r = _run_30(cfg)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertEqual(_data(td)["ancestry"]["default_analysis_id"], "kg-global")
+
+    def test_global_only_without_aadr_keeps_global_default(self):
+        """守卫：无 AADR、无区域的老形态默认仍是全球。"""
+        with tempfile.TemporaryDirectory() as td:
+            cfg = _write_config(td)
+            _write_base(td, y=False, mt=False, regional=False)
+            r = _run_30(cfg)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertEqual(_data(td)["ancestry"]["default_analysis_id"], "kg-global")
 
 
 @unittest.skipIf(_SKIP, _SKIP)

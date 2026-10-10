@@ -732,16 +732,32 @@ if _kgl_loc is not None and len(_kgl_loc) and {"dataset", "source_id"} <= set(_k
 _n_kgl = _attach_kg_group_locations(_anc_analyses,
                                     _kgl.to_dict("records") if _kgl is not None else [])
 print(f"30: kg group sampling-site locations attached for {_n_kgl} groups", file=sys.stderr)
-# 复审 AN6-P1：默认分析原先硬编码挑 AADR。一个只启用 1000G（或禁用了 AADR）的样本，报告仍会宣称
-# 默认分析是 AADR——那是个不存在于本次运行里的选择。改为按**数据顺序取第一个 state=ok 的分析**：
-# 顺序即配置里的启用顺序，state 决定它这次是否真的产出。全都不可用时留空，由消费端如实处理。
-_default = next((a.get("analysis_id") for a in _anc_analyses if a.get("state") == "ok"), "")
+# 复审 §3.2 P1 AN2/AN5：默认主分析按 §7.3 契约显式选择——有效现代 AADR → 已配置区域 1000G →
+# 全球 1000G；页面显式显示所选参考空间并允许切换。旧实现按数据顺序取第一个 state=ok：04b 的
+# spaces 把 global 排在 regional 前，于是 AADR 不可用但区域已配置且 ok 时默认仍是 global；
+# AADR 只选古代（09b 的 groups.modern 为空——无论只配了古代前缀，还是现代组全被门槛筛掉）
+# 时也冒称有效现代主空间。"有效现代 AADR" = state=ok 且现代侧有群体汇总；kg-regional 只在
+# REGIONAL_ENABLED（显式配置了 ref_superpop）时参与——未配置时遗留的区域产物不是"已配置区域"。
+# 全都不可用时留空（不回落到第一个非 ok 分析的 id）：模板按空值不画，不拿不可用的结果冒充。
+def _valid_modern_aadr(a):
+    if a.get("state") != "ok" or str(a.get("dataset") or "") != "AADR":
+        return False
+    _grp = a.get("groups")
+    return isinstance(_grp, dict) and bool(_grp.get("modern"))
+def _first_ok(analyses, analysis_id):
+    return next((a.get("analysis_id") for a in analyses
+                 if a.get("state") == "ok" and a.get("analysis_id") == analysis_id), "")
+_aadr_default = next((a.get("analysis_id") for a in _anc_analyses if _valid_modern_aadr(a)), "")
+_reg_default = _first_ok(_anc_analyses, "kg-regional") if REGIONAL_ENABLED else ""
+_glob_default = _first_ok(_anc_analyses, "kg-global")
+_default = _aadr_default or _reg_default or _glob_default
 if _default:
-    print(f"30: default analysis = {_default}", file=sys.stderr)
+    print(f"30: default analysis = {_default} "
+          f"(valid-modern-aadr={_aadr_default or '-'}, regional={_reg_default or '-'}, "
+          f"global={_glob_default or '-'})", file=sys.stderr)
 else:
     print("30: no analysis is in state ok; default_analysis_id left empty", file=sys.stderr)
-D["ancestry"] = {"schema_version": 1, "default_analysis_id": _default or
-                 (_anc_analyses[0].get("analysis_id") if _anc_analyses else ""),
+D["ancestry"] = {"schema_version": 1, "default_analysis_id": _default,
                  "analyses": _anc_analyses,
                  "local": (_LA_DOC if isinstance(_LA_DOC, dict) else {})}
 # near_* 取准入后的分析（stale/missing 一律 None），口径与 D.ancestry 同源，不二次解析文件
