@@ -79,10 +79,25 @@ function lineageObsPoints(doc){
       latitude:c.latitude, longitude:c.longitude, locality:String(o.locality||''),
       precision:String(o.precision||'unknown'), relation:rel,
       date_mean:dr.mean, date_min:dr.min, date_max:dr.max,
+      date_basis:String(o.date_basis||''), date_raw:String(o.date_raw||''),
       publication:String(o.publication||'')};
     if(geoValid(c.latitude,c.longitude)) out.points.push(rec); else out.unlocated.push(rec);
   });
   return out;
+}
+
+/* 复审 §3.2 P1 AN6（纯函数）：观测的报告年代标签。Number(null)===0 的两个陷阱——旧 dtOf 先
+   Number() 再判 isFinite，未知均值（null）变成 0 落进"现代个体"，上下界为 null 时同样变 0
+   打出（0–0）。缺失先于转换：null/'' /非数值是"年代未知"；"现代"只认数据集明确写的 0，不认
+   "未知年被当成 0"；区间缺一侧显示 ?，双侧缺失不显示区间。date_basis/date_raw 由
+   lineageObsPoints 透传，obsRow 把依据附在年代后——报告年代与它的来源一起呈现。 */
+function lineageDateLabel(r, zh){
+  const n=v=>{ if(v==null||v==='') return null; const x=Number(v); return Number.isFinite(x)?x:null; };
+  const d=n(r.date_mean), lo=n(r.date_min), hi=n(r.date_max);
+  if(d==null) return zh?'年代未知':'no date';
+  if(d===0) return zh?'现代个体':'modern';
+  const rng=(lo!=null||hi!=null)?`（${lo!=null?fmt(Math.round(lo)):'?'}–${hi!=null?fmt(Math.round(hi)):'?'}）`:'';
+  return `≈${fmt(Math.round(d))} BP${rng}`;
 }
 
 /* 复审 §3.2 P0-2b（纯函数）：待核对记录的展示文案。同名≠等价：把记录侧的树版本与本项目树
@@ -132,20 +147,18 @@ const renderLineageCards=()=>{
   // 缺坐标如实计数不落点；没有带来源的迁移路线就不画任何箭头（缺证据不画迁移）。底图复用
   // 全局 #world_land，定位走 use transform（845ead2 的教训），放大取景复用 geomapViewport。
   const REL_ZH={exact:'精确匹配',descendant:'下游支系',ancestor:'上游支系'}, REL_EN={exact:'exact',descendant:'descendant',ancestor:'ancestor'};
-  const dtOf=r=>{const d=Number(r.date_mean);
-    if(!Number.isFinite(d)) return Z?'年代未知':'no date';
-    if(d<=0) return Z?'现代个体':'modern';
-    const lo=Number(r.date_min), hi=Number(r.date_max);
-    const rng=(Number.isFinite(lo)||Number.isFinite(hi))?`（${Number.isFinite(lo)?fmt(Math.round(lo)):'?'}–${Number.isFinite(hi)?fmt(Math.round(hi)):'?'}）`:'';
-    return `≈${fmt(Math.round(d))} BP${rng}`;};
-  const obsRow=r=>`<div style="font-size:10.5px;opacity:.85">· ${_esc(r.key)} — ${_esc(r.locality)} · ${Z?REL_ZH[r.relation]||r.relation:REL_EN[r.relation]||r.relation} · ${dtOf(r)} · ${Z?'报告年代':'reported date'} · ${_esc(r.publication)||'—'}</div>`;
+  // 复审 §3.2 P1 AN6：年代标签走 lineageDateLabel（缺失先于转换），数据集给了判定依据
+  // （date_basis）就附在年代后面——"报告年代"要带着它的来源，不裸奔一个数。
+  const dtOf=r=>lineageDateLabel(r,Z);
+  const dtBasis=r=>r.date_basis?` · ${_esc(r.date_basis)}`:'';
+  const obsRow=r=>`<div style="font-size:10.5px;opacity:.85">· ${_esc(r.key)} — ${_esc(r.locality)} · ${Z?REL_ZH[r.relation]||r.relation:REL_EN[r.relation]||r.relation} · ${dtOf(r)}${dtBasis(r)} · ${Z?'报告年代':'reported date'} · ${_esc(r.publication)||'—'}</div>`;
   const obsMap=(pts,kind)=>{
     if(!pts.length) return '';
     const VBW=420,VBH=150,pl=6,pt0=6,pw=VBW-2*pl,ph=VBH-2*pt0;
     const vp=geomapViewport(pts);
     const sc=Math.min(pw/vp.w,ph/vp.h), ox=pl+(pw-vp.w*sc)/2-vp.x0*sc, oy=pt0+(ph-vp.h*sc)/2-vp.y0*sc;
     const dots=pts.map(r=>{const q=geoXY(r.latitude,r.longitude), x=(ox+q.x*sc).toFixed(1), y=(oy+q.y*sc).toFixed(1);
-      const tt=`${_esc(r.key)} · ${_esc(r.locality)} · ${dtOf(r)} · ${_esc(r.publication)}`;
+      const tt=`${_esc(r.key)} · ${_esc(r.locality)} · ${dtOf(r)}${dtBasis(r)} · ${_esc(r.publication)}`;
       return r.precision==='region'
         ? `<rect x="${(+x-2.2).toFixed(1)}" y="${(+y-2.2).toFixed(1)}" width="4.4" height="4.4" rx="1" fill="currentColor" opacity=".85"><title>${tt}</title></rect>`
         : `<circle cx="${x}" cy="${y}" r="2.6" fill="currentColor" opacity=".85"><title>${tt}</title></circle>`;}).join('');

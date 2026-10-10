@@ -305,6 +305,9 @@ def lineage_observations(rows, query, parents, tree_kind, same_tree=True, histor
             "date_range": {"mean": r.get("date_mean_bp"), "min": r.get("date_min_bp"),
                            "max": r.get("date_max_bp")},
             "date_basis": r.get("date_basis"),
+            # 复审 §3.2 P1 AN6：原始日期串一并透传——模板呈现"报告年代"时依据（date_basis）
+            # 与原始写法（date_raw）都在，不只是换算后的数字。
+            "date_raw": r.get("date_raw"),
             "call_source": call_src,
             "publication": r.get("publication"),
             # 复审 §3.2 P1 AN1：原始表示与同 Master 表示间的标签/QC 冲突跟着观测走（证据

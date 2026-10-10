@@ -177,8 +177,8 @@ class TestObservationsAndRoutes(unittest.TestCase):
     def test_observations_carry_the_required_fields(self):
         o = lh.lineage_observations(self.ROWS, "mt:A13", parents={}, tree_kind="mt")[0]
         for k in ("record_id", "node_id", "relation", "locality", "coordinates", "precision",
-                  "date_range", "date_basis", "call_source", "publication"):
-            self.assertIn(k, o)
+                  "date_range", "date_basis", "date_raw", "call_source", "publication"):
+            self.assertIn(k, o, "观测行缺 " + k + "——模板的报告年代要带依据与原始写法（AN6 P1）")
 
 
 class TestRepresentationConflictEvidence(unittest.TestCase):

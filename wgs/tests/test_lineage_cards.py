@@ -25,13 +25,38 @@ const code = [
   grab(/const geoXY[\s\S]*?\n}/),
   grab(/const geoValid[\s\S]*?\n};/),
   grab(/function geomapViewport[\s\S]*?\n}/),
+  grab(/const fmt=[^\n]*/),
   grab(/function lineageObsPoints[\s\S]*?\n}/),
   grab(/function lineagePendingNote[\s\S]*?\n}/),
   grab(/function lineageTimelineNodes[\s\S]*?\n}/),
+  grab(/function lineageDateLabel[\s\S]*?\n}/),
 ].join('\n').replace(/\bconst /g, 'var ');
 eval(code);
 const FAIL = [];
 const ok = (cond, msg) => { if (!cond) FAIL.push(msg); };
+
+// —— 复审 §3.2 P1 AN6：真实渲染器的年代标签。Number(null)===0 的两个陷阱——
+//    未知均值（null）经 Number() 变 0 落进"现代个体"；仅均值时上下界同样变 0 打出（0–0）。
+//    缺失先于转换：未知是"年代未知"，现代只认数据集明确写的 0。
+ok(lineageDateLabel({date_mean:null}, true)==='年代未知'
+   && lineageDateLabel({date_mean:null}, false)==='no date',
+   'unknown mean (null) must read 年代未知/no date — never 现代个体 via Number(null)===0');
+ok(lineageDateLabel({}, true)==='年代未知', 'missing mean field is unknown too');
+ok(lineageDateLabel({date_mean:''}, true)==='年代未知', 'empty string is unknown, not 0');
+ok(lineageDateLabel({date_mean:3300}, true)==='≈3,300 BP'
+   && lineageDateLabel({date_mean:3300}, false)==='≈3,300 BP',
+   'mean-only shows no (0–0) interval — null bounds are not zeros');
+ok(lineageDateLabel({date_mean:3300, date_min:null, date_max:null}, true)==='≈3,300 BP',
+   'explicit null bounds (the JSON shape) must not print （0–0） — Number(null)===0 is the trap');
+ok(lineageDateLabel({date_mean:0, date_min:0, date_max:0}, true)==='现代个体'
+   && lineageDateLabel({date_mean:0, date_min:0, date_max:0}, false)==='modern',
+   'an explicit dataset 0 is genuinely modern (guard: fixing null must not un-label real modern)');
+ok(lineageDateLabel({date_mean:0}, false)==='modern', 'mean 0 alone is explicit enough');
+ok(lineageDateLabel({date_mean:3300, date_min:3000, date_max:3600}, true)==='≈3,300 BP（3,000–3,600）',
+   'full interval renders on the 1950-BP basis');
+ok(lineageDateLabel({date_mean:3300, date_min:3000}, true)==='≈3,300 BP（3,000–?）',
+   'one-sided interval shows ? for the missing side');
+ok(lineageDateLabel({date_mean:'4635'}, false)==='≈4,635 BP', 'numeric strings still convert');
 
 // —— 真实数据形状（本样本 lineage_history.json 的 Y 段）：白羊村/宗日古人点 + 北京现代个体，
 //    外加一条无坐标观测。观测是支系的已发表记录，字段原样透传。
@@ -61,6 +86,14 @@ ok(b.date_mean === 3300 && b.date_min === 3350 && b.date_max === 3650, 'reported
 ok(op.points[2].date_mean === 0, 'modern individual (mean 0) stays a point, labelled at render time');
 ok(JSON.stringify(lineageObsPoints(null)) === '{"points":[],"unlocated":[],"pending":[]}', 'no doc -> empty, not an error');
 ok(JSON.stringify(lineageObsPoints({ history: {} })) === '{"points":[],"unlocated":[],"pending":[]}', 'no observations -> empty');
+
+// —— 复审 §3.2 P1 AN6：date_basis/date_raw 随观测透传（报告年代要带依据，未知区间保留 '?'）
+const dated = lineageObsPoints({ history: { observations: [
+  { record_id: 'D1', relation: 'exact', coordinates: { latitude: 30, longitude: 110 },
+    date_range: { mean: 3300, min: 3000, max: 3600 },
+    date_basis: 'Direct: IntCal20', date_raw: '6221-5986 calBCE' }] } });
+ok(dated.points[0].date_basis === 'Direct: IntCal20' && dated.points[0].date_raw === '6221-5986 calBCE',
+   'date_basis and date_raw travel with the observation record');
 
 // —— 复审 §3.2 P0-2b：待核对（pending_review）不是已发表观测。有坐标也不落点、不进
 //    points/unlocated（nObs 与地图都不得把它算进去），单独进 pending 桶。
@@ -122,6 +155,8 @@ const cardSrc = src.slice(src.indexOf('renderLineageCards'));
 ok(/lineageObsPoints\(lin\)/.test(cardSrc), 'lineage card derives its points from lineageObsPoints');
 ok(/lineagePendingNote\(lin,op,Z\)/.test(cardSrc), 'lineage card renders the pending-review note (P0-2b)');
 ok(/lineageTimelineNodes\(path\)/.test(cardSrc), 'lineage timeline consumes lineageTimelineNodes');
+ok(/lineageDateLabel\(r,Z\)/.test(cardSrc), 'observation rows label dates through lineageDateLabel (AN6 P1)');
+ok(/date_basis\?/.test(cardSrc), 'observation rows append the date basis when the dataset states one (AN6 P1)');
 ok(/obsMap\(op\.points,kind\)/.test(cardSrc), 'observation map is drawn from the placed points');
 ok(/clip-lineage-\$\{kind\}/.test(src), 'mini map clips via a per-kind clipPath id');
 ok(/href="#world_land"/.test(cardSrc) && /transform="translate\(\$\{ox/.test(cardSrc),
@@ -148,9 +183,11 @@ class TestLineageCards(unittest.TestCase):
         self.assertRegex(src, r"function lineageObsPoints\(doc\)\{")
         self.assertRegex(src, r"function lineageTimelineNodes\(path\)\{")
         self.assertRegex(src, r"function lineagePendingNote\(lin,op,zh\)\{")
+        self.assertRegex(src, r"function lineageDateLabel\(r, zh\)\{")
         self.assertIn("lineageObsPoints(lin)", src)
         self.assertIn("lineageTimelineNodes(path)", src)
         self.assertIn("lineagePendingNote(lin,op,Z)", src)
+        self.assertIn("lineageDateLabel(r,Z)", src)
 
 
 if __name__ == "__main__":
