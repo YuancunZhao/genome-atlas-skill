@@ -624,7 +624,12 @@ def location_key_of(record):
 
 
 def _representation_rank(rep):
-    """来源推荐的表示优先：SG/DG（高覆盖二倍体）> HO > AG/TW/其它。"""
+    """固定的技术偏好顺序（复审 §3.2 P1 AN1）：SG/DG（高覆盖二倍体）> HO > AG/TW/其它。
+
+    这是我们挑表示的顺序，**不是数据来源的推荐**——来源没有说过哪种表示"更好"。同偏好的
+    最高表示不可用时（比如不在 .ind 里），调用方要在**可用**候选内重新选择，而不是让不可
+    用的最高偏好把唯一可用的表示挤掉。
+    """
     rep = (rep or "").upper()
     if rep in ("SG", "DG"):
         return 3

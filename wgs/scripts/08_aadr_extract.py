@@ -90,21 +90,25 @@ if not any(r.get("kind")=="modern" for r in recs):
     print("warning: no modern references selected -- the modern PCA/projection side is empty",file=sys.stderr)
 if not any(r.get("kind")=="ancient" for r in recs):
     print("warning: no ancient references selected -- the ancient projection side is empty",file=sys.stderr)
-# 复审 AN1：同一个人可以有多种技术表示（不同 call 版本、重复记录）。之前只在测试里有去重，生产路径
-# 不去重，于是同一个人可能以两条记录各自计入分组与计数。这里接上：保留可用的那一条，被丢弃的带原因
-# 落盘供审计，而不是悄悄消失。
-_dd = ad.dedupe_by_master_id(recs)
-recs = _dd["kept"]
+# 复审 §3.2 P1 AN1：同一个人可以有多种技术表示（不同 call 版本、重复记录）。提取侧的去重
+# 只能在**可用**候选（.ind 里真有基因型）内选：旧顺序先对全 .anno 按固定偏好去重、再与 .ind
+# 相交，同一 Master 的 SG 不在 .ind、HO 在 .ind 时，SG 被偏好留下、唯一可用的 HO 被当重复丢
+# 掉，这个人从面板里无声消失。可用性只约束提取——没有基因型的表示仍是已发表记录，照常进
+# reference_metadata.tsv（"同一个人只算一次"由 09d 消费侧按 Master 归并，并负责暴露表示间的
+# 标签冲突）。被丢弃的可用表示带原因落盘供审计，而不是悄悄消失。
+_in_geno = set(ind.iid.astype(str))
+_dd = ad.dedupe_by_master_id([r for r in recs if str(r.get("record_id")) in _in_geno])
 if _dd["dropped"]:
     pathlib.Path(f"{W}/dedup_dropped.tsv").write_text(
         "record_id\tmaster_id\treason_code\tdetail\n" + "".join(
             f"{d['record_id']}\t{d['master_id']}\t{d['reason_code']}\t{d['detail']}\n" for d in _dd["dropped"]),
         encoding="utf-8")
-    print(f"dedupe: kept {len(recs)}, dropped {len(_dd['dropped'])} duplicate representation(s) "
+    print(f"dedupe: kept {len(_dd['kept'])} available representation(s), "
+          f"dropped {len(_dd['dropped'])} duplicate representation(s) "
           f"-> {W}/dedup_dropped.tsv", file=sys.stderr)
 
 # .ind and .anno are both keyed by the Genetic ID (the .ind's own "pop" column is a patch artefact).
-by_record={r["record_id"]: r for r in recs}
+by_record={r["record_id"]: r for r in _dd["kept"]}
 def _f(iid, field, default=None):
     r=by_record.get(str(iid))
     return r.get(field) if r else default
@@ -116,7 +120,9 @@ bad=ind["source_population_id"].fillna("").str.contains("Ignore|QCremove|DontUse
 keep=ind[(ind.kind.isin(["modern","ancient"]))&~bad].copy()
 keep["pop"]=keep["source_population_id"]
 keep["label"]=keep["pop"]
-# Every .anno record goes out for the history views -- not just the ones this PCA happens to use.
+# Every .anno record goes out for the history views -- not just the ones this PCA happens to use,
+# and NOT a deduped subset: all original technical representations are preserved (one person may
+# span several rows; 09d collapses per master and surfaces label conflicts between representations).
 # Genotypes are only extracted for the names the panel selected.
 pd.DataFrame(recs).to_csv(f"{W}/reference_metadata.tsv",sep="\t",index=False)
 _selected=set(keep.iid.astype(str))

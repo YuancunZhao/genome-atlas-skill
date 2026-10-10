@@ -196,6 +196,68 @@ class TestTgenoHeaderValidated(unittest.TestCase):
             self.assertIn("size", m["parameters"]["detail"])
 
 
+def _write_dup_panel(td, ind_ids):
+    """同一 Master（Persistent Genetic ID=P）的两种表示：P.SG（Suffices=SG，偏好最高）与
+    P.HO（Suffices=HO）。ind_ids 决定 .ind 里真有谁——SG 不在 .ind 时，HO 是唯一可用表示。"""
+    pref = pathlib.Path(td) / "work/data/ref/aadr/panel"
+    pref.parent.mkdir(parents=True, exist_ok=True)
+    (pref.parent / "panel.ind").write_text(
+        "".join(f"{i}\tM\tHan\n" for i in ind_ids), encoding="utf-8")
+    (pref.parent / "panel.snp").write_text(
+        "".join(f"{r}\t{c}\t0.0\t{pos}\t{a1}\t{a2}\n" for r, c, pos, a1, a2 in SITES), encoding="utf-8")
+    (pref.parent / "panel.anno").write_text(
+        "Genetic ID\tPersistent Genetic ID\tGroup ID\tDate mean in BP\tSuffices\n"
+        "P.SG\tP\tHan\t\tSG\n"
+        "P.HO\tP\tHan\t\tHO\n", encoding="utf-8")
+    rlen = (N_SNP + 3) // 4
+    head = f"TGENO   {len(ind_ids)}  {N_SNP} 00000000 00000000".encode()[:48].ljust(48, b"\x00")
+    (pref.parent / "panel.geno").write_bytes(head + bytes(rlen * len(ind_ids)))
+    return pref.parent
+
+
+@unittest.skipIf(_SKIP, _SKIP)
+class TestDedupStaysInsideTheAvailablePanel(unittest.TestCase):
+    """复审 §3.2 P1 AN1：08 先对全 .anno 按固定表示偏好去重、再与 .ind 相交。
+
+    同一 Master 的 SG 不在 .ind、HO 在 .ind 时，SG 被偏好留下、HO 被当作重复丢掉——
+    唯一有基因型的表示从面板里无声消失。去重只能在**可用**候选内选择；且
+    reference_metadata.tsv 是历史查询的输入，必须保留全部原始技术表示，不能再写成
+    去重后的子集（09d 的"同一个人只算一次"由消费侧自己做，并负责暴露表示间冲突）。"""
+
+    def test_only_available_representation_is_not_lost(self):
+        with tempfile.TemporaryDirectory() as td:
+            cfg = _write_config(td)
+            _write_dup_panel(td, ind_ids=["P.HO"])
+            bin_dir = _write_bcftools(td, "ok")
+            r = _run_08(cfg, bin_dir)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            fam = (pathlib.Path(td) / "work/wgs/11_aadr/aadr.fam").read_text(encoding="utf-8")
+            iids = [line.split()[1] for line in fam.strip().splitlines()]
+            self.assertIn("P.HO", iids, "SG 不在 .ind 时，唯一可用的 HO 不得在去重时被丢掉")
+            # 历史视图的输入保留两种原始表示（谁被提取、谁没被提取是提取侧的决定）
+            meta = (pathlib.Path(td) / "work/wgs/11_aadr/reference_metadata.tsv").read_text(
+                encoding="utf-8")
+            self.assertEqual({row.split("\t")[0] for row in meta.strip().splitlines()[1:]},
+                             {"P.SG", "P.HO"},
+                             "reference_metadata.tsv 必须带全部原始表示，不是去重后的子集")
+
+    def test_dedup_still_applies_when_both_representations_are_available(self):
+        """两种表示都在 .ind 时仍去重（一人一份基因型）：修可用性排序不得顺手取消去重。"""
+        with tempfile.TemporaryDirectory() as td:
+            cfg = _write_config(td)
+            _write_dup_panel(td, ind_ids=["P.SG", "P.HO"])
+            bin_dir = _write_bcftools(td, "ok")
+            r = _run_08(cfg, bin_dir)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            fam = (pathlib.Path(td) / "work/wgs/11_aadr/aadr.fam").read_text(encoding="utf-8")
+            iids = [line.split()[1] for line in fam.strip().splitlines()]
+            self.assertEqual(iids, ["P.SG", "TESTSAMPLE"], "可用候选内仍按偏好取一份（SG 优于 HO）")
+            meta = (pathlib.Path(td) / "work/wgs/11_aadr/reference_metadata.tsv").read_text(
+                encoding="utf-8")
+            self.assertEqual({row.split("\t")[0] for row in meta.strip().splitlines()[1:]},
+                             {"P.SG", "P.HO"})
+
+
 def _validate_fn():
     """从生产脚本里提取 validate_tgeno_header 本体做纯函数断言（08 是顶层脚本不能 import）。"""
     src = SCRIPT.read_text(encoding="utf-8")
