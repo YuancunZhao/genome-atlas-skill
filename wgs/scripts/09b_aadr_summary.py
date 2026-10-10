@@ -24,6 +24,12 @@ W = f"{P}/wgs/11_aadr"
 ANNO = str(AADR_ANNOTATION) if str(AADR_ANNOTATION or "").strip() else str(AADR).replace(".patch.PUB", ".PUB") + ".anno"
 ANALYSIS_ID = "aadr-human-origins"
 
+# 失效先于计算（复审 §3.2 P0 失败生命周期）：下面的 _state 只覆盖早期入口检查，计算中途
+# 崩溃时旧 ok manifest 与 summary.json 仍会留在目录里被 30 准入——先写失效记录再开工。
+# 08 的 manifest 记录参考版本（reference_release），09b 覆盖同一文件前先取走它。
+_prev = ad.read_manifest(f"{W}/manifest.json") or {}
+ad.begin_run_manifest(f"{W}/manifest.json", SAMPLE, "09b-aadr-summary")
+
 
 def _state(state, reason, detail):
     ad.write_manifest(f"{W}/manifest.json", ad.build_manifest(
@@ -202,8 +208,7 @@ def _clean(v):
 excluded = [r for r in recs if r.get("eligible") is False]
 by_reason = pd.Series([r.get("exclusion_reason") for r in excluded]).value_counts().to_dict() if excluded else {}
 loc_ok = sum(1 for r in recs if r.get("latitude") is not None)
-prev = ad.read_manifest(f"{W}/manifest.json") or {}
-release = prev.get("reference_release") or ""
+release = _prev.get("reference_release") or ""
 summary = {
     "schema_version": 1, "analysis_id": ANALYSIS_ID, "dataset": "AADR",
     "reference_release": release, "scope": "global", "state": "ok", "reason_code": "",

@@ -220,5 +220,41 @@ class TestLegacyEasIdentity(unittest.TestCase):
             self.assertEqual([a["analysis_id"] for a in s["analyses"]], ["kg-global", "kg-eas"])
 
 
+@unittest.skipIf(_SKIP, _SKIP)
+class TestFailureInvalidatesOldOk(unittest.TestCase):
+    """复审 §3.2 P0（H6/AN0/AN5 失败生命周期）：成功→同 ID 改输入→中途崩溃→单独准入。
+
+    04b 此前只在成功结尾写 manifest；计算中途崩溃时旧 manifest=ok 与旧 summary.json 原样
+    保留，30 的 analysis_state() 照旧准入。现在 04b 开工先写失效记录。"""
+
+    def test_midrun_crash_invalidates_previous_ok(self):
+        sys.path.insert(0, str(REPO / "scripts"))
+        import ancestry_data as ad
+        with tempfile.TemporaryDirectory() as td:
+            cfg = _write_config(td)
+            w = _write_space(td)
+            r = _run_04b(cfg)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            state, _, doc = ad.analysis_state(
+                w, {"sample_id": "TESTSAMPLE"},
+                owning_steps=("04-ancestry-pca", "04b-ancestry-summary"))
+            self.assertEqual(state, "ok")
+            self.assertIsNotNone(doc)
+            # 同 ID 换输入：kg.proj.sscore 换成读不了的东西（目录），复现计算中途的未处理崩溃
+            (w / "kg.proj.sscore").unlink()
+            (w / "kg.proj.sscore").mkdir()
+            r2 = _run_04b(cfg)
+            self.assertNotEqual(r2.returncode, 0, "输入损坏必须以非零退出终止，不得静默产出")
+            # 单独准入（30 的调用形状，global-only：04c 禁用记录同场也不得干扰这条结论）
+            ad.write_manifest(w / "manifest.04c-per-chromosome-axis.json",
+                              ad.disabled_manifest("TESTSAMPLE", "04c-per-chromosome-axis",
+                                                   "regional_axis_not_configured"))
+            state, reason, doc = ad.analysis_state(
+                w, {"sample_id": "TESTSAMPLE"},
+                owning_steps=("04-ancestry-pca", "04b-ancestry-summary"))
+            self.assertEqual((state, reason), ("unavailable", "run_begun_not_published"))
+            self.assertIsNone(doc, "开工失效后，上一轮的 summary.json 不得继续交付")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

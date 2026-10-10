@@ -290,5 +290,57 @@ class TestAncientRegionSource(unittest.TestCase):
         self.assertNotIn("kg_population_locations", src)
 
 
+@_NEEDS_NP
+class Test28FailureInvalidatesOldOk(unittest.TestCase):
+    """复审 §3.2 P0（H6/AN0/AN5 失败生命周期）——真实 28 子进程反例的回归。
+
+    复现：28 因 f3_groups 的参考群不在 kg.common.psam 里 sys.exit(1)，旧 manifest=ok 与旧
+    f3_stats.json 原样保留，30 的 analysis_state() 照旧准入。现在 28 开工先写失效记录；
+    崩溃后旧 ok 不得再冒充本次结果。触发点在 plink2 调用之前，替身 plink2 不需要存在。"""
+
+    def test_reference_group_missing_invalidates_previous_ok(self):
+        import os
+        import subprocess
+        import sys
+        sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "scripts"))
+        import ancestry_data as ad
+        with tempfile.TemporaryDirectory() as td:
+            td = pathlib.Path(td)
+            W = td / "work" / "wgs"
+            d04 = W / "04_ancestry"
+            f3dir = d04 / "f3"
+            f3dir.mkdir(parents=True)
+            # 上一轮的成功产物
+            ad.write_manifest(f3dir / "manifest.json", ad.build_manifest(
+                "TESTSAMPLE", "28-f3-stats", state="ok",
+                parameters={"estimator": "site-mean-corrected", "block_mb": 5, "min_group_n": 2}))
+            (f3dir / "f3_stats.json").write_text(
+                json.dumps({"sample_id": "TESTSAMPLE", "modern": {"value": 0.01}}), encoding="utf-8")
+            # 本次输入：modern 齐备但 psam 的群体不含 f3_groups 成员 → 真实复现的 sys.exit(1)
+            (d04 / "prune.prune.in").write_text("rs1\n", encoding="utf-8")
+            (d04 / "kg.common.psam").write_text(
+                "#FID\tIID\tSuperPop\tPopulation\nFAM\tX\tZZZ\tZZZ\n", encoding="utf-8")
+            (d04 / "kg.common.pvar").write_text(
+                "#CHROM\tPOS\tID\tREF\tALT\n1\t1000\trs1\tA\tG\n", encoding="utf-8")
+            (W / "02_complete").mkdir(parents=True)
+            (W / "02_complete" / "TESTSAMPLE.1kg.pgen").write_bytes(b"")
+            cfg = td / "config.yaml"
+            cfg.write_text("".join([
+                "sample_id: TESTSAMPLE\n",
+                f"work_dir: {json.dumps(str(td / 'work'))}\n",
+                f"plink2: {json.dumps(str(td / 'fake_plink2'))}\n",
+            ]), encoding="utf-8")
+            script = pathlib.Path(__file__).resolve().parents[1] / "scripts" / "28_f3_stats.py"
+            r = subprocess.run([sys.executable, str(script)], capture_output=True, text=True,
+                               env={**os.environ, "WGS_CONFIG": str(cfg)}, timeout=120)
+            self.assertNotEqual(r.returncode, 0, "参考群缺失必须以非零退出终止")
+            self.assertIn("absent from kg.common.psam", r.stderr + r.stdout)
+            # 单独准入（30 的调用形状）：旧 f3_stats.json 不得再作为本次结果交出
+            state, reason, doc = ad.analysis_state(f3dir, {"sample_id": "TESTSAMPLE"},
+                                                   names=("f3_stats.json",))
+            self.assertEqual((state, reason), ("unavailable", "run_begun_not_published"))
+            self.assertIsNone(doc)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

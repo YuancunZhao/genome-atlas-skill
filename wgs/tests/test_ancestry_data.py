@@ -765,6 +765,50 @@ class TestAnalysisStateStepRecords(unittest.TestCase):
             self.assertIsNone(doc)
 
 
+class TestRunInvalidation(unittest.TestCase):
+    """复审 §3.2 P0（H6/AN0/AN5 失败生命周期）：生产者开工先失效旧 ok。
+
+    真实 28 子进程曾因参考群缺失退出 1：旧 manifest=ok 与旧 f3_stats.json 原样保留，
+    analysis_state() 照旧准入。begin_run_manifest 让生产入口在做任何计算之前写一份
+    state=unavailable 的失效记录；成功路径的最终 manifest 原子覆盖。"""
+
+    def test_begin_invalidates_old_ok_even_with_result_file_present(self):
+        with tempfile.TemporaryDirectory() as td:
+            d = pathlib.Path(td)
+            ad.write_manifest(d / "manifest.json", ad.build_manifest("S1", "28-f3-stats",
+                                                                     state="ok"))
+            (d / "f3_stats.json").write_text('{"modern": {"value": 0.01}}', encoding="utf-8")
+            ad.begin_run_manifest(d / "manifest.json", "S1", "28-f3-stats")
+            state, reason, doc = ad.analysis_state(d, {"sample_id": "S1"},
+                                                   names=("f3_stats.json",))
+            self.assertEqual((state, reason), ("unavailable", "run_begun_not_published"))
+            self.assertIsNone(doc, "开工后的旧结果文件不得再作为本次结果交出")
+
+    def test_non_ok_manifest_state_beats_parameter_staleness(self):
+        """失效记录不带参数：非 ok manifest 报自己的原因，而不是 misleading 的 stale_result。"""
+        with tempfile.TemporaryDirectory() as td:
+            d = pathlib.Path(td)
+            ad.begin_run_manifest(d / "manifest.json", "S1", "09b-aadr-summary")
+            (d / "summary.json").write_text("{}", encoding="utf-8")
+            state, reason, doc = ad.analysis_state(
+                d, {"sample_id": "S1"}, expected_parameters={"min_group_n": 2})
+            self.assertEqual((state, reason), ("unavailable", "run_begun_not_published"))
+            self.assertIsNone(doc)
+
+    def test_successful_rerun_publishes_ok_again(self):
+        with tempfile.TemporaryDirectory() as td:
+            d = pathlib.Path(td)
+            ad.begin_run_manifest(d / "manifest.json", "S1", "28-f3-stats")
+            ad.write_manifest(d / "manifest.json", ad.build_manifest(
+                "S1", "28-f3-stats", state="ok", parameters={"min_group_n": 2}))
+            (d / "f3_stats.json").write_text('{"modern": {"value": 0.02}}', encoding="utf-8")
+            state, _, doc = ad.analysis_state(d, {"sample_id": "S1"},
+                                              names=("f3_stats.json",),
+                                              expected_parameters={"min_group_n": 2})
+            self.assertEqual(state, "ok")
+            self.assertEqual(doc, {"modern": {"value": 0.02}})
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
 

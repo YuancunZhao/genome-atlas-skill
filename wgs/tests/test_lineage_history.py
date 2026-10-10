@@ -568,3 +568,32 @@ class TestCliWritesAdmissibleManifest(unittest.TestCase):
                                        names=("lineage_history.json",))
             self.assertEqual(other[0], "unavailable")
             self.assertEqual(other[1], "stale_result")
+
+    def test_midrun_crash_invalidates_previous_ok(self):
+        """复审 §3.2 P0 失败生命周期：09d 开工先失效旧 ok。
+
+        成功一轮后再跑一轮、--history 指向损坏 JSON（未处理崩溃路径）：开工失效记录必须已经
+        写下，旧 ok manifest 与旧 lineage_history.json 不得继续充当本次结果。"""
+        import ancestry_data as ad
+        with tempfile.TemporaryDirectory() as td:
+            yard = self._yard(td)
+            out = pathlib.Path(td) / "lineage_history.json"
+            rc = lh._cli(["--yard", str(yard), "--out", str(out), "--sample", "S1",
+                          "--history", ""])
+            self.assertEqual(rc, 0)
+            state, _, doc = ad.analysis_state(
+                out.parent, {"sample_id": "S1", "analysis_id": "09d-lineage-history"},
+                names=("lineage_history.json",))
+            self.assertEqual(state, "ok")
+            self.assertIsNotNone(doc)
+            # 第二轮：history 文件损坏 → json.loads 在失效记录之后崩溃
+            bad = pathlib.Path(td) / "bad_history.json"
+            bad.write_text("{not json", encoding="utf-8")
+            with self.assertRaises(json.JSONDecodeError):
+                lh._cli(["--yard", str(yard), "--out", str(out), "--sample", "S1",
+                         "--history", str(bad)])
+            state, reason, doc = ad.analysis_state(
+                out.parent, {"sample_id": "S1", "analysis_id": "09d-lineage-history"},
+                names=("lineage_history.json",))
+            self.assertEqual((state, reason), ("unavailable", "run_begun_not_published"))
+            self.assertIsNone(doc, "开工失效后，上一轮的 lineage_history.json 不得继续交付")

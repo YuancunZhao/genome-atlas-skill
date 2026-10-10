@@ -255,5 +255,40 @@ class TestCalibrationStatistics(unittest.TestCase):
                                    msg="长度加权（chr1 249.25 Mb / chr2 243.20 Mb）的全局 posterior")
 
 
+@unittest.skipIf(_SKIP, _SKIP)
+class Test17FailureInvalidatesOldOk(unittest.TestCase):
+    """复审 §3.2 P0（H6/AN0/AN5 失败生命周期）：17 开工先失效旧 ok。
+
+    17 此前只在成功结尾写 manifest；读段/汇总中途崩溃时旧 manifest=ok 与旧
+    local_ancestry.json 原样保留，30 的 analysis_state() 照旧准入。崩溃触发用真实的
+    未处理路径：la.* 文件名里的染色体 token 不是数字（int() 在 glob 排序键上 ValueError）。"""
+
+    SCRIPT_17 = REPO / "scripts" / "17_local_ancestry_summary.py"
+
+    def test_midrun_crash_invalidates_previous_ok(self):
+        sys.path.insert(0, str(REPO / "scripts"))
+        import ancestry_data as ad
+        with tempfile.TemporaryDirectory() as td:
+            cfg = _write_config(td)
+            w = pathlib.Path(td) / "work" / "wgs" / "12_localanc"
+            w.mkdir(parents=True)
+            # 上一轮的成功产物（合成）：ok manifest + 旧 local_ancestry.json
+            ad.write_manifest(w / "manifest.json", ad.build_manifest(
+                "TESTSAMPLE", "17-local-ancestry", state="ok"))
+            (w / "local_ancestry.json").write_text(
+                json.dumps({"state": "ok", "panels": ["旧一轮"]}), encoding="utf-8")
+            # 本次输入：一个名字就能让 17 在进入任何计算前崩溃的 la 文件
+            (w / "la.bad.anc.vcf.gz").write_bytes(b"")
+            r = subprocess.run([sys.executable, str(self.SCRIPT_17)], capture_output=True,
+                               text=True, env={**os.environ, "WGS_CONFIG": str(cfg)}, timeout=120)
+            self.assertNotEqual(r.returncode, 0, "la 文件名损坏必须以非零退出终止")
+            # 单独准入（30 的调用形状）：旧 local_ancestry.json 不得再作为本次结果交出
+            state, reason, doc = ad.analysis_state(
+                w, {"sample_id": "TESTSAMPLE"}, names=("local_ancestry.json",),
+                owning_steps=("16-local-ancestry", "17-la-summary", "17b-la-calibrated"))
+            self.assertEqual((state, reason), ("unavailable", "run_begun_not_published"))
+            self.assertIsNone(doc)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

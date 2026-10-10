@@ -368,6 +368,10 @@ def main():
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
     import ancestry_data as ad
     outdir = W / "04_ancestry" / "f3"
+    # 失效先于计算（复审 §3.2 P0 失败生命周期）：真实复现里 28 因参考群缺失在下方
+    # sys.exit(1)，旧 manifest=ok 与旧 f3_stats.json 原样保留、30 照旧准入。开工先写
+    # 失效记录，成功后的最终 manifest 原子覆盖。
+    ad.begin_run_manifest(outdir / "manifest.json", SAMPLE, "28-f3-stats")
     groups = pd.read_csv(PANEL / "f3_groups.tsv", sep="\t", comment="#", dtype=str)
     groups["members"] = groups.members.str.split()
     glist = groups.to_dict("records")

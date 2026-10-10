@@ -21,6 +21,9 @@ import pandas as pd, numpy as np
 import ancestry_data as ad
 
 W = f"{P}/wgs/04_ancestry"
+# 失效先于计算（复审 §3.2 P0 失败生命周期）：中途崩溃/退出 1 时，上一轮的 ok manifest 与
+# summary.json 不得继续充当本次结果；成功路径的最终 manifest 原子覆盖这份记录。
+ad.begin_run_manifest(f"{W}/manifest.json", SAMPLE, "04b-ancestry-summary")
 log = []
 
 

@@ -6,6 +6,10 @@ from wgsconfig import *  # noqa: F401,F403 -- P, W, REF, TOOLS, SAMPLE, THREADS 
 
 import glob, gzip, io, json, os, subprocess, pandas as pd, numpy as np
 P=str(P); W=f"{P}/wgs/12_localanc"
+# 失效先于计算（复审 §3.2 P0 失败生命周期）：读段/汇总中途崩溃时，旧 ok manifest 与旧
+# local_ancestry.json 不得继续充当本次结果；成功路径的最终 manifest 原子覆盖这份记录。
+import ancestry_data as _ad_begin
+_ad_begin.begin_run_manifest(f"{W}/manifest.json", SAMPLE, "17-local-ancestry")
 
 
 def an_labels(work):

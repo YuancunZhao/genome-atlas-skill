@@ -478,6 +478,13 @@ def _cli(argv=None):
                     help="09b summary.json (a SCREENED subset of the metadata); explicit fallback only")
     a = ap.parse_args(argv)
 
+    # 失效先于计算（复审 §3.2 P0 失败生命周期）：--history JSON 损坏、树读取失败、查询/合并/
+    # 写文件中途崩溃时，旧 ok manifest 与旧 lineage_history.json 不得继续充当本次结果。写不出
+    # 失效记录就不开工——否则旧 ok 恰好在最需要失效的路径上存活。
+    import ancestry_data as _adm
+    _adm.begin_run_manifest(pathlib.Path(a.out).parent / "manifest.json",
+                            a.sample or "", "09d-lineage-history")
+
     hist = load_history(json.loads(pathlib.Path(a.history).read_text(encoding="utf-8"))
                         if a.history and pathlib.Path(a.history).exists() else {})
     parents = hist["parents"]
@@ -527,7 +534,6 @@ def _cli(argv=None):
     # manifest（analysis_id=09d-lineage-history）让 30 走 analysis_state 准入；parameters 记
     # 观测来源的实际 provenance（层级/行数/查询状态），不用路径字符串冒充内容指纹。
     try:
-        import ancestry_data as _adm
         _adm.write_manifest(_out_path.parent / "manifest.json", _adm.build_manifest(
             a.sample or "", "09d-lineage-history", state="ok",
             parameters={"history": a.history or "", "ytree": a.ytree or "",

@@ -314,6 +314,17 @@ def write_manifest(path, manifest):
     os.replace(tmp, path)
 
 
+def begin_run_manifest(path, sample_id, analysis_id):
+    """生产者开工即失效旧 ok（复审 §3.2 P0：H6/AN0/AN5 失败生命周期）。
+
+    真实 28 子进程曾因参考群缺失退出 1：旧 manifest=ok 与旧 f3_stats.json 原样保留，
+    30 的 analysis_state() 照旧准入。生产入口在**做任何计算之前**先写这份 state=unavailable
+    的失效记录；成功路径的最终 manifest 原子覆盖它。中途崩溃/被杀时记录留在目录里，
+    analysis_state 返回非 ok 且不交旧结果文件——"上一次成功"不再冒充"本次结果"。"""
+    write_manifest(path, build_manifest(sample_id, analysis_id,
+                                        state="unavailable", reason_code="run_begun_not_published"))
+
+
 def clear_step_manifests(dir_path, *step_ids):
     """一个步骤本次**成功**运行后，撤下它自己的步骤级 manifest（manifest.<step-id>.json）。
 
@@ -1165,16 +1176,18 @@ def analysis_state(dir_path, expected=None, names=("summary.json", "local_ancest
             continue
         if str(man.get(k)) != str(v):
             return "unavailable", "stale_result", None
+    # 目录 manifest 自身非 ok：状态照实传出，但不交结果文件——它只能来自上一次运行或
+    # 未完成的本次运行（复审反例：16b 的 ok 回执 + 目录 failed + 残留旧 local_ancestry.json
+    # 曾被当成 ok 交付）。这一检查先于 expected_parameters：非 ok 的 manifest 无论"当时的
+    # 参数会是什么"都不可用，报它自己的原因（如 run_begun_not_published）比报 stale_result
+    # 诚实——失效记录（begin_run_manifest）本就不携带计算参数。
+    if str(man.get("state") or "ok") != "ok":
+        return str(man.get("state") or "ok"), str(man.get("reason_code") or ""), None
     # 配置绑定参数：manifest.parameters 里缺键或值不符同样是 stale_result——"没记录"不等于"一致"。
     _params = man.get("parameters") or {}
     for k, v in (expected_parameters or {}).items():
         if k not in _params or str(_params[k]) != str(v):
             return "unavailable", "stale_result", None
-    # 目录 manifest 自身非 ok：状态照实传出，但结果文件不作为 doc 交出——它属于上一次运行或
-    # 未完成的本次运行（复审反例：16b 的 ok 回执 + 目录 failed + 残留旧 local_ancestry.json
-    #曾被当成 ok 交付）。
-    if str(man.get("state") or "ok") != "ok":
-        return str(man.get("state") or "ok"), str(man.get("reason_code") or ""), None
     for name in names:
         f = d / name
         if f.exists():
