@@ -629,7 +629,7 @@ D["ho_near_ancient"] = (_na.to_dict("records")
 # 复审 §3.2 P0 指纹绑定：比对 28 记录的估计量/块/门槛与分组面板、modern prune 集的内容
 # 指纹（sha 与写侧同一 ad.file_sha；estimator/block_mb/min_group_n 是 28 的模块常量）。
 _F3_PARAMS = {"estimator": ("site-mean[(pA-pB)(pA-pC) - pA(1-pA)/(nA-1)] "
-                            "+ delete-one-block(5Mb) jackknife SE"),
+                            "+ weighted delete-one-block(5Mb) jackknife SE (unequal blocks)"),
               "block_mb": 5, "min_group_n": 20,
               "panel_sha": _ad.file_sha(pathlib.Path(__file__).resolve().parents[1]
                                         / "panel" / "f3_groups.tsv"),

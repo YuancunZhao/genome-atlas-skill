@@ -318,7 +318,7 @@ class TestOptionalProductAdmission(unittest.TestCase):
                 "state": "ok", "reason_code": "", "build": "GRCh37", "reference_release": "",
                 "parameters": {
                     "estimator": ("site-mean[(pA-pB)(pA-pC) - pA(1-pA)/(nA-1)] "
-                                  "+ delete-one-block(5Mb) jackknife SE"),
+                                  "+ weighted delete-one-block(5Mb) jackknife SE (unequal blocks)"),
                     "block_mb": 5, "min_group_n": 20,
                     "panel_sha": hashlib.sha256(
                         (REPO / "panel" / "f3_groups.tsv").read_bytes()).hexdigest()[:12],

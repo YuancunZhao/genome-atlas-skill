@@ -51,8 +51,10 @@ import pandas as pd
 PANEL = pathlib.Path(__file__).resolve().parents[1] / "panel"
 BLOCK_MB = 5_000_000
 MIN_GROUP_N = 20          # an ancient region pool below this is too small to pool quietly
+# 复审 §3.2 W-T2：估计量串随加权公式的引入而改写——它同时是 28 manifest/30 准入的比对键，
+# 改串让按旧等块公式算出的旧 f3_stats.json 判 stale，不复算前不认证旧 Z。
 ESTIMATOR_ID = ("site-mean[(pA-pB)(pA-pC) - pA(1-pA)/(nA-1)] "
-                "+ delete-one-block(5Mb) jackknife SE")
+                "+ weighted delete-one-block(5Mb) jackknife SE (unequal blocks)")
 
 
 def _num(v, nd=6):
@@ -76,19 +78,32 @@ def _cfg():
 def jackknife(x, bcode, nblk):
     """Delete-one-block mean and SE of the per-site statistic x (one value per site).
 
+    Unequal blocks use the weighted block jackknife (admixtools R/resampling.R
+    jack_vec_stats2): with h_b = n/n_b, est = weighted.mean(loo, 1 - 1/h_b) and
+    var = mean((est - loo)^2 * (h_b - 1)). The plain equal-block formula this
+    replaced inflated the SE whenever block site counts differed (5 Mb blocks at
+    chromosome edges are never equal): on per-site [0 x100, 0.1, 0.2] with block
+    sizes [100, 1, 1] both give mean 0.002941176, but the SE is 0.09901155 vs the
+    official 0.01741909. With equal blocks the two formulas coincide, so the
+    hand-checked equal-block cases are unchanged.
+
     SE == 0 (constant statistic / single block) or a non-finite theta is reported as
     (theta, se, None) / (None, None, None): a zero-SE point estimate has no usable Z, and
     Infinity must never reach the JSON.
     """
     x = np.asarray(x, dtype=float)
-    if len(x) == 0 or not np.isfinite(x).all() or nblk < 1:
+    if len(x) == 0 or not np.isfinite(x).all() or nblk < 2:
         return None, None, None
     S = x.sum()
     Sb = np.bincount(bcode, weights=x, minlength=nblk)
     Nb = np.bincount(bcode, minlength=nblk).astype(float)
     theta = S / len(x)
     loo = (S - Sb) / (len(x) - Nb)
-    se = np.sqrt((nblk - 1) / nblk * ((loo - loo.mean()) ** 2).sum())
+    h = len(x) / Nb
+    w = 1.0 - 1.0 / h                       # 0 only when a block holds every site (nblk==1)
+    est = (w * loo).sum() / w.sum() if w.sum() > 0 else theta
+    var = (((est - loo) ** 2) * (h - 1.0)).sum() / nblk
+    se = math.sqrt(var)
     if not (math.isfinite(theta) and math.isfinite(se)):
         return None, None, None
     z = theta / se if se > 0 else None

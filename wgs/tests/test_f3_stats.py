@@ -58,6 +58,23 @@ class TestJackknife(unittest.TestCase):
         self.assertEqual((theta, se), (0.0, 0.0))
         self.assertIsNone(z)  # Z is meaningless for an exactly-zero statistic: null, not inf
 
+    def test_unequal_blocks_use_the_official_weighted_jackknife(self):
+        """复审 §3.2 W-T2：不等位点数分块不得套等块公式。
+
+        官方对拍（admixtools R/resampling.R jack_vec_stats2：h=n/n_b、est=weighted.mean(loo,
+        1-1/h)、var=mean((est-loo)²·(h-1))）：per-site 值 [0×100, 0.1, 0.2]、三块位点数
+        [100,1,1] → 均值 0.002941176、SE=0.01741909。旧等块公式对同一组数据给 0.09901155
+        （大 5.7 倍）——非等块 SE 未闭合。
+        """
+        x = np.array([0.0] * 100 + [0.1, 0.2])
+        bcode = np.array([0] * 100 + [1, 2])
+        theta, se, z = f3.jackknife(x, bcode, 3)
+        self.assertAlmostEqual(theta, 0.002941176, places=9)
+        self.assertAlmostEqual(se, 0.01741909, places=7,
+                               msg="不等块 SE 必须对拍官方加权公式，不是等块近似")
+        self.assertIsNotNone(z)
+        self.assertAlmostEqual(z, theta / se, places=6)
+
     def test_empty_or_nonfinite_inputs_are_unavailable(self):
         self.assertEqual(f3.jackknife(np.array([]), np.array([], dtype=int), 1), (None, None, None))
         self.assertEqual(f3.jackknife(np.array([1.0, np.inf]), np.array([0, 1]), 2), (None, None, None))

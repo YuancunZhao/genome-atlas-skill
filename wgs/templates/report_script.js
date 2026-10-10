@@ -1099,6 +1099,10 @@ function f3Note(adm){
   const av=adm.filter(r=>r.f3!=null&&r.se!=null&&isFinite(r.f3)&&isFinite(r.se));
   if(!av.length) return adm.length?'all-unavailable':'none';
   if(av.some(r=>f3Verdict(r)==='sig-neg')) return 'has-sig-neg';
+  /* 复审 §3.2 W-T2：f3/se 有限但 Z 为 null（SE=0/非有限）的行是"不可推断"，不是"未检出"
+     的证据——旧汇总只过滤 f3/se，[{f3:0,se:0,z:null}] 会落进 no-sig-neg，把零 SE 的点估计
+     当成阴性。必须至少一行真的可判（有限 Z 且非 sig-neg）才说未检出。 */
+  if(!av.some(r=>f3Verdict(r)==='ns')) return 'all-unavailable';
   return 'no-sig-neg';
 }
 const renderF3=()=>{
@@ -1187,11 +1191,13 @@ const renderF3=()=>{
     ?(Z?'存在显著为负的混合 f3（|Z|>3）：对该对来源构成两群混合信号；幅度解释受参照选择与覆盖限制。'
        :'At least one admixture-f3 is significantly negative (|Z|>3): a two-source admixture signal for that source pair; magnitude interpretation is limited by reference choice and coverage.')
     :verdict==='no-sig-neg'
-    ?(Z?'未检出显著为负的混合 f3：这只是"未检出"，不是反证——东亚参照群彼此分化浅，该检验对南北混合的功效本就有限。'
-       :'No admixture-f3 is significantly negative: non-detection, not disproof -- East Asian reference groups are weakly differentiated, and the test has little power for north-south admixture.')
+    /* 复审 §3.2 W-T2：删掉"东亚分化浅所以功效有限"——该功效从未被实测，是给当前样本编的
+       解释。未检出只说未检出，如实说明它区分不了两种原因，不替任何一种讲故事。 */
+    ?(Z?'未检出显著为负的混合 f3：这只是"未检出"，不是反证——本数据无法区分"无此混合"与"检验不出"。'
+       :'No admixture-f3 is significantly negative: non-detection, not disproof -- this data cannot distinguish "no such admixture" from "not detectable here".')
     :verdict==='all-unavailable'
-    ?(Z?'混合 f3 的标准误为 0 或非有限，无法给出 Z，也就无法给出混合结论。'
-       :'Admixture-f3 standard errors are zero or non-finite: no Z, therefore no admixture verdict.')
+    ?(Z?'混合 f3 不可推断：全部行都无法给出 Z（SE 为 0 或非有限），无法给出混合结论。'
+       :'Admixture-f3 is non-inferable: no row yields a usable Z (zero or non-finite SE), so no admixture verdict is possible.')
     :'';
   note.textContent=(bits.join('  ·  ')+(bits.length?'. ':''))+concl
    +(FD.estimator?((concl?'  ':'')+(Z?'估计量：':'estimator: ')+FD.estimator+'  ·  '):'')

@@ -45,6 +45,12 @@ ok(f3Note([{f3:null, se:null, z:null}]) === 'all-unavailable', 'only-unavailable
 ok(f3Note([{f3:0.07, se:0.001, z:70}, {f3:null, se:null, z:null}]) === 'no-sig-neg', 'at least one available non-significant row -> non-detection note');
 ok(f3Note([{f3:0.07, se:0.001, z:70}]) === 'no-sig-neg', 'all positive -> non-detection (wording derived, not assumed)');
 ok(f3Note([{f3:0.07, se:0.001, z:70}, {f3:-0.01, se:0.002, z:-5}]) === 'has-sig-neg', 'any significant-negative row flips the card to the admixture-signal note');
+// —— 复审 §3.2 W-T2：f3/se 有限但 Z 为 null（SE=0/非有限）的行是"不可推断"，不是"未检出"。
+//    旧 f3Note 只过滤 f3/se，[{f3:0,se:0,z:null}] 落进 no-sig-neg——零 SE 的点估计被当成
+//    "未检出显著为负"的阴性证据。必须至少一行真的可判（有限 Z）才说未检出。
+ok(f3Note([{f3:0, se:0, z:null}]) === 'all-unavailable', 'zero-SE row alone -> non-inferable, NOT no-sig-neg (reviewer repro)');
+ok(f3Note([{f3:-0.01, se:0.0, z:null}]) === 'all-unavailable', 'negative f3 without a Z is non-inferable, not non-detection');
+ok(f3Note([{f3:0.07, se:0.001, z:70}, {f3:0, se:0, z:null}]) === 'no-sig-neg', 'a usable row + a zero-SE row still yields the non-detection note');
 console.log(FAIL.length ? 'FAIL\n' + FAIL.join('\n') : 'PASS');
 process.exit(FAIL.length ? 1 : 0);
 """
@@ -63,6 +69,21 @@ class TestF3Card(unittest.TestCase):
         src = JS.read_text(encoding="utf-8")
         for pat in ("function f3Num", "function f3Verdict", "function f3Cell", "function f3Note"):
             self.assertIn(pat, src)
+
+    def test_power_interpretation_is_gone_and_non_inferable_is_named(self):
+        """复审 §3.2 W-T2：删掉未实测的功效解释，不可推断结论要点名"不可推断"。
+
+        旧 no-sig-neg 文案固定解释"东亚参照群分化浅所以功效有限"——该功效从未被实测，是
+        给当前样本量身编的故事；all-unavailable 文案只说"无法给出结论"，没说这是不可推断。
+        """
+        src = JS.read_text(encoding="utf-8")
+        self.assertNotIn("功效本就有限", src, "untested power claim must be deleted (zh)")
+        self.assertNotIn("little power for north-south", src, "untested power claim must be deleted (en)")
+        # 未检出仍是未检出（不是反证），但不再替它编功效故事
+        self.assertIn("不是反证", src)
+        # 不可推断要说出来
+        self.assertIn("不可推断", src)
+        self.assertIn("non-inferable", src)
 
 
 if __name__ == "__main__":
