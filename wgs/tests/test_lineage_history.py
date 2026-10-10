@@ -569,6 +569,31 @@ class TestCliWritesAdmissibleManifest(unittest.TestCase):
             self.assertEqual(other[0], "unavailable")
             self.assertEqual(other[1], "stale_result")
 
+    def test_manifest_binds_history_content_not_path(self):
+        """复审 §3.2 P0 指纹绑定：09d 的 manifest 记 history 文件的内容 sha（不是路径）；
+        换面板证据内容后 30 的准入形状判 stale，还原后重新 ok（A→B→A）。"""
+        import ancestry_data as ad
+        with tempfile.TemporaryDirectory() as td:
+            yard = self._yard(td)
+            hist = pathlib.Path(td) / "panel_history.json"
+            hist.write_text(json.dumps({"parents": {}}), encoding="utf-8")
+            out = pathlib.Path(td) / "lineage_history.json"
+            rc = lh._cli(["--yard", str(yard), "--out", str(out), "--sample", "S1",
+                          "--history", str(hist)])
+            self.assertEqual(rc, 0)
+            man = json.loads((out.parent / "manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(man["parameters"]["history_sha"], ad.file_sha(hist))
+            admit = lambda: ad.analysis_state(
+                out.parent, {"sample_id": "S1", "analysis_id": "09d-lineage-history"},
+                names=("lineage_history.json",),
+                expected_parameters={"history_sha": ad.file_sha(hist)})
+            self.assertEqual(admit()[0], "ok")
+            orig = hist.read_bytes()
+            hist.write_text(json.dumps({"parents": {}, "v": 2}), encoding="utf-8")
+            self.assertEqual(admit()[:2], ("unavailable", "stale_result"))
+            hist.write_bytes(orig)
+            self.assertEqual(admit()[0], "ok")
+
     def test_midrun_crash_invalidates_previous_ok(self):
         """复审 §3.2 P0 失败生命周期：09d 开工先失效旧 ok。
 

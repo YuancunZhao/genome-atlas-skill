@@ -62,7 +62,11 @@ for c in ${CALIB_CHROMS//,/ }; do
 done
 # 成功凭证（复审 AN0/AN5/H6）：17b 凭这份 state=ok 且样本相符的记录读 calib.*——只看文件存在
 # 会把上一轮失败前的旧校准当成本次结果。写不进记录就视为失败，不留半成功状态。
+# 复审 §3.2 P0 指纹绑定：回执带上本次校准的有效配置（群体/人数/种子/标签）——17b 与自己的
+# 配置逐项核对，相同标签下换了面板/seed/n，旧校准不再适用。
 python3 "$S/ancestry_data.py" --step-ok 16b-la-calibration \
   --out "$W/manifest.16b-la-calibration.json" --sample "$SAMPLE" \
+  --param "pops=$CALIB_POPS" --param "n=$CALIB_N" --param "seed=$CALIB_SEED" \
+  --param "labels=$LA_LAB_A,$LA_LAB_B" \
   || { echo "calibration ran but its success record could not be written" >&2; exit 7; }
 echo CALIB_DONE

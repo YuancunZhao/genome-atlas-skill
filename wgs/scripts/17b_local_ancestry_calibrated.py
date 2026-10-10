@@ -65,6 +65,19 @@ if glob.glob(f"{W}/calib.*.global.anc.gz") and not _cal_ok:
                           + ("missing (16b did not succeed this run)" if not _cal_man
                              else f"is state={_cal_man.get('state')}, sample_id={_cal_man.get('sample_id')}"))
     print(f"warning: {_cal_reason_absent}", file=sys.stderr)
+# 复审 §3.2 P0 指纹绑定：回执只带 sample_id 不能证明"相同标签下换面板/seed/n 后校准仍适用"。
+# 16b 现在把本次校准的有效配置写进回执；17b 与自己的配置逐项核对，任一不符即不读 calib.*
+# （原始 LA 照常交付，校准标记为不可用并说明原因——旧回执 parameters={} 同样过不了这一关）。
+if _cal_ok:
+    _expect = {"pops": ",".join(CALIB_POPS), "n": str(CALIB_N), "seed": str(CALIB_SEED),
+               "labels": ",".join(LA_LABELS[:2])}
+    _got = _cal_man.get("parameters") or {}
+    _mismatch = sorted(k for k, v in _expect.items() if str(_got.get(k, "")) != str(v))
+    if _mismatch:
+        _cal_ok = False
+        _cal_reason_absent = ("calibration receipt does not bind to the current config "
+                              f"(mismatched: {', '.join(_mismatch)}); rerun 16b under this config")
+        print(f"warning: {_cal_reason_absent}", file=sys.stderr)
 if _cal_ok:
     for f in glob.glob(f"{W}/calib.*.global.anc.gz"):
         c=os.path.basename(f).split(".")[1]

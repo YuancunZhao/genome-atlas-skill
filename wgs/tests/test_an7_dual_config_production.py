@@ -121,7 +121,13 @@ def _aadR_products(W):
                        "min_projection_snps": _AADR_PARAMS["ancestry_min_projection_snps"],
                        "min_group_n": _AADR_PARAMS["ancestry_min_group_n"],
                        "ancient_prefix": ["China_"], "modern_groups": ["Han"],
-                       "prune_sha": prune_sha, "prune_sites": 2},
+                       "prune_sha": prune_sha, "prune_sites": 2,
+                       # 复审 §3.2 P0 指纹绑定：30 还比对 AADR 前缀/注释与 08/09 阶段产物内容。
+                       # 本合成目录没有 proj.sscore/samples.tsv → sha 为 ""（30 的比对侧对缺失
+                       # 文件同样算 ""）；前缀取该配置下 wgsconfig 的默认解析路径。
+                       "aadr_prefix": str((a.parent.parent / "data" / "ref" / "aadr"
+                                           / "v66.p1_HO.aadr.patch.PUB").resolve()),
+                       "annotation": "", "proj_sha": "", "samples_sha": ""},
         "tool_versions": {}, "input_fingerprints": {}, "outputs": ["summary.json"]}) + "\n",
         encoding="utf-8")
 

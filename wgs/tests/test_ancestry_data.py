@@ -809,6 +809,116 @@ class TestRunInvalidation(unittest.TestCase):
             self.assertEqual(doc, {"modern": {"value": 0.02}})
 
 
+class TestFingerprintBinding(unittest.TestCase):
+    """复审 §3.2 P0 指纹绑定：同 ID 换输入/门槛/参考后旧 manifest 判 stale；内容还原
+    （A→B→A）后重新可准入。expected_parameters 的键与 30 各准入点、各生产者写侧一致；
+    生产者真的写入这些键由 test_04b/09b_production 的指纹断言覆盖。"""
+
+    def test_file_sha_missing_dir_and_empty_are_blank(self):
+        import hashlib
+        with tempfile.TemporaryDirectory() as td:
+            self.assertEqual(ad.file_sha(pathlib.Path(td) / "nope"), "")
+            self.assertEqual(ad.file_sha(pathlib.Path(td)), "", "目录不算可指纹内容")
+            self.assertEqual(ad.file_sha(""), "", "空串解析成 '.'，同样返回空")
+            f = pathlib.Path(td) / "x"
+            f.write_bytes(b"abc")
+            self.assertEqual(ad.file_sha(f), hashlib.sha256(b"abc").hexdigest()[:12])
+
+    def _admit(self, d, expected_params, names=("summary.json",)):
+        return ad.analysis_state(d, {"sample_id": "S1"}, names=names,
+                                 expected_parameters=expected_params)
+
+    def test_kg_changed_target_then_restored(self):
+        """30 的 kg 形状：换目标 sscore 内容 → stale；还原内容（A→B→A）→ 重新 ok。"""
+        with tempfile.TemporaryDirectory() as td:
+            d = pathlib.Path(td)
+            kg, tgt, prune = d / "kg.proj.sscore", d / "target.proj.sscore", d / "prune.prune.in"
+            kg.write_text("kg\n"); tgt.write_text("A-content\n"); prune.write_text("rs1\n")
+            (d / "summary.json").write_text("{}", encoding="utf-8")
+            # 30 在准入时从当前文件重算期望（这里是同一形状）；manifest 记生产时的指纹
+            exp = lambda: {"regional_enabled": 0, "superpop": "EAS", "subpops": ["CHB", "CHS"],
+                           "kg_sscore_sha": ad.file_sha(kg), "target_sscore_sha": ad.file_sha(tgt),
+                           "prune_sha": ad.file_sha(prune), "prune_sites": 1,
+                           "min_call_rate_modern": 0.95, "min_call_rate_target": 0.95,
+                           "min_projection_snps": 10000, "min_group_n": 2}
+            ad.write_manifest(d / "manifest.json", ad.build_manifest(
+                "S1", "04b-ancestry-summary", state="ok", parameters=exp()))
+            self.assertEqual(self._admit(d, exp())[0], "ok")
+            orig = tgt.read_bytes()
+            tgt.write_bytes(b"B-content\n")                     # 同 ID 换目标输入
+            self.assertEqual(self._admit(d, exp())[:2], ("unavailable", "stale_result"))
+            tgt.write_bytes(orig)                               # A→B→A：内容还原
+            self.assertEqual(self._admit(d, exp())[0], "ok")
+
+    def test_aadr_changed_stage_product(self):
+        with tempfile.TemporaryDirectory() as td:
+            d = pathlib.Path(td)
+            proj, samples = d / "proj.sscore", d / "samples.tsv"
+            proj.write_text("A\n"); samples.write_text("s\n")
+            (d / "summary.json").write_text("{}", encoding="utf-8")
+            exp = lambda: {"min_group_n": 2, "aadr_prefix": "/ref/aadr", "annotation": "",
+                           "proj_sha": ad.file_sha(proj), "samples_sha": ad.file_sha(samples)}
+            ad.write_manifest(d / "manifest.json", ad.build_manifest(
+                "S1", "09b-aadr-summary", state="ok", parameters=exp()))
+            self.assertEqual(self._admit(d, exp())[0], "ok")
+            orig = proj.read_bytes()
+            proj.write_bytes(b"B\n")                            # 08/09 阶段产物变了
+            self.assertEqual(self._admit(d, exp())[:2], ("unavailable", "stale_result"))
+            proj.write_bytes(orig)
+            self.assertEqual(self._admit(d, exp())[0], "ok")
+
+    def test_f3_changed_prune(self):
+        with tempfile.TemporaryDirectory() as td:
+            d = pathlib.Path(td)
+            prune = d / "prune.prune.in"
+            prune.write_text("rs1\n")
+            (d / "f3_stats.json").write_text("{}", encoding="utf-8")
+            exp = lambda: {"estimator": "site-mean", "block_mb": 5, "min_group_n": 20,
+                           "panel_sha": "abc123", "prune_sha": ad.file_sha(prune)}
+            ad.write_manifest(d / "manifest.json", ad.build_manifest(
+                "S1", "28-f3-stats", state="ok", parameters=exp()))
+            self.assertEqual(self._admit(d, exp(), names=("f3_stats.json",))[0], "ok")
+            orig = prune.read_bytes()
+            prune.write_bytes(b"rs1\nrs2\n")
+            self.assertEqual(self._admit(d, exp(), names=("f3_stats.json",))[:2],
+                             ("unavailable", "stale_result"))
+            prune.write_bytes(orig)
+            self.assertEqual(self._admit(d, exp(), names=("f3_stats.json",))[0], "ok")
+
+    def test_lineage_changed_history_content(self):
+        with tempfile.TemporaryDirectory() as td:
+            d = pathlib.Path(td)
+            hist = pathlib.Path(td) / "panel.json"
+            hist.write_text('{"v": 1}', encoding="utf-8")
+            (d / "lineage_history.json").write_text('{"y": null}', encoding="utf-8")
+            exp = lambda: {"history_sha": ad.file_sha(hist)}
+            ad.write_manifest(d / "manifest.json", ad.build_manifest(
+                "S1", "09d-lineage-history", state="ok", parameters=exp()))
+            admit = lambda: self._admit(d, exp(), names=("lineage_history.json",))
+            self.assertEqual(admit()[0], "ok")
+            orig = hist.read_bytes()
+            hist.write_text('{"v": 2}', encoding="utf-8")       # 换面板证据内容
+            self.assertEqual(admit()[:2], ("unavailable", "stale_result"))
+            hist.write_bytes(orig)
+            self.assertEqual(admit()[0], "ok")
+
+    def test_la_changed_labels_or_chroms(self):
+        with tempfile.TemporaryDirectory() as td:
+            d = pathlib.Path(td)
+            (d / "la.1.anc.vcf.gz").write_bytes(b"")
+            (d / "local_ancestry.json").write_text("{}", encoding="utf-8")
+            exp = {"la_labels": ["NorthEA", "SouthEA"], "la_a": ["CHB"], "la_b": ["CDX"],
+                   "la_chroms": ["1"]}
+            ad.write_manifest(d / "manifest.json", ad.build_manifest(
+                "S1", "17-local-ancestry", state="ok", parameters=dict(exp)))
+            admit = lambda e: self._admit(d, e, names=("local_ancestry.json",))
+            self.assertEqual(admit(exp)[0], "ok")
+            for bad in ({"la_labels": ["North", "South"]},          # 换标签
+                        {"la_chroms": ["1", "2"]}):                # 染色体集变了
+                self.assertEqual(admit({**exp, **bad})[:2],
+                                 ("unavailable", "stale_result"), bad)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
 

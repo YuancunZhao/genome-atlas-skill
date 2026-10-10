@@ -314,6 +314,17 @@ def write_manifest(path, manifest):
     os.replace(tmp, path)
 
 
+def file_sha(path, ndigits=12):
+    """内容指纹（复审 §3.2 P0：指纹绑定）。生产者与 30 用**同一算法**对同一阶段产物取
+    sha256 前缀，写入/比对 manifest.parameters——路径字符串或行数日志不充当指纹。大参考
+    不整库重算：绑定的是该模块实际消费的派生产物（sscore/score/prune/history 等小文件）。"""
+    import hashlib as _h
+    p = pathlib.Path(path)
+    if not p.is_file():          # 缺失、空串（解析成 "."）或传了目录：都算"无内容可指纹"
+        return ""
+    return _h.sha256(p.read_bytes()).hexdigest()[:ndigits]
+
+
 def begin_run_manifest(path, sample_id, analysis_id):
     """生产者开工即失效旧 ok（复审 §3.2 P0：H6/AN0/AN5 失败生命周期）。
 
@@ -395,6 +406,10 @@ def _cli(argv=None):
     ap.add_argument("--disabled", metavar="ANALYSIS_ID")
     ap.add_argument("--step-ok", metavar="ANALYSIS_ID",
                     help="write a state=ok step record (a successful optional step's receipt for its consumer)")
+    ap.add_argument("--param", action="append", default=[], metavar="KEY=VALUE",
+                    help="extra parameters for --step-ok (repeatable); the receipt's consumer verifies "
+                         "them against its own effective config (复审 §3.2 P0：回执只带 sample_id "
+                         "不能证明换面板/seed/n 后校准仍适用)")
     ap.add_argument("--clear-step", metavar="ANALYSIS_ID",
                     help="remove this step's own manifest.<id>.json after a successful run (lifecycle)")
     ap.add_argument("--dir", help="directory holding the step-level manifest to clear")
@@ -431,8 +446,15 @@ def _cli(argv=None):
     if a.step_ok:
         if not a.out or not a.sample:
             ap.error("--step-ok requires --out and --sample")
-        write_manifest(a.out, build_manifest(a.sample, a.step_ok, state="ok"))
-        print(f"wrote {a.out} (state=ok)")
+        _params = {}
+        for kv in a.param:
+            if "=" not in kv:
+                ap.error(f"--param expects KEY=VALUE, got {kv!r}")
+            k, v = kv.split("=", 1)
+            _params[k] = v
+        write_manifest(a.out, build_manifest(a.sample, a.step_ok, state="ok",
+                                             parameters=_params))
+        print(f"wrote {a.out} (state=ok, parameters={sorted(_params)})")
         return 0
     if not a.disabled or not a.out or not a.sample:
         ap.error("--disabled requires --out and --sample")

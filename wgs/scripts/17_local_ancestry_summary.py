@@ -113,12 +113,17 @@ json.dump({
 print(f"wrote {W}/local_ancestry.json ({len(ANC)} panels, chroms {_chroms})")
 
 # AN5：把这次汇总的状态写进 manifest，30 据此判断能不能用这份结果（而不是看文件在不在）。
+# 复审 §3.2 P0 指纹绑定：记录有效配置（面板标签/来源群体）与本步实际消费的 la.* 染色体集，
+# 30 与当前配置、当前文件比对——换标签/换面板/缺染色体后旧 manifest 判 stale。
 import ancestry_data as _ad
 _ad.write_manifest(f"{W}/manifest.json", _ad.build_manifest(
     SAMPLE, "17-local-ancestry", state=("ok" if len(sg) else "unavailable"),
     reason_code=("" if len(sg) else "no_segments"),
     parameters={"panels": list(ANC), "missing_chroms": list(missing),
-                "aggregation": "marker_counts_for_global; segment_spans_for_per_chrom"},
+                "aggregation": "marker_counts_for_global; segment_spans_for_per_chrom",
+                "la_labels": list(OPT.get("la_labels") or []),
+                "la_a": list(LA_NORTH), "la_b": list(LA_SOUTH),
+                "la_chroms": list(_chroms)},
     outputs=["12_localanc/local_ancestry.json", "12_localanc/segments.tsv", "12_localanc/global.tsv",
              "12_localanc/calibration.tsv"]))
 print(f"wrote {W}/manifest.json (state={'ok' if len(sg) else 'unavailable'})")

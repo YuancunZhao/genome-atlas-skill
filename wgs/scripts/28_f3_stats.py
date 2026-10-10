@@ -393,7 +393,11 @@ def main():
     ad.write_manifest(outdir / "manifest.json", ad.build_manifest(
         SAMPLE, "28-f3-stats", state="ok",
         parameters={"estimator": ESTIMATOR_ID, "block_mb": BLOCK_MB // 1_000_000,
-                    "min_group_n": MIN_GROUP_N},
+                    "min_group_n": MIN_GROUP_N,
+                    # 复审 §3.2 P0 指纹绑定：分组面板与 modern 侧 prune 集的内容指纹——换
+                    # f3_groups 或换 04 的修剪集后，旧 f3_stats.json 不得继续冒充本次结果。
+                    "panel_sha": ad.file_sha(PANEL / "f3_groups.tsv"),
+                    "prune_sha": ad.file_sha(W / "04_ancestry" / "prune.prune.in")},
         outputs=outputs,
         sides=[k for k in ("modern", "ancient") if out[k] is not None]))
     print("28: wrote", dst)

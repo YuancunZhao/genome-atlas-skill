@@ -256,5 +256,45 @@ class TestFailureInvalidatesOldOk(unittest.TestCase):
             self.assertIsNone(doc, "开工失效后，上一轮的 summary.json 不得继续交付")
 
 
+@unittest.skipIf(_SKIP, _SKIP)
+class TestManifestFingerprints(unittest.TestCase):
+    """复审 §3.2 P0 指纹绑定：04b 的 manifest 必须记录阶段产物内容与 QC 门槛；同 ID 换目标
+    输入后单独准入（30 的调用形状）判 stale，内容还原（A→B→A）后重新 ok。"""
+
+    def test_manifest_carries_fingerprints_and_admission_is_content_bound(self):
+        sys.path.insert(0, str(REPO / "scripts"))
+        import ancestry_data as ad
+        with tempfile.TemporaryDirectory() as td:
+            cfg = _write_config(td)
+            w = _write_space(td)
+            r = _run_04b(cfg)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            man = json.loads((w / "manifest.json").read_text(encoding="utf-8"))
+            for k in ("kg_sscore_sha", "target_sscore_sha", "prune_sha",
+                      "min_call_rate_modern", "min_call_rate_target",
+                      "min_projection_snps", "min_group_n"):
+                self.assertIn(k, man["parameters"], f"04b manifest 缺指纹/门槛键 {k}")
+            self.assertTrue(man["parameters"]["target_sscore_sha"])
+            exp = lambda: {"regional_enabled": False, "superpop": man["parameters"]["superpop"],
+                           "subpops": man["parameters"]["subpops"],
+                           "kg_sscore_sha": ad.file_sha(w / "kg.proj.sscore"),
+                           "target_sscore_sha": ad.file_sha(w / "target.proj.sscore"),
+                           "prune_sha": ad.file_sha(w / "prune.prune.in"),
+                           "prune_sites": man["parameters"].get("prune_sites", 2),
+                           "min_call_rate_modern": 0.95, "min_call_rate_target": 0.95,
+                           "min_projection_snps": 10000, "min_group_n": 2}
+            admit = lambda: ad.analysis_state(
+                w, {"sample_id": "TESTSAMPLE"}, owning_steps=("04-ancestry-pca", "04b-ancestry-summary"),
+                expected_parameters=exp())
+            self.assertEqual(admit()[0], "ok")
+            tgt = w / "target.proj.sscore"
+            orig = tgt.read_bytes()
+            tgt.write_bytes(orig + b"TEST\tTESTSAMPLE\t0.0001\t0.0000\t0.0000\t0.0000\n")
+            self.assertEqual(admit()[:2], ("unavailable", "stale_result"),
+                             "同 ID 换目标输入后，旧 manifest 必须判 stale")
+            tgt.write_bytes(orig)                                # A→B→A：内容还原
+            self.assertEqual(admit()[0], "ok")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

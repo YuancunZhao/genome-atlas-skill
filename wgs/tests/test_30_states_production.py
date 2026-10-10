@@ -10,7 +10,7 @@
 30 需要 pandas/numpy/yaml 与 PATH 里的 bcftools；缺任一整文件跳过（本地跳过、服务器执行，
 与 test_09b_production 同一约定）。
 """
-import importlib.util, json, os, pathlib, shutil, subprocess, sys, tempfile, unittest
+import hashlib, importlib.util, json, os, pathlib, shutil, subprocess, sys, tempfile, unittest
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
 SCRIPT = REPO / "scripts" / "30_build_report_data.py"
@@ -122,13 +122,21 @@ def _write_base(td, y=True, mt=True, regional=False):
         "schema_version": 1, "default_analysis_id": "kg-global", "analyses": analyses,
         "local": {}, "state": "ok", "reason_code": ""}, ensure_ascii=False, indent=1) + "\n",
         encoding="utf-8")
-    # 04b manifest 的参数必须与本次配置一致，30 的 expected_parameters 准入才放行
+    # 04b manifest 的参数必须与本次配置一致，30 的 expected_parameters 准入才放行。
+    # 复审 §3.2 P0 指纹绑定：30 还比对阶段产物内容（sscore/prune 的 sha，与真实 04b 写侧
+    # 同一算法）与 QC 门槛（本配置未覆盖 → wgsconfig 默认 0.95/0.95/10000/2）。
     superpop = "EUR" if regional else "EAS"
+    _sha = lambda p: hashlib.sha256((a / p).read_bytes()).hexdigest()[:12]
     (a / "manifest.json").write_text(json.dumps({
         "schema_version": "1", "sample_id": "TESTSAMPLE", "analysis_id": "04b-ancestry-summary",
         "state": "ok", "reason_code": "", "build": "GRCh37", "reference_release": "",
         "parameters": {"regional_enabled": regional_enabled, "superpop": superpop,
-                       "subpops": ["CHB", "CHS"]},
+                       "subpops": ["CHB", "CHS"],
+                       "kg_sscore_sha": _sha("kg.proj.sscore"),
+                       "target_sscore_sha": _sha("target.proj.sscore"),
+                       "prune_sha": _sha("prune.prune.in"), "prune_sites": 2,
+                       "min_call_rate_modern": 0.95, "min_call_rate_target": 0.95,
+                       "min_projection_snps": 10000, "min_group_n": 2},
         "tool_versions": {}, "input_fingerprints": {}, "outputs": []}) + "\n", encoding="utf-8")
     # --- 其余必读
     ref = pathlib.Path(td) / "work" / "data" / "ref"
@@ -302,16 +310,28 @@ class TestOptionalProductAdmission(unittest.TestCase):
             cfg = _write_config(td)
             W = _write_base(td, y=True, mt=True)
             self._write_unadmitted_products(W)
+            # 30 的 expected_parameters 与真实 28/09d 写侧一致：估计量串/块/门槛 + 分组面板与
+            # prune 的内容 sha（复审 §3.2 P0 指纹绑定）；history_sha 是 LINEAGE_HISTORY_FILE
+            # （默认 wgs/panel/lineage_history.json）的内容 sha。
             (W / "04_ancestry/f3/manifest.json").write_text(json.dumps({
                 "schema_version": "1", "sample_id": "TESTSAMPLE", "analysis_id": "28-f3-stats",
                 "state": "ok", "reason_code": "", "build": "GRCh37", "reference_release": "",
-                "parameters": {"estimator": "site-mean-corrected", "block_mb": 5, "min_group_n": 2},
+                "parameters": {
+                    "estimator": ("site-mean[(pA-pB)(pA-pC) - pA(1-pA)/(nA-1)] "
+                                  "+ delete-one-block(5Mb) jackknife SE"),
+                    "block_mb": 5, "min_group_n": 20,
+                    "panel_sha": hashlib.sha256(
+                        (REPO / "panel" / "f3_groups.tsv").read_bytes()).hexdigest()[:12],
+                    "prune_sha": hashlib.sha256(
+                        (W / "04_ancestry/prune.prune.in").read_bytes()).hexdigest()[:12]},
                 "tool_versions": {}, "input_fingerprints": {}, "outputs": ["f3_stats.json"]}) + "\n",
                 encoding="utf-8")
             (W / "03_haplo/manifest.json").write_text(json.dumps({
                 "schema_version": "1", "sample_id": "TESTSAMPLE", "analysis_id": "09d-lineage-history",
                 "state": "ok", "reason_code": "", "build": "GRCh37", "reference_release": "",
-                "parameters": {}, "tool_versions": {}, "input_fingerprints": {},
+                "parameters": {"history_sha": hashlib.sha256(
+                    (REPO / "panel" / "lineage_history.json").read_bytes()).hexdigest()[:12]},
+                "tool_versions": {}, "input_fingerprints": {},
                 "outputs": ["lineage_history.json"]}) + "\n", encoding="utf-8")
             r = _run_30(cfg)
             self.assertEqual(r.returncode, 0, r.stderr)

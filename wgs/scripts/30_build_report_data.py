@@ -369,11 +369,19 @@ _analysis_state = lambda d, expected=None, expected_parameters=None, owning_step
     owning_steps=owning_steps)
 
 _prune_in = W/"11_aadr/prune.prune.in"
-_prune_sha = (hashlib.sha256(_prune_in.read_bytes()).hexdigest()[:12] if _prune_in.exists() else "")
+_prune_sha = _ad.file_sha(_prune_in)
 
 _LA_STATE, _LA_REASON, _LA_DOC = _analysis_state(
     W/"12_localanc",
-    owning_steps=("16-local-ancestry", "17-la-summary", "17b-la-calibrated"))
+    owning_steps=("16-local-ancestry", "17-la-summary", "17b-la-calibrated"),
+    expected_parameters={
+        # 复审 §3.2 P0 指纹绑定：LA 此前只比 sample_id——17 记录有效配置（标签/来源群体）
+        # 与实际消费的 la.* 染色体集，这里与当前配置、当前文件比对。16b 校准回执的绑定
+        # 由 17b 自行核验（回执参数 vs 17b 的当前配置），不在此重复。
+        "la_labels": list(LA_LABELS), "la_a": list(LA_NORTH), "la_b": list(LA_SOUTH),
+        "la_chroms": sorted((p.name.split(".")[1] for p in (W/"12_localanc").glob("la.*.anc.vcf.gz")),
+                            key=lambda x: int(x) if x.isdigit() else 10**9),
+    })
 _AADR_STATE, _AADR_REASON, _AADR_DOC = _analysis_state(
     W/"11_aadr",
     owning_steps=("08-aadr-extract", "09-aadr-pca", "09b-aadr-summary"),
@@ -382,6 +390,11 @@ _AADR_STATE, _AADR_REASON, _AADR_DOC = _analysis_state(
         "min_projection_snps": MIN_PROJECTION_SNPS, "min_group_n": MIN_GROUP_N,
         "ancient_prefix": AADR_ANCIENT_PREFIX, "modern_groups": AADR_MODERN,
         "prune_sha": _prune_sha, "prune_sites": (len(_prune_in.read_text().split()) if _prune_in.exists() else 0),
+        # 复审 §3.2 P0 指纹绑定：09b 覆盖 08 manifest 后丢失的提取来源在此核对——当前 AADR
+        # 前缀/注释与 08/09 阶段产物内容（sha 与写侧同一 ad.file_sha）。
+        "aadr_prefix": AADR, "annotation": (AADR_ANNOTATION or ""),
+        "proj_sha": _ad.file_sha(W/"11_aadr/proj.sscore"),
+        "samples_sha": _ad.file_sha(W/"11_aadr/samples.tsv"),
     })
 _g = W/"12_localanc/global.tsv"
 # 复审 AN5：旧读入口必须服从状态。LA 被禁用/失败时，目录里残留的 global.tsv 与旧
@@ -613,8 +626,17 @@ D["ho_near_ancient"] = (_na.to_dict("records")
 # # and the report's f3 card hides itself on a null -- the sections table records why.
 # 复审 H6/AN5 残留：f3 此前按"文件存在"进场，绕过 28 的 manifest——禁用/失败/换样本的旧
 # f3_stats.json 照样投递。走 analysis_state 准入（state+sample_id），不合格即空态。
+# 复审 §3.2 P0 指纹绑定：比对 28 记录的估计量/块/门槛与分组面板、modern prune 集的内容
+# 指纹（sha 与写侧同一 ad.file_sha；estimator/block_mb/min_group_n 是 28 的模块常量）。
+_F3_PARAMS = {"estimator": ("site-mean[(pA-pB)(pA-pC) - pA(1-pA)/(nA-1)] "
+                            "+ delete-one-block(5Mb) jackknife SE"),
+              "block_mb": 5, "min_group_n": 20,
+              "panel_sha": _ad.file_sha(pathlib.Path(__file__).resolve().parents[1]
+                                        / "panel" / "f3_groups.tsv"),
+              "prune_sha": _ad.file_sha(W/"04_ancestry/prune.prune.in")}
 _F3_STATE, _F3_REASON, _F3_DOC = _ad.analysis_state(
-    W/"04_ancestry/f3", {"sample_id": SAMPLE}, names=("f3_stats.json",))
+    W/"04_ancestry/f3", {"sample_id": SAMPLE}, names=("f3_stats.json",),
+    expected_parameters=_F3_PARAMS)
 if _F3_STATE == "ok":
     D["f3"] = _F3_DOC
 else:
@@ -669,11 +691,21 @@ def _attach_kg_group_locations(analyses, loc_rows):
 # 这是模板与 AN6 要消费的形状；旧键（ho_*/near_eas/…）只作为尚未迁移的视图的过渡，不再各自算一套。
 # kg 模块的 owning 步骤是 04/04b；04c 区域轴是可选能力，其 disabled 记录不得阻断 global-only
 # 运行里的全球模块（复审 §3.2 P0 反例）。
+# 复审 §3.2 P0 指纹绑定：除区域三项外，比对 04b 记录的阶段产物内容（global sscore/prune 的
+# sha，与写侧同一 ad.file_sha）与 QC 门槛——换目标/参考/修剪/门槛后旧 manifest 判 stale。
+_kg_prune = W/"04_ancestry/prune.prune.in"
 _kg_state, _kg_reason, _kg_doc = _analysis_state(
     W/"04_ancestry",
     owning_steps=("04-ancestry-pca", "04b-ancestry-summary"),
-    expected_parameters={"regional_enabled": REGIONAL_ENABLED, "superpop": SUPERPOP,
-                        "subpops": SUBPOPS})
+    expected_parameters={
+        "regional_enabled": REGIONAL_ENABLED, "superpop": SUPERPOP, "subpops": SUBPOPS,
+        "kg_sscore_sha": _ad.file_sha(W/"04_ancestry/kg.proj.sscore"),
+        "target_sscore_sha": _ad.file_sha(W/"04_ancestry/target.proj.sscore"),
+        "prune_sha": _ad.file_sha(_kg_prune),
+        "prune_sites": (len(_kg_prune.read_text().split()) if _kg_prune.exists() else 0),
+        "min_call_rate_modern": MIN_CR_MODERN, "min_call_rate_target": MIN_CR_TARGET,
+        "min_projection_snps": MIN_PROJECTION_SNPS, "min_group_n": MIN_GROUP_N,
+    })
 _AADR_DOC = _AADR_DOC if isinstance(_AADR_DOC, dict) else None
 _anc_analyses = []
 for _doc, _st, _rs in ((_AADR_DOC, _AADR_STATE, _AADR_REASON), (_kg_doc, _kg_state, _kg_reason)):
@@ -718,9 +750,12 @@ D["near_eas"], D["knn_eas"] = _near_from(_anc_analyses, "kg-regional")
 # 父母系：以 05/06 的结构化结果 + 04 的历史视图为准（lineage_history.json）。
 # 复审 H6/AN5 残留：此前按"文件存在"读取，绕过 09d 的状态——现在 09d 会写 manifest
 # （analysis_id=09d-lineage-history），30 走 analysis_state 准入；不合格交付空态并说明原因。
+# 复审 §3.2 P0 指纹绑定：09d 的 manifest 记 history 文件的内容 sha（不是路径）；换面板
+# 证据文件内容后旧 lineage_history.json 判 stale。
 _LH_STATE, _LH_REASON, _LH_DOC = _ad.analysis_state(
     W/"03_haplo", {"sample_id": SAMPLE, "analysis_id": "09d-lineage-history"},
-    names=("lineage_history.json",))
+    names=("lineage_history.json",),
+    expected_parameters={"history_sha": _ad.file_sha(LINEAGE_HISTORY_FILE)})
 if _LH_STATE != "ok":
     print(f"30: lineage history not admitted (state={_LH_STATE}, reason={_LH_REASON}); "
           "D.lineages delivered empty", file=sys.stderr)

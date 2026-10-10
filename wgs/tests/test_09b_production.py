@@ -302,5 +302,41 @@ class TestFailureInvalidatesOldOk(unittest.TestCase):
             self.assertIsNone(doc, "开工失效后，上一轮的 summary.json 不得继续交付")
 
 
+@unittest.skipIf(_SKIP, _SKIP)
+class TestManifestFingerprints(unittest.TestCase):
+    """复审 §3.2 P0 指纹绑定：09b 覆盖 08 manifest 后必须保留提取来源——记录 AADR 前缀与
+    08/09 阶段产物内容；同 ID 换阶段产物后单独准入判 stale，还原后重新 ok。"""
+
+    def test_manifest_carries_extraction_source_and_stage_fingerprints(self):
+        sys.path.insert(0, str(REPO / "scripts"))
+        import ancestry_data as ad
+        with tempfile.TemporaryDirectory() as td:
+            cfg = _write_config(td)
+            w = _write_panel(td, {iid: (0, 1000000) for iid, *_ in PANEL})
+            r = _run_09b(cfg)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            man = json.loads((w / "manifest.json").read_text(encoding="utf-8"))
+            for k in ("aadr_prefix", "annotation", "proj_sha", "samples_sha"):
+                self.assertIn(k, man["parameters"], f"09b manifest 缺提取来源/阶段指纹键 {k}")
+            self.assertIn("aadr", man["parameters"]["aadr_prefix"])
+            exp = lambda: {"min_group_n": 2,
+                           "aadr_prefix": man["parameters"]["aadr_prefix"],
+                           "annotation": man["parameters"]["annotation"],
+                           "proj_sha": ad.file_sha(w / "proj.sscore"),
+                           "samples_sha": ad.file_sha(w / "samples.tsv")}
+            admit = lambda: ad.analysis_state(
+                w, {"sample_id": "TESTSAMPLE"},
+                owning_steps=("08-aadr-extract", "09-aadr-pca", "09b-aadr-summary"),
+                expected_parameters=exp())
+            self.assertEqual(admit()[0], "ok")
+            proj = w / "proj.sscore"
+            orig = proj.read_bytes()
+            proj.write_bytes(orig + b"X\tEXTRA\t0.1\t0.1\t0.1\t0.1\tNA\t0\t0\t0\t0\n")
+            self.assertEqual(admit()[:2], ("unavailable", "stale_result"),
+                             "08/09 阶段产物内容变化后，旧 summary 必须判 stale")
+            proj.write_bytes(orig)                                # A→B→A：内容还原
+            self.assertEqual(admit()[0], "ok")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -186,6 +186,18 @@ pathlib.Path(f"{W}/summary.json").write_text(json.dumps({
 ad.write_manifest(f"{W}/manifest.json", ad.build_manifest(
     SAMPLE, "04b-ancestry-summary", state=state,
     reason_code="" if analyses else skip_reason,
-    parameters={"regional_enabled": REGIONAL_ENABLED, "superpop": SUPERPOP, "subpops": SUBPOPS},
+    parameters={
+        "regional_enabled": REGIONAL_ENABLED, "superpop": SUPERPOP, "subpops": SUBPOPS,
+        # 复审 §3.2 P0（指纹绑定）：此前只记区域三项，改目标输入、参考/修剪内容或 QC 门槛后
+        # 旧 manifest 照样通过。绑定本步实际消费的 global 阶段产物内容（sscore/prune 的
+        # sha256 前缀，与 30 比对侧同一算法）与有效门槛。
+        "kg_sscore_sha": ad.file_sha(f"{W}/kg.proj.sscore"),
+        "target_sscore_sha": ad.file_sha(f"{W}/target.proj.sscore"),
+        "prune_sha": ad.file_sha(f"{W}/prune.prune.in"),
+        "prune_sites": (len((pathlib.Path(W) / "prune.prune.in").read_text().split())
+                        if (pathlib.Path(W) / "prune.prune.in").exists() else 0),
+        "min_call_rate_modern": MIN_CR_MODERN, "min_call_rate_target": MIN_CR_TARGET,
+        "min_projection_snps": MIN_PROJECTION_SNPS, "min_group_n": MIN_GROUP_N,
+    },
     outputs=["04_ancestry/summary.json", "04_ancestry/summary.txt"]))
 print(f"wrote {W}/summary.json ({len(analyses)} reference space(s)); manifest written")

@@ -536,9 +536,14 @@ def _cli(argv=None):
     try:
         _adm.write_manifest(_out_path.parent / "manifest.json", _adm.build_manifest(
             a.sample or "", "09d-lineage-history", state="ok",
-            parameters={"history": a.history or "", "ytree": a.ytree or "",
-                        "source_kind": _query["source_kind"], "source": _query["source"],
-                        "n_rows": _query["n_rows"], "query_state": _query["state"]},
+            parameters={
+                # 复审 §3.2 P0 指纹绑定：路径字符串不充当指纹——记 history/ytree 的**内容**
+                # sha（缺失/传目录时为 ""，30 比对侧同一算法）。观测来源记 provenance（层级/
+                # 行数/查询状态），30 不把它们当比对键。
+                "history_sha": _adm.file_sha(a.history),
+                "ytree_sha": _adm.file_sha(a.ytree),
+                "source_kind": _query["source_kind"], "source": _query["source"],
+                "n_rows": _query["n_rows"], "query_state": _query["state"]},
             outputs=[_out_path.name]))
     except Exception as _e:      # manifest 写失败不阻断结果文件，但要留下痕迹
         print(f"WARNING: could not write the 09d manifest: {_e}", file=sys.stderr)

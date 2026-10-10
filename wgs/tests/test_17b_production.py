@@ -64,18 +64,24 @@ def _write_la(td, target_rows_by_chrom):
     return w
 
 
-def _write_calib(td, rows_by_chrom, psam_lines, record=True, sample="TESTSAMPLE"):
+def _write_calib(td, rows_by_chrom, psam_lines, record=True, sample="TESTSAMPLE", receipt_params=None):
     """校准产物 + 真实 psam（holdout 的群体归属来自这里）。
 
     record=False 时**不**写 16b 的成功凭证（manifest.16b-la-calibration.json），用于复现
-    "calib.* 存在但属于上一轮失败前的旧产物"的场景；sample= 用于复现凭证样本不符。"""
+    "calib.* 存在但属于上一轮失败前的旧产物"的场景；sample= 用于复现凭证样本不符；
+    receipt_params= 用于复现"凭证属于另一套面板/seed/n 配置"（复审 §3.2 P0 指纹绑定），
+    默认写入与本文件 _write_config 一致的参数。"""
     w = pathlib.Path(td) / "work" / "wgs" / "12_localanc"
     for c, rows in rows_by_chrom.items():
         _write_anc(w, "calib", c, rows)
     if record:
+        # 与 env.sh 在该配置下导出的值一致：CALIB_POPS 默认取轴群体前两个（CHB,CDX），n=20，seed=1。
+        # receipt_params 非 None 时**按原样**写入（包括 {} = 旧式无参数回执，或只带部分键）。
+        params = (dict(receipt_params) if receipt_params is not None
+                  else {"pops": "CHB,CDX", "n": "20", "seed": "1", "labels": "NorthEA,SouthEA"})
         (w / "manifest.16b-la-calibration.json").write_text(json.dumps({
             "schema_version": 1, "sample_id": sample, "analysis_id": "16b-la-calibration",
-            "state": "ok", "reason_code": "",
+            "state": "ok", "reason_code": "", "parameters": params,
         }), encoding="utf-8")
     ref = pathlib.Path(td) / "work" / "data" / "ref"
     (ref / "all_phase3.psam").write_text("#IID\tPopulation\n" + psam_lines, encoding="utf-8")
@@ -157,6 +163,26 @@ class TestCalibrationGate(unittest.TestCase):
             self.assertEqual(r.returncode, 0, r.stderr)
             cal = {c["population"]: c for c in _json(w)["calibration"]}
             self.assertAlmostEqual(cal["P_NORTH"]["north_mean"], 0.95, places=6)
+
+    def test_receipt_from_a_different_config_is_ignored(self):
+        """复审 §3.2 P0 指纹绑定：回执属于另一套 seed/n/群体/标签配置时，校准不得进场。
+
+        原始 LA 仍照常交付（校准是增强不是前置）；旧式无参数回执同样过不了绑定检查。"""
+        for bad in ({"seed": "2"}, {"n": "10"}, {"pops": "CHB,JPT"},
+                    {"labels": "North,South"}, {}):   # {} = 旧式无参数回执
+            with tempfile.TemporaryDirectory() as td:
+                cfg = _write_config(td)
+                w = self._la(td)
+                _write_calib(td, {"1": [_anc_row("N1", 0.95, 0.03)],
+                                   "2": [_anc_row("N1", 0.95, 0.03)]},
+                             "N1\tP_NORTH\n", receipt_params=bad)
+                r = _run_17b(cfg)
+                self.assertEqual(r.returncode, 0, r.stderr)
+                d = _json(w)
+                self.assertEqual(d["calibration_state"], "not_run",
+                                f"回执 {bad} 不得让旧校准进场")
+                self.assertEqual(d["calibration"], [])
+                self.assertIn("receipt", d["calibration_reason"])
 
 
 @unittest.skipIf(_SKIP, _SKIP)

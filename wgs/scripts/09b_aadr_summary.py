@@ -234,7 +234,14 @@ ad.write_manifest(f"{W}/manifest.json", ad.build_manifest(
                 # 复审 AN0/AN5/H6：prune 集指纹。smiss/投影/排名全出自这批位点（09b 每次重算），
                 # 但 manifest 若不记它，换成 1 个位点的 prune 集、旧 summary 照样能冒充本次结果。
                 "prune_sha": hashlib.sha256(_PRUNE.read_bytes()).hexdigest()[:12],
-                "prune_sites": len(_PRUNE.read_text().split())},
+                "prune_sites": len(_PRUNE.read_text().split()),
+                # 复审 §3.2 P0 指纹绑定：09b 覆盖 08 的 manifest 后提取来源随之丢失——记录当前
+                # AADR 前缀与本步实际消费的 08/09 阶段产物内容（proj.sscore / samples.tsv 的
+                # sha256 前缀），30 与当前配置、当前文件比对。
+                "aadr_prefix": str(AADR),
+                "annotation": str(AADR_ANNOTATION or ""),
+                "proj_sha": ad.file_sha(f"{W}/proj.sscore"),
+                "samples_sha": ad.file_sha(f"{W}/samples.tsv")},
     outputs=["11_aadr/summary.json", "11_aadr/proj_annotated.tsv", "11_aadr/near_modern.tsv",
              "11_aadr/near_ancient.tsv"]))
 
