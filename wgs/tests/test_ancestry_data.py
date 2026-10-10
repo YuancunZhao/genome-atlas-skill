@@ -619,6 +619,152 @@ class TestGroupSummaries(unittest.TestCase):
         self.assertEqual(g["date_max_bp"], 3400)
 
 
+class TestAnalysisStateStepRecords(unittest.TestCase):
+    """复审 2026-10-09 §3.2 P0（AN0/H6）：步骤级记录与目录 manifest 的准入语义。
+
+    两个生产反例驱动：
+    1. global-only 运行里 run_all 的 skipped() 往 04_ancestry 写 04c（可选区域轴）的 disabled
+       记录，旧实现的 glob 把它当成整份 KG 模块的状态——全球结果被可选能力的禁用拖死。
+    2. 12_localanc 里 16b 成功后写 state=ok 步骤回执（17b 的消费凭证），旧实现让这份回执顶替
+       目录 manifest.json——目录明明 failed 也返回 ok，并交出上一轮的 local_ancestry.json。
+    规则：目录 manifest.json 是模块级唯一准入依据；owning_steps 中生产步骤的非 ok 记录阻断
+    整个模块（其消费者另行用 step 记录查询）；非 owning 步骤（04c 区域轴、16b 校准）的记录
+    只代表自身能力，不影响模块准入；ok 回执永远不能把失败/缺失的目录 manifest 升级成 ok。
+    """
+
+    OWN_KG = ("04-ancestry-pca", "04b-ancestry-summary")
+    OWN_LA = ("16-local-ancestry", "17b-la-calibrated", "17-la-summary")
+    OWN_AADR = ("08-aadr-extract", "09-aadr-pca", "09b-aadr-summary")
+
+    @staticmethod
+    def _manifest(state="ok", reason="", analysis_id="kg-global-v1", sample="S1"):
+        return {"schema_version": 1, "sample_id": sample, "analysis_id": analysis_id,
+                "state": state, "reason_code": reason, "reference_release": "",
+                "build": "GRCh37", "parameters": {}, "tool_versions": {},
+                "input_fingerprints": {}, "outputs": []}
+
+    def test_optional_step_disabled_does_not_poison_module(self):
+        """反例 1：04c disabled 记录 + 本轮 04b 的 ok 目录 manifest + summary → 模块照常 ok。"""
+        with tempfile.TemporaryDirectory() as td:
+            d = pathlib.Path(td) / "04_ancestry"
+            d.mkdir()
+            ad.write_manifest(d / "manifest.json", self._manifest())
+            (d / "summary.json").write_text(json.dumps({"analyses": []}), encoding="utf-8")
+            ad.write_manifest(d / "manifest.04c-per-chromosome-axis.json",
+                              ad.disabled_manifest("S1", "04c-per-chromosome-axis",
+                                                   "regional_axis_not_configured"))
+            state, reason, doc = ad.analysis_state(d, {"sample_id": "S1"},
+                                                   owning_steps=self.OWN_KG)
+            self.assertEqual(state, "ok", "可选区域轴禁用不得拖死全球模块")
+            self.assertEqual(doc, {"analyses": []})
+
+    def test_ok_receipt_never_upgrades_failed_directory_manifest(self):
+        """反例 2：16b ok 回执 + 目录 manifest failed + 旧 local_ancestry.json → failed、无 doc。"""
+        with tempfile.TemporaryDirectory() as td:
+            d = pathlib.Path(td) / "12_localanc"
+            d.mkdir()
+            ad.write_manifest(d / "manifest.json", self._manifest(
+                state="failed", reason="tool_failed", analysis_id="la-summary-v1"))
+            (d / "local_ancestry.json").write_text(json.dumps({"panels": ["旧一轮"]}),
+                                                   encoding="utf-8")
+            ad.write_manifest(d / "manifest.16b-la-calibration.json",
+                              self._manifest(state="ok", analysis_id="16b-la-calibration"))
+            state, reason, doc = ad.analysis_state(d, {"sample_id": "S1"},
+                                                   names=("local_ancestry.json",),
+                                                   owning_steps=self.OWN_LA)
+            self.assertEqual(state, "failed", "回执不得把失败目录升级成 ok")
+            self.assertEqual(reason, "tool_failed")
+            self.assertIsNone(doc, "失败模块的旧结果文件不得作为 doc 交出")
+
+    def test_owning_disabled_record_blocks_stale_ok_directory(self):
+        """AADR 本轮禁用 + 上一轮的 ok 目录 manifest/summary → 模块按 disabled 拒收。"""
+        with tempfile.TemporaryDirectory() as td:
+            d = pathlib.Path(td) / "11_aadr"
+            d.mkdir()
+            ad.write_manifest(d / "manifest.json", self._manifest(analysis_id="aadr-modern-v1"))
+            (d / "summary.json").write_text(json.dumps({"analyses": []}), encoding="utf-8")
+            ad.write_manifest(d / "manifest.08-aadr-extract.json",
+                              ad.disabled_manifest("S1", "08-aadr-extract",
+                                                   "aadr_not_configured"))
+            state, reason, doc = ad.analysis_state(d, {"sample_id": "S1"},
+                                                   owning_steps=self.OWN_AADR)
+            self.assertEqual((state, reason), ("disabled", "aadr_not_configured"))
+            self.assertIsNone(doc)
+
+    def test_owning_disabled_record_works_without_directory_manifest(self):
+        """模块从未跑过（无 manifest.json）、只有禁用记录 → 报禁用原因，不是 missing_manifest。"""
+        with tempfile.TemporaryDirectory() as td:
+            d = pathlib.Path(td) / "11_aadr"
+            d.mkdir()
+            ad.write_manifest(d / "manifest.09b-aadr-summary.json",
+                              ad.disabled_manifest("S1", "09b-aadr-summary",
+                                                   "aadr_not_configured"))
+            state, reason, doc = ad.analysis_state(d, owning_steps=self.OWN_AADR)
+            self.assertEqual((state, reason), ("disabled", "aadr_not_configured"))
+            self.assertIsNone(doc)
+
+    def test_non_owning_ok_receipt_alone_is_not_admission(self):
+        """只有 16b ok 回执、目录 manifest 缺失 → missing_manifest；回执不是模块准入依据。"""
+        with tempfile.TemporaryDirectory() as td:
+            d = pathlib.Path(td) / "12_localanc"
+            d.mkdir()
+            (d / "local_ancestry.json").write_text(json.dumps({"panels": []}), encoding="utf-8")
+            ad.write_manifest(d / "manifest.16b-la-calibration.json",
+                              self._manifest(state="ok", analysis_id="16b-la-calibration"))
+            state, reason, doc = ad.analysis_state(d, names=("local_ancestry.json",),
+                                                   owning_steps=self.OWN_LA)
+            self.assertEqual((state, reason), ("unavailable", "missing_manifest"))
+            self.assertIsNone(doc)
+
+    def test_non_ok_directory_manifest_delivers_no_doc(self):
+        """目录 manifest 自身 failed/unavailable：状态照实传出，但不交结果文件。"""
+        with tempfile.TemporaryDirectory() as td:
+            d = pathlib.Path(td)
+            ad.write_manifest(d / "manifest.json", self._manifest(state="disabled",
+                                                                  reason="disabled_by_config"))
+            (d / "summary.json").write_text("{}", encoding="utf-8")
+            state, reason, doc = ad.analysis_state(d)
+            self.assertEqual((state, reason), ("disabled", "disabled_by_config"))
+            self.assertIsNone(doc)
+
+    def test_run_all_skip_wiring_real_commands(self):
+        """真实接线回归：执行 run_all skipped()/16b 实际发出的 --disabled/--step-ok 命令，
+        再按 30 的 owning_steps 断言准入结果——不是 grep 源文本。"""
+        script = pathlib.Path(__file__).resolve().parents[1] / "scripts" / "ancestry_data.py"
+        with tempfile.TemporaryDirectory() as td:
+            kg = pathlib.Path(td) / "04_ancestry"
+            kg.mkdir()
+            ad.write_manifest(kg / "manifest.json", self._manifest())
+            (kg / "summary.json").write_text(json.dumps({"analyses": []}), encoding="utf-8")
+            # run_all.sh:40 —— skipped 04c-per-chromosome-axis regional_axis_not_configured 04_ancestry
+            r = subprocess.run([sys.executable, str(script), "--disabled",
+                                "04c-per-chromosome-axis",
+                                "--out", str(kg / "manifest.04c-per-chromosome-axis.json"),
+                                "--sample", "S1", "--reason", "regional_axis_not_configured"],
+                               capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            state, _, doc = ad.analysis_state(kg, {"sample_id": "S1"}, owning_steps=self.OWN_KG)
+            self.assertEqual(state, "ok", "run_all 的 04c 禁用记录不得阻断 KG 模块")
+
+            la = pathlib.Path(td) / "12_localanc"
+            la.mkdir()
+            ad.write_manifest(la / "manifest.json", self._manifest(
+                state="failed", reason="tool_failed", analysis_id="la-summary-v1"))
+            (la / "local_ancestry.json").write_text(json.dumps({"panels": ["旧"]}),
+                                                     encoding="utf-8")
+            # 16b_local_ancestry_calibration.sh:65 —— --step-ok 16b-la-calibration
+            r = subprocess.run([sys.executable, str(script), "--step-ok", "16b-la-calibration",
+                                "--out", str(la / "manifest.16b-la-calibration.json"),
+                                "--sample", "S1"],
+                               capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            state, _, doc = ad.analysis_state(la, {"sample_id": "S1"},
+                                              names=("local_ancestry.json",),
+                                              owning_steps=self.OWN_LA)
+            self.assertEqual(state, "failed", "16b 的 ok 回执不得掩盖 LA 目录失败")
+            self.assertIsNone(doc)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
 

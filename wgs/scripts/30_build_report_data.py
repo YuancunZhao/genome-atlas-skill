@@ -361,15 +361,22 @@ else:
 # 照样通过。expected_parameters 传**当前有效配置**能推导出的键，与 manifest.parameters 逐一比对；
 # 任一缺失或不等 → stale_result。prune 指纹从当前文件重算（与 09b 写入侧同一算法）。
 import ancestry_data as _ad
-_analysis_state = lambda d, expected=None, expected_parameters=None: _ad.analysis_state(  # noqa: E731
-    d, {"sample_id": SAMPLE, **(expected or {})}, expected_parameters=expected_parameters)
+# owning_steps（复审 2026-10-09 §3.2 P0）：只把**生产该模块**的步骤交给步骤级记录把关；
+# 可选能力（04c 区域轴、16b 校准）的记录不代表模块——04c 的 disabled 曾把 global-only 的
+# KG 模块整份拖死，16b 的 ok 回执曾掩盖 LA 目录的 failed manifest。
+_analysis_state = lambda d, expected=None, expected_parameters=None, owning_steps=None: _ad.analysis_state(  # noqa: E731
+    d, {"sample_id": SAMPLE, **(expected or {})}, expected_parameters=expected_parameters,
+    owning_steps=owning_steps)
 
 _prune_in = W/"11_aadr/prune.prune.in"
 _prune_sha = (hashlib.sha256(_prune_in.read_bytes()).hexdigest()[:12] if _prune_in.exists() else "")
 
-_LA_STATE, _LA_REASON, _LA_DOC = _analysis_state(W/"12_localanc")
+_LA_STATE, _LA_REASON, _LA_DOC = _analysis_state(
+    W/"12_localanc",
+    owning_steps=("16-local-ancestry", "17-la-summary", "17b-la-calibrated"))
 _AADR_STATE, _AADR_REASON, _AADR_DOC = _analysis_state(
     W/"11_aadr",
+    owning_steps=("08-aadr-extract", "09-aadr-pca", "09b-aadr-summary"),
     expected_parameters={
         "min_call_rate_modern": MIN_CR_MODERN, "min_call_rate_ancient": MIN_CR_ANCIENT,
         "min_projection_snps": MIN_PROJECTION_SNPS, "min_group_n": MIN_GROUP_N,
@@ -660,8 +667,11 @@ def _attach_kg_group_locations(analyses, loc_rows):
     return n_located
 
 # 这是模板与 AN6 要消费的形状；旧键（ho_*/near_eas/…）只作为尚未迁移的视图的过渡，不再各自算一套。
+# kg 模块的 owning 步骤是 04/04b；04c 区域轴是可选能力，其 disabled 记录不得阻断 global-only
+# 运行里的全球模块（复审 §3.2 P0 反例）。
 _kg_state, _kg_reason, _kg_doc = _analysis_state(
     W/"04_ancestry",
+    owning_steps=("04-ancestry-pca", "04b-ancestry-summary"),
     expected_parameters={"regional_enabled": REGIONAL_ENABLED, "superpop": SUPERPOP,
                         "subpops": SUBPOPS})
 _AADR_DOC = _AADR_DOC if isinstance(_AADR_DOC, dict) else None

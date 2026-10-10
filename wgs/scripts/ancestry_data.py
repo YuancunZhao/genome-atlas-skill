@@ -1119,7 +1119,7 @@ def js_string_literal(text):
 
 
 def analysis_state(dir_path, expected=None, names=("summary.json", "local_ancestry.json"),
-                   expected_parameters=None):
+                   expected_parameters=None, owning_steps=None):
     """读某分析目录的 manifest 与结构化结果，返回 (state, reason_code, doc)。
 
     缺 manifest → missing_manifest（旧结果必须重建，不能当current用）；指纹不符 → stale_result；
@@ -1130,25 +1130,31 @@ def analysis_state(dir_path, expected=None, names=("summary.json", "local_ancest
     30 此前只比 sample_id，同一样本换门槛/换参考/换 prune 集后旧结果照样进场）。调用方传它**当前
     有效配置**能推导出的键；任一键缺失或不等 → stale_result。数据依赖键（如 missing_chroms）不
     属于此列，不要传。
+
+    owning_steps（复审 2026-10-09 §3.2 P0）：该模块**生产步骤**的 id 集合——run_all 在步骤被
+    配置禁用/失败时写 manifest.<step-id>.json。准入语义：
+      - 目录 manifest.json 永远是模块级准入依据；ok 的**步骤回执**（如 16b 给 17b 的凭证）
+        不参与模块准入，更不能把失败/缺失的目录 manifest 升级成 ok；
+      - owning 步骤的非 ok 记录 → 模块不按 ok 准入，返回该记录的 state/reason、doc=None
+        （目录里的结果只能来自更早的运行）；
+      - 非 owning 步骤（04c 区域轴、16b 校准这类可选能力）的记录**不代表模块**：它们只影响
+        自身视图，各自的消费者另行读步骤记录——曾按"任意非 ok 记录压过一切"实现，global-only
+        运行里 04c 的 disabled 记录把整份 KG 模块拖死（复审反例）。
     """
     d = pathlib.Path(dir_path)
-    # 步骤级 manifest（manifest.<step-id>.json）由 run_all 在"该步被配置禁用或失败"时写。它**优先于**
-    # 目录里的 manifest.json：那一步没有产出，目录里若有结果只能来自更早的运行，用它等于让禁用状态
-    # 失效（复审 AN0+AN5+H6）。只有所有步骤级记录都是 ok，才回落到目录级 manifest。
-    # 第一版把这段放在"找不到 manifest.json 时"才走，实测两种位置都返回 ok——因为真实 manifest 存在，
-    # glob 根本不会被走到。
-    man = None
-    _step_non_ok = False
+    own = tuple(owning_steps or ())
+    blocking = None
     for extra in sorted(d.glob("manifest.*.json")) if d.exists() else []:
         cand = read_manifest(extra)
-        if cand and str(cand.get("state") or "ok") not in ("ok",):
-            man = cand
-            _step_non_ok = True
+        if not cand:
+            continue
+        sid = str(cand.get("analysis_id") or extra.name[len("manifest."):-len(".json")])
+        if sid in own and str(cand.get("state") or "ok") not in ("ok",):
+            blocking = cand
             break
-        if cand and man is None:
-            man = cand
-    if not man:
-        man = read_manifest(d / "manifest.json")
+    if blocking is not None:
+        return str(blocking.get("state") or "ok"), str(blocking.get("reason_code") or ""), None
+    man = read_manifest(d / "manifest.json")
     if not man:
         return "unavailable", "missing_manifest", None
     # 逐键比对标识（sample_id / analysis_id / 参考版本…），但**不**把 state 当准入条件：state 是这份
@@ -1164,10 +1170,10 @@ def analysis_state(dir_path, expected=None, names=("summary.json", "local_ancest
     for k, v in (expected_parameters or {}).items():
         if k not in _params or str(_params[k]) != str(v):
             return "unavailable", "stale_result", None
-    # 步骤级禁用/失败记录压过目录 manifest 时，目录里的结果文件属于**上一次**运行——状态照实
-    # 报告，但结果不能作为 doc 交出（与目录自身 manifest.json 标 disabled、由该步写入原因文件的
-    # 情形不同：那种结果属于本次运行，读出来是安全的）。
-    if _step_non_ok:
+    # 目录 manifest 自身非 ok：状态照实传出，但结果文件不作为 doc 交出——它属于上一次运行或
+    # 未完成的本次运行（复审反例：16b 的 ok 回执 + 目录 failed + 残留旧 local_ancestry.json
+    #曾被当成 ok 交付）。
+    if str(man.get("state") or "ok") != "ok":
         return str(man.get("state") or "ok"), str(man.get("reason_code") or ""), None
     for name in names:
         f = d / name

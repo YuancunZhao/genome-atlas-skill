@@ -79,16 +79,20 @@ class TestStaleManifestRejected(unittest.TestCase):
             d = self._dir(td, "SAMPLE_A", state="disabled")
             state, reason, doc = ad.analysis_state(d, {"sample_id": "SAMPLE_A"})
             self.assertEqual(state, "disabled")
-            self.assertIsNotNone(doc, "禁用也要能读出结果文件（里面写着原因）")
+            self.assertIsNone(doc, "复审 2026-10-09：非 ok 目录 manifest 不交结果文件——"
+                                   "它只能来自上一次运行，交出去等于让禁用状态失效")
 
     def test_step_level_disabled_manifest_overrides_a_healthy_directory_one(self):
-        """run_all 禁用某步时写 manifest.<step>.json；它必须压过目录里上一次运行留下的
-        manifest.json——否则 A→B→A 换回配置后，旧结果照旧以 ok 进报告（复审 AN0+AN5+H6）。"""
+        """run_all 禁用某步时写 manifest.<step>.json；对**owning 步骤**（模块的生产者）它必须压过
+        目录里上一次运行留下的 manifest.json——否则 A→B→A 换回配置后，旧结果照旧以 ok 进报告
+        （复审 AN0+AN5+H6）。owning_steps 由调用方声明：不声明就不让步骤记录代表模块。"""
         with tempfile.TemporaryDirectory() as td:
             d = self._dir(td, "SAMPLE_A")            # 健康的 manifest.json + summary.json（上次运行的）
             ad.write_manifest(d / "manifest.09b-aadr-summary.json",
                               ad.disabled_manifest("SAMPLE_A", "09b-aadr-summary", "aadr_not_configured"))
-            state, reason, doc = ad.analysis_state(d, {"sample_id": "SAMPLE_A"})
+            state, reason, doc = ad.analysis_state(
+                d, {"sample_id": "SAMPLE_A"},
+                owning_steps=("08-aadr-extract", "09-aadr-pca", "09b-aadr-summary"))
             self.assertEqual((state, reason), ("disabled", "aadr_not_configured"))
             self.assertIsNone(doc, "禁用时不能把旧 summary.json 当结果交给调用方")
         # 步骤级记录全部是 ok 时，回落到目录级 manifest：不因存在 manifest.*.json 而误判
@@ -96,27 +100,33 @@ class TestStaleManifestRejected(unittest.TestCase):
             d = self._dir(td, "SAMPLE_A")
             ad.write_manifest(d / "manifest.09b-aadr-summary.json",
                               ad.build_manifest("SAMPLE_A", "09b-aadr-summary"))
-            self.assertEqual(ad.analysis_state(d, {"sample_id": "SAMPLE_A"})[0], "ok")
+            self.assertEqual(ad.analysis_state(
+                d, {"sample_id": "SAMPLE_A"},
+                owning_steps=("08-aadr-extract", "09-aadr-pca", "09b-aadr-summary"))[0], "ok")
 
     def test_disable_then_rerun_success_ends_the_disabled_state(self):
         """复审 AN0/AN5/H6 生命周期：禁用→重新启用并成功产出后，状态必须回到 ok。
         生产者成功时通过 clear_step_manifests 撤下**自己的**步骤级记录——不撤别人的。"""
+        _own = ("08-aadr-extract", "09-aadr-pca", "09b-aadr-summary")
         with tempfile.TemporaryDirectory() as td:
             d = self._dir(td, "SAMPLE_A")
             ad.write_manifest(d / "manifest.09b-aadr-summary.json",
                               ad.disabled_manifest("SAMPLE_A", "09b-aadr-summary", "aadr_not_configured"))
             ad.write_manifest(d / "manifest.08-aadr-extract.json",
                               ad.disabled_manifest("SAMPLE_A", "08-aadr-extract", "aadr_not_configured"))
-            self.assertEqual(ad.analysis_state(d, {"sample_id": "SAMPLE_A"})[0], "disabled")
+            self.assertEqual(ad.analysis_state(d, {"sample_id": "SAMPLE_A"},
+                                               owning_steps=_own)[0], "disabled")
             # 09b 本次成功：只撤自己的记录；08 的禁用证据必须留下（不粗暴清场）
             removed = ad.clear_step_manifests(d, "09b-aadr-summary")
             self.assertEqual(removed, ["manifest.09b-aadr-summary.json"])
             self.assertTrue((d / "manifest.08-aadr-extract.json").exists(),
                             "clearing one step's record must not delete another step's evidence")
             # 08 仍有一条 disabled 记录压着目录——照实报告，直到 08 也成功撤下
-            self.assertEqual(ad.analysis_state(d, {"sample_id": "SAMPLE_A"})[0], "disabled")
+            self.assertEqual(ad.analysis_state(d, {"sample_id": "SAMPLE_A"},
+                                               owning_steps=_own)[0], "disabled")
             ad.clear_step_manifests(d, "08-aadr-extract")
-            state, reason, doc = ad.analysis_state(d, {"sample_id": "SAMPLE_A"})
+            state, reason, doc = ad.analysis_state(d, {"sample_id": "SAMPLE_A"},
+                                                   owning_steps=_own)
             self.assertEqual((state, doc), ("ok", {"counts": {"selected": 1}}))
 
     def test_clear_step_is_a_noop_without_a_record(self):
