@@ -80,7 +80,7 @@ if [ -f "$WGS/11_aadr/reference_metadata.tsv" ]; then
 elif [ -n "$AADR_ANNO" ] && [ -f "$AADR_ANNO" ]; then
   _LHSRC="--anno $AADR_ANNO"
 fi
-step 09d lineage history and evidence;                        python3 $S/lineage_history.py --history "$LINEAGE_HISTORY_FILE" $_LHSRC --yard $WGS/03_haplo --out $WGS/03_haplo/lineage_history.json --ytree "$YTREE" --sample "$SAMPLE"
+step 09d lineage history and evidence;                        python3 $S/lineage_history.py --history "$LINEAGE_HISTORY_FILE" $_LHSRC --yard $WGS/03_haplo --out $WGS/03_haplo/lineage_history.json --ytree "$YTREE/current_tree.json" --sample "$SAMPLE"
 unset _LHSRC
 
 step 10b CYP2D6 star alleles;                                bash  $S/10b_cyrius.sh

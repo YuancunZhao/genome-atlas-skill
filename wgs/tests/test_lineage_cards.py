@@ -26,6 +26,7 @@ const code = [
   grab(/const geoValid[\s\S]*?\n};/),
   grab(/function geomapViewport[\s\S]*?\n}/),
   grab(/function lineageObsPoints[\s\S]*?\n}/),
+  grab(/function lineagePendingNote[\s\S]*?\n}/),
   grab(/function lineageTimelineNodes[\s\S]*?\n}/),
 ].join('\n').replace(/\bconst /g, 'var ');
 eval(code);
@@ -49,6 +50,7 @@ const doc = { history: { observations: [
 const op = lineageObsPoints(doc);
 ok(op.points.length === 3, `3 located observation points (got ${op.points.length})`);
 ok(op.unlocated.length === 1, `1 observation without coordinates -> unlocated (got ${op.unlocated.length})`);
+ok(op.pending.length === 0, `no pending records in this doc (got ${op.pending.length})`);
 const b = op.points[0];
 ok(b.key === 'BaiyangcunM1_W.SG' && b.latitude === 25.84 && b.longitude === 100.59, 'identity + coordinates carry through');
 ok(b.locality.indexOf('Baiyangcun') === 0, 'locality carried');
@@ -57,8 +59,45 @@ ok(op.points[1].precision === 'region', 'region precision carried');
 ok(b.relation === 'exact' && b.publication === 'WangFuScience2025', 'relation + publication carried');
 ok(b.date_mean === 3300 && b.date_min === 3350 && b.date_max === 3650, 'reported date range carried');
 ok(op.points[2].date_mean === 0, 'modern individual (mean 0) stays a point, labelled at render time');
-ok(JSON.stringify(lineageObsPoints(null)) === '{"points":[],"unlocated":[]}', 'no doc -> empty, not an error');
-ok(JSON.stringify(lineageObsPoints({ history: {} })) === '{"points":[],"unlocated":[]}', 'no observations -> empty');
+ok(JSON.stringify(lineageObsPoints(null)) === '{"points":[],"unlocated":[],"pending":[]}', 'no doc -> empty, not an error');
+ok(JSON.stringify(lineageObsPoints({ history: {} })) === '{"points":[],"unlocated":[],"pending":[]}', 'no observations -> empty');
+
+// —— 复审 §3.2 P0-2b：待核对（pending_review）不是已发表观测。有坐标也不落点、不进
+//    points/unlocated（nObs 与地图都不得把它算进去），单独进 pending 桶。
+const doc2 = { history: { observations: [
+  ...doc.history.observations,
+  { record_id: 'PND1', locality: 'Zongri (Qinghai)', relation: 'pending_review',
+    source_version: 'YFull12.03',
+    pending_reason: 'label matches by name, but version equivalence ... is not proven',
+    coordinates: { latitude: 35.3, longitude: 100.4 }, publication: 'AADRv66' },
+  { record_id: 'PND2', locality: 'no coords', relation: 'pending_review', source_version: '',
+    coordinates: {}, publication: 'AADRv66' },
+]}};
+const op2 = lineageObsPoints(doc2);
+ok(op2.points.length === 3 && op2.unlocated.length === 1,
+   `pending records never become points/unlocated even with coordinates (got ${op2.points.length}/${op2.unlocated.length})`);
+ok(op2.pending.length === 2, `both pending records land in the pending bucket (got ${op2.pending.length})`);
+ok(op2.pending[0].record_id === 'PND1' && op2.pending[1].record_id === 'PND2', 'pending records carry through');
+
+// —— lineagePendingNote：空桶不渲染；两种语言都写出记录侧树版本与本项目树版本，
+//    并说明"不计入已发表观测"。
+ok(lineagePendingNote({tree_source:'YFull',tree_version:'14.06.0'}, op, true) === ''
+   && lineagePendingNote({tree_source:'YFull',tree_version:'14.06.0'}, op, false) === '',
+   'no pending records -> no note line');
+const lin2 = {tree_source:'YFull', tree_version:'14.06.0'};
+const zh = lineagePendingNote(lin2, op2, true), en = lineagePendingNote(lin2, op2, false);
+ok(zh.indexOf('待核对 2 条') === 0, `zh note leads with the pending count (got "${zh.slice(0,12)}")`);
+ok(zh.indexOf('YFull12.03') > 0 && zh.indexOf('YFull 14.06.0') > 0,
+   'zh note names BOTH tree versions (record side and this project side)');
+ok(zh.indexOf('不计入已发表观测') > 0, 'zh note says they are not counted as published observations');
+ok(en.indexOf('2 record(s) pending review') === 0, 'en note leads with the pending count');
+ok(en.indexOf('YFull12.03') > 0 && en.indexOf('YFull 14.06.0') > 0, 'en note names both tree versions');
+ok(en.indexOf('not counted as published observations') > 0, 'en honesty phrasing survives');
+// 无版本标注的记录（mt：AADR 不发布 mt 树版本）如实说"未标注"，不造一个
+const mtOnly = lineageObsPoints({ history: { observations: [
+  { record_id: 'M1', relation: 'pending_review', source_version: '', coordinates: {} }] } });
+ok(lineagePendingNote({tree_source:'PhyloTree',tree_version:'rcrs@17.2'}, mtOnly, true).indexOf('未标注') > 0,
+   'unlabelled source version is reported as such, never invented');
 // 点集中在云南–青海–北京一带：取景应放大而非整幅世界（复用 geomapViewport 的同一份几何）。
 const vp = geomapViewport(op.points);
 ok(vp.w < 360 && vp.h < 180, `observation cluster zooms in (got ${vp.w}x${vp.h})`);
@@ -81,6 +120,7 @@ ok(lineageTimelineNodes([]).length === 0 && lineageTimelineNodes(null).length ==
 // —— 生产路径消费（drawGeoMap 的教训：纯函数可以是死代码）与 §7 诚实约束。
 const cardSrc = src.slice(src.indexOf('renderLineageCards'));
 ok(/lineageObsPoints\(lin\)/.test(cardSrc), 'lineage card derives its points from lineageObsPoints');
+ok(/lineagePendingNote\(lin,op,Z\)/.test(cardSrc), 'lineage card renders the pending-review note (P0-2b)');
 ok(/lineageTimelineNodes\(path\)/.test(cardSrc), 'lineage timeline consumes lineageTimelineNodes');
 ok(/obsMap\(op\.points,kind\)/.test(cardSrc), 'observation map is drawn from the placed points');
 ok(/clip-lineage-\$\{kind\}/.test(src), 'mini map clips via a per-kind clipPath id');
@@ -107,8 +147,10 @@ class TestLineageCards(unittest.TestCase):
         src = JS.read_text(encoding="utf-8")
         self.assertRegex(src, r"function lineageObsPoints\(doc\)\{")
         self.assertRegex(src, r"function lineageTimelineNodes\(path\)\{")
+        self.assertRegex(src, r"function lineagePendingNote\(lin,op,zh\)\{")
         self.assertIn("lineageObsPoints(lin)", src)
         self.assertIn("lineageTimelineNodes(path)", src)
+        self.assertIn("lineagePendingNote(lin,op,Z)", src)
 
 
 if __name__ == "__main__":

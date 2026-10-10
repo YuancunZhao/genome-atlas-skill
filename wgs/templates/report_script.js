@@ -65,19 +65,38 @@ F.yterm=((D.lineages||{}).y||{}).reported_hg||D.y_terminal||"—"; F.yformed=(()
 
 /* AN6-③（纯函数，与回归测试同源）：谱系"已知发现"观测 → 统一地点词汇（与地理卡同名字段：
    latitude/longitude/locality/precision），缺坐标如实分桶不造点；relation/publication/报告年代
-   原样透传——这些观测是该支系的已发表记录，不是本样本的坐标。 */
+   原样透传——这些观测是该支系的已发表记录，不是本样本的坐标。
+   复审 §3.2 P0-2b：relation=pending_review（待核对）的记录**不是**已发表观测——标签与该支系
+   同名，但记录所用树版本与本项目树版本未证明等价。它们进 pending 桶单独计数，不落点、不进
+   已发表总数；卡片用 lineagePendingNote 诚实展示，等人工核对后经面板版本映射收录。 */
 function lineageObsPoints(doc){
-  const out={points:[],unlocated:[]};
+  const out={points:[],unlocated:[],pending:[]};
   (((doc||{}).history||{}).observations||[]).forEach(o=>{
+    const rel=String((o||{}).relation||'');
+    if(rel==='pending_review'){ out.pending.push(o); return; }
     const c=(o||{}).coordinates||{}, dr=((o||{}).date_range||{});
     const rec={key:String(o.record_id||''), label:String(o.locality||o.record_id||''),
       latitude:c.latitude, longitude:c.longitude, locality:String(o.locality||''),
-      precision:String(o.precision||'unknown'), relation:String(o.relation||''),
+      precision:String(o.precision||'unknown'), relation:rel,
       date_mean:dr.mean, date_min:dr.min, date_max:dr.max,
       publication:String(o.publication||'')};
     if(geoValid(c.latitude,c.longitude)) out.points.push(rec); else out.unlocated.push(rec);
   });
   return out;
+}
+
+/* 复审 §3.2 P0-2b（纯函数）：待核对记录的展示文案。同名≠等价：把记录侧的树版本与本项目树
+   版本都写出来，说明为什么这些记录没有计入"已发表发现记录"。空桶返回 ''（不渲染占位行）。 */
+function lineagePendingNote(lin,op,zh){
+  const p=(op&&op.pending)||[];
+  if(!p.length) return '';
+  const _esc2=t=>String(t==null?'':t).replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));
+  const srcs=[...new Set(p.map(o=>String(o.source_version||'').trim()).filter(Boolean))];
+  const tree=_esc2(String((lin&&lin.tree_source)||'')+' '+String((lin&&lin.tree_version)||'').trim());
+  const from=srcs.length?_esc2(srcs.join('、')):(zh?'未标注版本':'no version labelled');
+  return zh
+    ? `待核对 ${p.length} 条：标签与该支系同名，但记录所用树版本（${from}）与本项目树（${tree}）的版本等价未证明，不计入已发表观测；请人工核对后经面板版本映射收录`
+    : `${p.length} record(s) pending review: the label matches by name, but version equivalence between the record's tree (${from}) and this project's tree (${tree}) is not proven; they are not counted as published observations. Verify by hand, then admit them via a sourced panel version map`;
 }
 
 /* AN6-③（纯函数）：树时间线节点——YFull formed 优先；formed 缺失（含 0/n-a 解析出的 0）退
@@ -155,6 +174,7 @@ const renderLineageCards=()=>{
         <div style="font-size:11px;margin-top:4px;opacity:.8">${anc.join(' → ')||'—'}</div></details>
       <div style="font-size:11px;margin-top:6px">${Z?'已发表发现记录':'published records'}: ${nObs}${nObs?'':'（'+_esc(hist.history_reason_code||'')+'）'} ·
         ${Z?'迁移路线':'migration routes'}: ${routes.length}${routes.length?'':(Z?'（无有来源的路线，本卡只呈现分布）':' (no sourced route; distribution only)')}</div>
+      ${lineagePendingNote(lin,op,Z)}
       ${obsMap(op.points,kind)}
       ${op.points.map(obsRow).join('')}
       ${op.unlocated.length?`<div style="font-size:10.5px;opacity:.7">${Z?`另有 ${op.unlocated.length} 条观测无坐标，不落点（已计入上方总数）`:`${op.unlocated.length} observation(s) without coordinates are not placed (counted above)`}</div>`:''}

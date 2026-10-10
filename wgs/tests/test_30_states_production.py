@@ -329,8 +329,11 @@ class TestOptionalProductAdmission(unittest.TestCase):
             (W / "03_haplo/manifest.json").write_text(json.dumps({
                 "schema_version": "1", "sample_id": "TESTSAMPLE", "analysis_id": "09d-lineage-history",
                 "state": "ok", "reason_code": "", "build": "GRCh37", "reference_release": "",
+                # ytree_sha：本夹具的 work 树没有 data/ref/ytree/current_tree.json，30 比对侧
+                # 用同一算法算出 ""（复审 §3.2 P0-2b 绑定树文件内容）。
                 "parameters": {"history_sha": hashlib.sha256(
-                    (REPO / "panel" / "lineage_history.json").read_bytes()).hexdigest()[:12]},
+                    (REPO / "panel" / "lineage_history.json").read_bytes()).hexdigest()[:12],
+                    "ytree_sha": ""},
                 "tool_versions": {}, "input_fingerprints": {},
                 "outputs": ["lineage_history.json"]}) + "\n", encoding="utf-8")
             r = _run_30(cfg)

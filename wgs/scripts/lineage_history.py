@@ -174,45 +174,113 @@ def _dedupe_by_master(rows):
     return [best[k] for k in sorted(best)]
 
 
+def _record_source_version(record, kind):
+    """记录标签的来源树版本，按 Y/mt 分开取（复审 §3.2 P0-2b）。
+
+    AADR 只为 Y 标签发布来源（.anno 的 "based on Y-full 12.03" → hg_source_tree）；mt 标签没有
+    对应的树版本字段。mt 的来源版本如实为空——绝不把 Y 的 YFull12.03 安到 mt 头上冒充来源。
+    返回 (source_version, call_source)：前者进版本准入，后者只是"标签怎么来的"。
+    """
+    if kind == "y":
+        return str(record.get("hg_source_tree") or ""), \
+            str(record.get("hg_source_tree") or record.get("hg_call_source") or "")
+    return "", str(record.get("mt_call_source") or record.get("hg_call_source") or "")
+
+
+def _version_proven(source_version, tree_source, tree_version, maps):
+    """记录来源版本与结果树版本是否**已证明**等价（复审 §3.2 P0-2b）。
+
+    只有两种情况算证明：两边的版本字面一致（AADR 写 "YFull12.03"，结果写 tree_source="YFull"
+    + tree_version="12.03"，拼起来正好相同），或面板里有一条**有来源、明确起止版本**的映射
+    （version_maps 的 from/to/source 齐全）。同名节点存在本身不是版本等价——YFull 12.03 的
+    N-CTS4714 与 14.06.0 的 N-CTS4714 只是同名。
+    """
+    s, v = str(source_version or "").strip(), str(tree_version or "").strip()
+    if not s or not v:
+        return False
+    name = str(tree_source or "").strip()
+    target = f"{name}{v}" if name else v
+    if s == v or s == target:
+        return True
+    return any(str(m.get("from") or "") == s and str(m.get("to") or "") == target
+               and str(m.get("source") or "").strip()
+               for m in (maps or []))
+
+
 def lineage_observations(rows, query, parents, tree_kind, same_tree=True, history=None,
-                         known_nodes=None, stats=None):
+                         known_nodes=None, stats=None, result_tree_source="",
+                         result_tree_version="", strict=True):
     """筛出与该支系相关的历史记录（含祖先/后代/未定），并带上坐标、年代与来源。
 
     这里**不用**常染色体 call_rate 门槛：来源对 Y/mt 的可用性决定记录是否可用，覆盖率低只影响
     常染色体 PCA。没有相应单倍群标签的记录直接跳过——不猜。
+
+    版本准入（复审 §3.2 P0-2b）：exact/父子关系只在记录来源版本与**结果**的
+    tree_source/tree_version 已证明等价时成立（字面一致，或有来源、明确起止版本的 version_maps
+    映射）。未证明时，与查询同名的记录进"待核对"（relation=pending_review，带原因），其余
+    unresolved——同名节点存在不等于版本等价，宁可待核对也不冒充已证实的观测。
+    strict=False（本样本判定有未解决冲突）时关系一律不作数：strict_match_allowed 要真正约束
+    查询，不是摆设。
     """
     kind = str(tree_kind)
     field = "y_hg_raw" if kind == "y" else "mt_hg_raw"
-    field_tree = "hg_source_tree"
+    hist = history or {}
+    maps = hist.get("version_maps") or []
     out = []
     for r in _dedupe_by_master([x for x in (rows or []) if not is_missing_hg(x.get(field))]):
         node, note = canonicalize(r.get(field), kind, history, known_nodes)
         if stats is not None and note != "missing":
             stats[note] = stats.get(note, 0) + 1     # 进了比较就记账，包括版本不匹配的那些
-        rel = match_lineage(query, node, parents, same_tree=bool(same_tree))
+        src_version, call_src = _record_source_version(r, kind)
+        proven = _version_proven(src_version, result_tree_source, result_tree_version, maps)
+        rel = match_lineage(query, node, parents, same_tree=bool(same_tree) and proven)
+        pending_reason = ""
         if note == "version_mismatch":
             # 复审 AN4：标签不在当前树节点集（多半来自另一个树版本，如 AADR 的 YFull 12.03）时，
-            # 与查询支系字符串相等不等于版本等价——此前 version_mismatch 只记计数，same_tree=True
-            # 照样可判 exact。未验证版本等价的记录不进默认视图，宁可 unresolved。
+            # 与查询支系字符串相等不等于版本等价——未验证版本等价的记录不进默认视图，宁可
+            # unresolved。
             rel = "unresolved"
+        elif not proven:
+            # 复审 §3.2 P0-2b：版本等价未证明。同名记录不是 exact，是"待核对"——留给人对着
+            # 两个版本的树核一遍，再经面板 version_maps（带来源）收录。
+            if node and node == str(query or ""):
+                rel = "pending_review"
+                got = src_version or "an unlabelled tree"
+                want = (f"{result_tree_source}{result_tree_version}" if result_tree_source
+                        else str(result_tree_version or "an unknown tree"))
+                pending_reason = (f"label matches by name, but version equivalence between its "
+                                  f"source tree ({got}) and this result's tree ({want}) "
+                                  f"is not proven")
+            else:
+                rel = "unresolved"
+        if (not strict) and rel in ("exact", "descendant", "ancestor"):
+            # strict_match_allowed=False：查询支系自身有未解决冲突，严格视图不冒充任何关系
+            if stats is not None:
+                stats["strict_match_blocked"] = stats.get("strict_match_blocked", 0) + 1
+            rel = "unresolved"
+        if rel == "pending_review" and stats is not None:
+            stats["pending_review"] = stats.get("pending_review", 0) + 1
         lat, lon = r.get("latitude"), r.get("longitude")
         out.append({
             "record_id": str(r.get("record_id") or ""),
             "node_id": node,
             "relation": rel,
+            "pending_reason": pending_reason,
+            "source_version": src_version,
             "locality": r.get("locality"),
             "coordinates": ({"latitude": lat, "longitude": lon} if (lat is not None and lon is not None) else None),
             "precision": str(r.get("location_precision") or "unknown"),
             "date_range": {"mean": r.get("date_mean_bp"), "min": r.get("date_min_bp"),
                            "max": r.get("date_max_bp")},
             "date_basis": r.get("date_basis"),
-            "call_source": str(r.get(field_tree) or r.get("hg_call_source") or ""),
+            "call_source": call_src,
             "publication": r.get("publication"),
         })
     # 只保留能与查询支系建立关系的记录：exact 与后代默认显示，祖先作为背景层（视图决定怎么展开）。
+    # 待核对（pending_review）保留在载荷里交给模板诚实展示，但不计入已发表观测。
     # unrelated 与 unresolved 不进默认视图——缺树边时无法确认，宁可说"未定"也不把别的支系算进来。
-    out = [o for o in out if o["relation"] in ("exact", "descendant", "ancestor")]
-    order = {"exact": 0, "descendant": 1, "ancestor": 2}
+    out = [o for o in out if o["relation"] in ("exact", "descendant", "ancestor", "pending_review")]
+    order = {"exact": 0, "descendant": 1, "ancestor": 2, "pending_review": 3}
     out.sort(key=lambda o: (order.get(o["relation"], 9), o["record_id"]))
     return out
 
@@ -404,7 +472,7 @@ HISTORY_STATES = ("ok", "distribution_only", "unavailable")
 
 
 def load_history(doc):
-    """读 panel/lineage_history.json：版本、来源、树边/别名与经核对的路线。"""
+    """读 panel/lineage_history.json：版本、来源、树边/别名、版本映射与经核对的路线。"""
     d = dict(doc or {})
     parents = {str(k): (str(v) if v is not None else None) for k, v in (d.get("parents") or {}).items()}
     routes = []
@@ -416,11 +484,23 @@ def load_history(doc):
         if not (r.get("waypoints") or []) or not (r.get("sources") or []):
             continue          # 没有航点或没有出处的"路线"不是路线
         routes.append(r)
+    # 版本映射（复审 §3.2 P0-2b）：把另一个树版本的标签等价为当前版本。from/to/source 三者
+    # 齐全才算证据——没有来源的映射不是映射，是愿望。
+    maps = []
+    for m in (d.get("version_maps") or []):
+        if not isinstance(m, dict):
+            continue
+        if not str(m.get("from") or "").strip() or not str(m.get("to") or "").strip():
+            continue
+        if not str(m.get("source") or "").strip():
+            continue
+        maps.append({"from": str(m["from"]), "to": str(m["to"]), "source": str(m["source"])})
     return {"schema_version": int(d.get("schema_version") or 1),
             "tree_source": str(d.get("tree_source") or ""),
             "tree_version": str(d.get("tree_version") or ""),
             "parents": parents,
             "aliases": {str(k): str(v) for k, v in (d.get("aliases") or {}).items()},
+            "version_maps": maps,
             "reviewed_calls": {str(k): dict(v) for k, v in (d.get("reviewed_calls") or {}).items()
                                if isinstance(v, dict)},
             "routes": routes,
@@ -520,8 +600,13 @@ def _cli(argv=None):
         key = node if (node and ":" in str(node)) else (f"{kind}:{node}" if node else "")
         # 复审 AN4：树节点集只对 Y 有效（--ytree 是 YFull 树）；mt 没有 correspond 的树文件，
         # 传 Y 的节点集会把每个 mt 标签都误判 version_mismatch。mt 保持 unverified。
+        # 复审 §3.2 P0-2b：把结果的 tree_source/tree_version 与 strict_match_allowed 一并传进
+        # 观测比较——exact/父子关系只在版本等价已证明时成立；本样本判定有冲突时严格视图不作数。
         _obs = lineage_observations(rows, key, parents, kind, history=hist,
-                                    known_nodes=(nodes if kind == "y" else None), stats=stats) \
+                                    known_nodes=(nodes if kind == "y" else None), stats=stats,
+                                    result_tree_source=s.get("tree_source") or "",
+                                    result_tree_version=s.get("tree_version") or "",
+                                    strict=bool(s.get("strict_match_allowed", True))) \
             if (rows and key) else []
         _hist = history_view(key, hist, _obs, parents, source=_query)
         if stats:

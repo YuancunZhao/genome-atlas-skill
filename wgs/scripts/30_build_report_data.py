@@ -752,10 +752,13 @@ D["near_eas"], D["knn_eas"] = _near_from(_anc_analyses, "kg-regional")
 # （analysis_id=09d-lineage-history），30 走 analysis_state 准入；不合格交付空态并说明原因。
 # 复审 §3.2 P0 指纹绑定：09d 的 manifest 记 history 文件的内容 sha（不是路径）；换面板
 # 证据文件内容后旧 lineage_history.json 判 stale。
+# 复审 §3.2 P0-2b：ytree 也按**内容**绑定——run_all 现在把 05 用的同一棵树文件传给 09d，
+# 换树文件（版本变更）后旧 lineage_history.json 同样判 stale，不再静默沿用旧分类。
 _LH_STATE, _LH_REASON, _LH_DOC = _ad.analysis_state(
     W/"03_haplo", {"sample_id": SAMPLE, "analysis_id": "09d-lineage-history"},
     names=("lineage_history.json",),
-    expected_parameters={"history_sha": _ad.file_sha(LINEAGE_HISTORY_FILE)})
+    expected_parameters={"history_sha": _ad.file_sha(LINEAGE_HISTORY_FILE),
+                         "ytree_sha": _ad.file_sha(pathlib.Path(YTREE) / "current_tree.json")})
 if _LH_STATE != "ok":
     print(f"30: lineage history not admitted (state={_LH_STATE}, reason={_LH_REASON}); "
           "D.lineages delivered empty", file=sys.stderr)

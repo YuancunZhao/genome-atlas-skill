@@ -186,12 +186,195 @@ class TestObservationsAndRoutes(unittest.TestCase):
                                       known_nodes={"y:N-M1845"}, stats=stats)
         self.assertEqual(stats.get("version_mismatch"), 1)
         self.assertEqual(obs, [], "未验证版本等价的记录不得冒充 exact 进默认视图")
-        # 对照：同一标签在当前树节点集里（note=none）时，字符串相等才可以说 exact
+        # 对照（复审 §3.2 P0-2b 改写）：同名节点在当前树里**且**记录来源版本与结果树版本一致
+        # 时，字符串相等才可以说 exact——同名节点存在本身不再充分（YFull12.03 的 N-CTS4714
+        # 与 14.06.0 的 N-CTS4714 只是同名，未证明等价）。
         ok_stats = {}
         ok = lh.lineage_observations(rows, "y:N-CTS4714", parents={}, tree_kind="y",
-                                     known_nodes={"y:N-CTS4714"}, stats=ok_stats)
+                                     known_nodes={"y:N-CTS4714"}, stats=ok_stats,
+                                     result_tree_source="YFull", result_tree_version="12.03")
         self.assertEqual(ok_stats.get("none"), 1)
         self.assertEqual([o["relation"] for o in ok], ["exact"])
+
+
+class TestTreeVersionAdmission(unittest.TestCase):
+    """复审 §3.2 P0-2b：树版本准入。
+
+    复审复现的两个漏洞：run_all 把 **目录** 传给 09d --ytree，load_tree_nodes 按文件读失败返回
+    None → canonicalize 全部 unverified → lineage_observations 仍以 same_tree=True 比较，字符串
+    相等照样判 exact（AADR 的 YFull12.03 标签对 14.06.0 的结果"精确匹配"；mt 没有节点集同理）；
+    即使传对文件，canonicalize 也只检查同名节点存在，不比较记录 hg_source_tree 与结果的
+    tree_source/tree_version。规则：**同版本**规范节点，或有来源、明确起止版本的映射，才允许
+    exact/父子关系；同名节点存在不等于已证明版本等价，unverified/missing mapping 保留 unresolved
+    与原因——同名待人工核对的进"待核对"桶（pending_review），绝不冒充已证实的观测。
+    """
+
+    ROW = {"record_id": "P.SG", "master_id": "P", "dataset": "AADR",
+           "y_hg_raw": "N-CTS4714", "hg_source_tree": "YFull12.03",
+           "hg_call_source": "aadr_automatic", "call_rate": 0.9, "locality": "Somewhere"}
+
+    def test_run_all_passes_the_tree_file_not_the_directory(self):
+        """接线：05 读 $YTREE/current_tree.json，09d 必须拿到同一个**文件**。
+
+        旧接线把目录传给 --ytree，load_tree_nodes 读目录失败返回 None，整棵树的节点校验
+        静默失效——测试传文件时从未覆盖这条真实接线。
+        """
+        text = (pathlib.Path(__file__).resolve().parents[1] / "run_all.sh").read_text(encoding="utf-8")
+        m = __import__("re").search(r'--ytree\s+"[^"]*"', text)
+        self.assertIsNotNone(m, "run_all.sh must pass --ytree to 09d")
+        self.assertEqual(m.group(), '--ytree "$YTREE/current_tree.json"',
+                         "09d must receive the tree FILE 05 walks, not the directory")
+
+    def test_unverified_label_is_pending_never_exact(self):
+        """复审复现：没有节点集（目录接线的形状）时，同名标签不得判 exact。"""
+        stats = {}
+        obs = lh.lineage_observations([dict(self.ROW)], "y:N-CTS4714", parents={}, tree_kind="y",
+                                      known_nodes=None, stats=stats,
+                                      result_tree_source="YFull", result_tree_version="14.06.0")
+        self.assertEqual(stats.get("unverified"), 1)
+        self.assertEqual([o["relation"] for o in obs], ["pending_review"],
+                         "同名但版本未验证的记录进待核对桶，不冒充 exact")
+        self.assertIn("version", (obs[0].get("pending_reason") or "").lower())
+
+    def test_same_name_node_across_versions_is_pending_not_exact(self):
+        """同名节点存在（note=none）但记录来源版本与结果树版本不同：只是同名，不是等价。"""
+        stats = {}
+        obs = lh.lineage_observations([dict(self.ROW)], "y:N-CTS4714", parents={}, tree_kind="y",
+                                      known_nodes={"y:N-CTS4714"}, stats=stats,
+                                      result_tree_source="YFull", result_tree_version="14.06.0")
+        self.assertEqual(stats.get("none"), 1)
+        self.assertEqual([o["relation"] for o in obs], ["pending_review"])
+        self.assertIn("12.03", obs[0].get("pending_reason") or "")
+        self.assertIn("14.06.0", obs[0].get("pending_reason") or "")
+        # 不同名（祖先/后代形状）在版本未证实时同样不认：宁可 unresolved 也不建父子关系
+        row = dict(self.ROW, record_id="Q.SG", master_id="Q", y_hg_raw="N-M1845")
+        obs2 = lh.lineage_observations([row], "y:N-CTS4714", parents={}, tree_kind="y",
+                                      known_nodes={"y:N-CTS4714", "y:N-M1845"},
+                                      result_tree_source="YFull", result_tree_version="14.06.0")
+        self.assertEqual(obs2, [], "版本等价未证明时，父子关系同样不成立")
+
+    def test_sourced_version_map_admits_cross_version_relations(self):
+        """有来源、明确起止版本的映射可以把跨版本标签等价为当前版本——缺来源的映射不认。"""
+        hist = {"parents": {}, "aliases": {},
+                "version_maps": [{"from": "YFull12.03", "to": "YFull14.06.0",
+                                  "source": "YFull changelog: clade ids unchanged 12.03->14.06.0"}]}
+        obs = lh.lineage_observations([dict(self.ROW)], "y:N-CTS4714", parents={}, tree_kind="y",
+                                      known_nodes={"y:N-CTS4714"}, history=hist,
+                                      result_tree_source="YFull", result_tree_version="14.06.0")
+        self.assertEqual([o["relation"] for o in obs], ["exact"])
+        # 没有来源的映射不是证据：同样跨版本，回到待核对
+        bad = {"parents": {}, "version_maps": [{"from": "YFull12.03", "to": "YFull14.06.0"}]}
+        obs2 = lh.lineage_observations([dict(self.ROW)], "y:N-CTS4714", parents={}, tree_kind="y",
+                                       known_nodes={"y:N-CTS4714"}, history=bad,
+                                       result_tree_source="YFull", result_tree_version="14.06.0")
+        self.assertEqual([o["relation"] for o in obs2], ["pending_review"])
+
+    def test_mt_records_never_carry_the_y_tree_version(self):
+        """mt 的 call_source 绝不读记录的 Y 来源字段（hg_source_tree=YFull12.03 是 Y 树版本）。"""
+        row = dict(self.ROW, mt_hg_raw="A13")        # 同一记录既有 Y 又有 mt 标签
+        obs = lh.lineage_observations([row], "mt:A13", parents={}, tree_kind="mt",
+                                      result_tree_source="PhyloTree", result_tree_version="rcrs@17.2")
+        self.assertEqual([o["relation"] for o in obs], ["pending_review"],
+                         "AADR 不发布 mt 标签的树版本，版本等价无从证明")
+        self.assertNotEqual(obs[0]["call_source"], "YFull12.03",
+                            "mt 观测不得把 Y 树版本当自己的来源")
+        self.assertEqual(obs[0].get("source_version"), "",
+                         "mt 的来源版本如实为空，不造一个")
+
+    def test_strict_match_blocks_relations_when_the_query_is_disputed(self):
+        """strict_match_allowed=False（本样本判定有未解决冲突）必须真正约束查询，不是摆设。"""
+        row = {**self.ROW, "hg_source_tree": "YFull12.03"}
+        stats = {}
+        obs = lh.lineage_observations([row], "y:N-CTS4714", parents={}, tree_kind="y",
+                                      known_nodes={"y:N-CTS4714"}, stats=stats,
+                                      result_tree_source="YFull", result_tree_version="12.03",
+                                      strict=False)
+        self.assertEqual(obs, [], "查询支系自身有冲突时，严格视图不冒充任何关系")
+        self.assertEqual(stats.get("strict_match_blocked"), 1)
+
+
+class TestTreeVersionCliProduction(unittest.TestCase):
+    """09d 真实接线的最小生产回归：--ytree 目录（复审复现的接线）与文件两种形态。"""
+
+    @staticmethod
+    def _yard(td):
+        yard = pathlib.Path(td) / "03_haplo"
+        yard.mkdir(parents=True)
+        (yard / "y_result.json").write_text(json.dumps({
+            "kind": "y", "state": "ok", "reported_hg": "N-CTS4714",
+            "tree_source": "YFull", "tree_version": "14.06.0",
+            "supported_path": [{"node": "N-CTS4714", "der": 5, "anc": 0, "na": 0}]}), encoding="utf-8")
+        (yard / "mt_result.json").write_text(json.dumps({
+            "kind": "mt", "state": "ok", "reported_hg": "A13",
+            "tree_source": "PhyloTree", "tree_version": "rcrs@17.2",
+            "supported_path": [{"node": "A13", "n_defining_sites": 22}]}), encoding="utf-8")
+        return yard
+
+    @staticmethod
+    def _metadata(td, y_src, mt_src=""):
+        p = pathlib.Path(td) / "reference_metadata.tsv"
+        p.write_text("\n".join([
+            "record_id\tmaster_id\tdataset\ty_hg_raw\tmt_hg_raw\thg_source_tree\thg_call_source\tlatitude\tlongitude",
+            f"P.SG\tP\tAADR\tN-CTS4714\tA13\t{y_src}\taadr_automatic\t30.0\t110.0",
+            f"Q.SG\tQ\tAADR\tN-CTS4714\tA13\t{y_src}\taadr_automatic\t35.0\t115.0"]) + "\n",
+            encoding="utf-8")
+        return p
+
+    @staticmethod
+    def _tree_dir(td):
+        d = pathlib.Path(td) / "ytree"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "current_tree.json").write_text(json.dumps(
+            {"id": "root", "children": [{"id": "N", "children": [
+                {"id": "N-M1845", "children": [{"id": "N-CTS4714", "children": []}]}]}]}),
+            encoding="utf-8")
+        return d
+
+    def _run(self, td, ytree_arg):
+        out = pathlib.Path(td) / "lineage_history.json"
+        rc = lh._cli(["--yard", str(self._yard(td)), "--out", str(out), "--sample", "S1",
+                      "--history", "", "--ytree", ytree_arg,
+                      "--metadata", str(self._metadata(td, "YFull12.03"))])
+        self.assertEqual(rc, 0)
+        return json.loads(out.read_text(encoding="utf-8"))
+
+    def test_directory_ytree_yields_pending_not_exact(self):
+        """复审复现的接线形状：--ytree 收到目录 → 没有节点集 → 全部 unverified。
+
+        旧行为：unverified 仍按 same_tree=True 比较，两条 YFull12.03 的 N-CTS4714 记录被当成
+        对 14.06.0 结果的 exact"已发表观测"。现在它们与 mt 观测一样全部进待核对桶。
+        """
+        with tempfile.TemporaryDirectory() as td:
+            doc = self._run(td, str(self._tree_dir(td)))     # 目录，不是文件
+            for kind in ("y", "mt"):
+                rels = [o["relation"] for o in doc[kind]["history"]["observations"]]
+                self.assertEqual(rels, ["pending_review", "pending_review"],
+                                 f"{kind}: 同名记录进待核对，不再冒充 exact")
+                self.assertNotIn("exact", rels)
+
+    def test_tree_file_with_matching_versions_yields_exact(self):
+        """对照：传对文件且记录来源版本与结果一致（12.03 标签对 12.03 结果）时 exact 恢复。"""
+        with tempfile.TemporaryDirectory() as td:
+            yard = self._yard(td)
+            (yard / "y_result.json").write_text(json.dumps({
+                "kind": "y", "state": "ok", "reported_hg": "N-CTS4714",
+                "tree_source": "YFull", "tree_version": "12.03",
+                "supported_path": [{"node": "N-CTS4714", "der": 5, "anc": 0, "na": 0}]}),
+                encoding="utf-8")
+            out = pathlib.Path(td) / "lineage_history.json"
+            rc = lh._cli(["--yard", str(yard), "--out", str(out), "--sample", "S1",
+                          "--history", "", "--ytree", str(self._tree_dir(td) / "current_tree.json"),
+                          "--metadata", str(self._metadata(td, "YFull12.03"))])
+            self.assertEqual(rc, 0)
+            doc = json.loads(out.read_text(encoding="utf-8"))
+            rels = [o["relation"] for o in doc["y"]["history"]["observations"]]
+            self.assertEqual(rels, ["exact", "exact"],
+                             "节点在当前树且来源版本与结果一致：exact 恢复")
+            mt_rels = [o["relation"] for o in doc["mt"]["history"]["observations"]]
+            self.assertEqual(mt_rels, ["pending_review", "pending_review"],
+                             "mt 仍无来源版本可证：待核对")
+            for o in doc["mt"]["history"]["observations"]:
+                self.assertNotEqual(o["call_source"], "YFull12.03")
 
     def test_weak_chain_above_the_terminal_forces_a_step_back(self):
         """真实的 12 / 1 / 0 / 1 / 5 形态：末端那个 5 只是弱链的末尾，不是独立证据。"""
