@@ -125,6 +125,26 @@ for _n in _best["path"]:
     _d, _a, _o = score(_n)
     _cum += _d - _a
     path.append((_n["id"], _d, _a, _o, _n.get("formed"), _n.get("tmrca")))
+# 复审 §3.2 P0（AN4/H4）：空路径（无可用 Y 证据或无 derived 位点）此前在生成审计文本时先读
+# path[-1]——IndexError、exit 1、不写 y_result.json，run_all 在此停止，有 mt 无 Y 的合法样本
+# 走不完整。先落本次的 unavailable（覆盖上一轮的 ok），旧的末端 SNP 表同步清成空表（旧证据
+# 不得混进后续复核绑定），给一行诚实的审计文本后退出 0——下游 09d/30 按 unavailable 呈现。
+if not path:
+    import lineage_history as _lh0
+    _tv = open(f"{P}/data/ref/ytree/current_version.txt").read().strip()
+    _res0 = _lh0.unavailable_lineage(
+        "y", "no_supported_path",
+        "the tree walk found no supported branch (no usable Y pileup or no derived sites)")
+    json.dump(_res0, open(f"{W}/y_result.json", "w"), ensure_ascii=False, indent=1)
+    pd.DataFrame([], columns=["branch", "snp", "pos_hg19", "anc", "der", "state", "depth",
+                              "n_anc", "n_der"]).to_csv(f"{W}/y_terminal_snps.tsv", sep="\t",
+                                                         index=False)
+    open(f"{W}/y_haplogroup_yfull.txt", "w").write(
+        f"YFull tree {_tv} (walk from root): no supported branch; "
+        f"y_result.json records state=unavailable (no_supported_path)\n")
+    print(f"wrote {W}/y_result.json: state=unavailable (no_supported_path); "
+          "no terminal-dependent detail was generated", file=sys.stderr)
+    sys.exit(0)
 lines = [f"YFull tree {open(f'{P}/data/ref/ytree/current_version.txt').read().strip()} (walk from root); terminal branch: {path[-1][0]}",
          f"  formed ~{path[-1][4]} ybp, TMRCA ~{path[-1][5]} ybp", "", "Path (branch, #derived, #ancestral, #untyped/mixed, formed, tmrca):"]
 for p in path: lines.append("  %-28s der=%3d anc=%3d n/a=%3d  formed=%s tmrca=%s" % p)

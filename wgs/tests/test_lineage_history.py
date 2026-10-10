@@ -7,6 +7,12 @@ import json, pathlib, sys, tempfile, unittest
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "scripts"))
 import lineage_history as lh  # noqa: E402
 
+try:                       # 生产 05 子进程需要 pandas（wgsconfig 还要 yaml）
+    import pandas  # noqa: F401
+    _SKIP05 = ""
+except ImportError:
+    _SKIP05 = "pandas not available (the production 05 script imports it)"
+
 
 class TestMatchLineage(unittest.TestCase):
     """match_lineage(query, record, parents) 回答的是"记录相对查询支系是什么关系"。"""
@@ -622,3 +628,66 @@ class TestCliWritesAdmissibleManifest(unittest.TestCase):
                 names=("lineage_history.json",))
             self.assertEqual((state, reason), ("unavailable", "run_begun_not_published"))
             self.assertIsNone(doc, "开工失效后，上一轮的 lineage_history.json 不得继续交付")
+
+
+@unittest.skipIf(_SKIP05, _SKIP05)
+class Test05EmptyPathProduction(unittest.TestCase):
+    """复审 §3.2 P0（AN4/H4）：05 在空 Y 路径下曾先读 path[-1]——IndexError、exit 1、不写
+    y_result.json，run_all 停在这一步。三种生产路径：无 Y 证据 / 全祖先 / 有效 Y。
+    子进程跑真实 05；pileup 预先落盘，绕开 samtools/CRAM。"""
+
+    SCRIPT = pathlib.Path(__file__).resolve().parents[1] / "scripts" / "05_y_haplogroup.py"
+
+    def _run05(self, td, pileup_text, preexisting_ok=False):
+        import os
+        import subprocess
+        W = pathlib.Path(td) / "work" / "wgs" / "03_haplo"
+        W.mkdir(parents=True)
+        yt = pathlib.Path(td) / "ytree"
+        yt.mkdir()
+        (yt / "snps_hg19.csv").write_text(
+            "Name,start,allele_anc,allele_der\nSNP1,1000,A,G\n", encoding="utf-8")
+        (yt / "current_tree.json").write_text(json.dumps(
+            {"id": "root", "snps": "", "children": [{"id": "N-TEST1", "snps": "SNP1"}]}),
+            encoding="utf-8")
+        cv = pathlib.Path(td) / "work" / "data" / "ref" / "ytree"
+        cv.mkdir(parents=True)
+        (cv / "current_version.txt").write_text("14.06.0\n", encoding="utf-8")
+        (W / "y_pileup.tsv").write_text(pileup_text, encoding="utf-8")
+        if preexisting_ok:   # 上一轮的成功必须被本次的 unavailable 覆盖
+            (W / "y_result.json").write_text(json.dumps(
+                {"kind": "y", "state": "ok", "reported_hg": "N-OLD"}), encoding="utf-8")
+            (W / "y_terminal_snps.tsv").write_text("branch\tsnp\nN-OLD\tX\n", encoding="utf-8")
+        cfg = pathlib.Path(td) / "config.yaml"
+        cfg.write_text("".join([
+            "sample_id: TESTSAMPLE\n",
+            f"work_dir: {json.dumps(str(pathlib.Path(td) / 'work'))}\n",
+            f"ytree_dir: {json.dumps(str(yt))}\n"]), encoding="utf-8")
+        r = subprocess.run([sys.executable, str(self.SCRIPT)], capture_output=True, text=True,
+                           env={**os.environ, "WGS_CONFIG": str(cfg)}, timeout=120)
+        return r, W
+
+    def test_no_y_evidence_and_all_ancestral_deliver_unavailable(self):
+        """无 pileup 行 / 全祖先：exit 0、y_result.json=unavailable（no_supported_path），
+        上一轮的 ok 结果与旧末端 SNP 表被本次覆盖，不残留 N-OLD。"""
+        for label, pileup in (("no pileup rows", ""), ("all ancestral", "Y\t1000\tA\t5\t.....\tIIIII\n")):
+            with tempfile.TemporaryDirectory() as td:
+                r, W = self._run05(td, pileup, preexisting_ok=True)
+                self.assertEqual(r.returncode, 0, f"{label}: {r.stderr[-400:]}")
+                res = json.loads((W / "y_result.json").read_text(encoding="utf-8"))
+                self.assertEqual(res["state"], "unavailable", label)
+                self.assertEqual(res["reason_code"], "no_supported_path", label)
+                self.assertNotEqual(res.get("reported_hg"), "N-OLD", f"{label}: 旧成功不得残留")
+                self.assertEqual((W / "y_terminal_snps.tsv").read_text().splitlines(),
+                                 ["branch\tsnp\tpos_hg19\tanc\tder\tstate\tdepth\tn_anc\tn_der"],
+                                 f"{label}: 旧末端 SNP 表必须清空")
+                self.assertIn("no supported branch", (W / "y_haplogroup_yfull.txt").read_text())
+
+    def test_valid_y_still_works(self):
+        """有效 Y：路径非空，正常 ok——空路径处理不得破坏既有生产路径。"""
+        with tempfile.TemporaryDirectory() as td:
+            r, W = self._run05(td, "Y\t1000\tA\t5\tGGGGG\tIIIII\n")
+            self.assertEqual(r.returncode, 0, r.stderr)
+            res = json.loads((W / "y_result.json").read_text(encoding="utf-8"))
+            self.assertEqual(res["state"], "ok")
+            self.assertEqual(res["reported_hg"], "N-TEST1")
