@@ -153,6 +153,14 @@ class TestObservationsAndRoutes(unittest.TestCase):
         self.assertEqual([o["record_id"] for o in obs], ["X.SG"],
                          "同一 Master ID 的 .SG/.AG 只算一次（.SG 优先）")
 
+    def test_identical_representations_carry_the_originals_but_no_conflict(self):
+        """复审 §3.2 P1 AN1 对照组：两条表示标签一致、都无 QC 结论——保留原始表示，冲突为空。"""
+        obs = lh.lineage_observations(self.ROWS, "mt:A13", parents={}, tree_kind="mt")
+        self.assertEqual([r["record_id"] for r in obs[0]["representations"]], ["X.SG", "X.AG"],
+                         "观测必须保留该人全部原始技术表示")
+        self.assertEqual(obs[0]["label_conflicts"], [])
+        self.assertEqual(obs[0]["qc_conflicts"], [])
+
     def test_records_without_a_call_are_skipped_and_unknown_dates_stay_null(self):
         obs = lh.lineage_observations(self.ROWS, "mt:D4", parents={}, tree_kind="mt")
         self.assertEqual([o["record_id"] for o in obs], ["Y.SG"])
@@ -171,6 +179,57 @@ class TestObservationsAndRoutes(unittest.TestCase):
         for k in ("record_id", "node_id", "relation", "locality", "coordinates", "precision",
                   "date_range", "date_basis", "call_source", "publication"):
             self.assertIn(k, o)
+
+
+class TestRepresentationConflictEvidence(unittest.TestCase):
+    """复审 §3.2 P1 AN1：09d 按表示排序去重时未核对支系标签/QC 冲突。
+
+    同一 Master 的两条表示给出**不同** Y/mt 标签（或不同的 QC 结论）时，旧去重悄悄选一条、
+    另一条无声消失——观测看起来干净，其实该人自己的记录互相矛盾。证据必须跟着观测走：
+    representations 保留全部原始表示（record_id/该 kind 原始标签/QC），label_conflicts /
+    qc_conflicts 点名与所选表示不同的那些。缺标签的表示不是"另一种说法"，保留但不记冲突。"""
+
+    ROWS = [
+        {"record_id": "Z.SG", "master_id": "Z", "y_hg_raw": "N-CTS4714",
+         "hg_source_tree": "YFull12.03", "hg_qc": "", "locality": "S1"},
+        {"record_id": "Z.HO", "master_id": "Z", "y_hg_raw": "N-M1845",
+         "hg_source_tree": "YFull12.03", "hg_qc": "Ignore: contamination", "locality": "S1"},
+    ]
+
+    def _obs(self, rows=None):
+        return lh.lineage_observations(
+            rows if rows is not None else self.ROWS, "y:N-CTS4714", parents={}, tree_kind="y",
+            result_tree_source="YFull", result_tree_version="12.03")
+
+    def test_conflicting_label_and_qc_follow_the_observation(self):
+        obs = self._obs()
+        self.assertEqual([o["record_id"] for o in obs], ["Z.SG"],
+                         "仍按固定技术偏好选一份表示生成观测（一人一次）")
+        o = obs[0]
+        self.assertEqual([r["record_id"] for r in o["representations"]], ["Z.SG", "Z.HO"])
+        self.assertEqual([r["label"] for r in o["representations"]],
+                         ["N-CTS4714", "N-M1845"])
+        self.assertEqual(o["label_conflicts"],
+                         [{"record_id": "Z.HO", "label": "N-M1845", "kept_label": "N-CTS4714"}],
+                         "另一表示给了不同支系标签——点名保留，不在排序里无声解决")
+        self.assertEqual(o["qc_conflicts"],
+                         [{"record_id": "Z.HO", "qc": "Ignore: contamination", "kept_qc": None}],
+                         "另一表示带 QC 结论而所选没有——同样要跟着观测走")
+
+    def test_unlabelled_representation_is_preserved_but_not_a_conflict(self):
+        rows = [
+            {"record_id": "V.SG", "master_id": "V", "y_hg_raw": "N-CTS4714",
+             "hg_source_tree": "YFull12.03", "locality": "S2"},
+            {"record_id": "V.HO", "master_id": "V", "y_hg_raw": "",
+             "hg_source_tree": "YFull12.03", "locality": "S2"},
+        ]
+        obs = self._obs(rows)
+        self.assertEqual([o["record_id"] for o in obs], ["V.SG"])
+        reps = obs[0]["representations"]
+        self.assertEqual([r["record_id"] for r in reps], ["V.SG", "V.HO"],
+                         "没有标签的表示仍是该人的原始表示，照常保留")
+        self.assertIsNone(reps[1]["label"])
+        self.assertEqual(obs[0]["label_conflicts"], [], "缺标签不是另一种支系说法，不记冲突")
 
     def test_version_mismatched_label_never_claims_exact(self):
         """复审 AN4：标签不在当前树（version_mismatch）时，与查询字符串相等不等于版本等价。

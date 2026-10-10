@@ -156,22 +156,52 @@ def lineage_summary(result):
 
 # ---------------------------------------------------------------- 历史观测与路线
 
-def _dedupe_by_master(rows):
-    """同一个人可能有多条技术表示（.SG/.AG/…）；历史视图里只算一次，优先高覆盖表示。"""
+def _dedupe_by_master(rows, field):
+    """同一个人的多种技术表示在历史视图里只算一次，按固定技术偏好挑一份（SG/DG/HO/AG/TW）。
+
+    field 是该 kind 的标签字段（"y_hg_raw"/"mt_hg_raw"）。复审 §3.2 P1 AN1：挑选不再悄悄
+    抹掉同 Master 的其它表示。没有该 kind 标签的表示不参与挑选（缺标签不是另一种支系说法），
+    但保留在证据里；返回的每条记录带 `_representations`（该人**全部**原始表示：
+    record_id/该 kind 原始标签/QC）、`_label_conflicts`（其它表示的非空标签与所选表示不同）、
+    `_qc_conflicts`（其它表示的非空 QC 结论与所选不同，含所选无 QC 的情况）——同一人两条
+    表示给出不同支系标签或质量结论时，证据必须跟着观测走，不能在排序里无声解决。
+    """
     def rank(r):
         rep = str(r.get("genotype_representation") or r.get("record_id", "")).upper()
         for i, tok in enumerate(("SG", "DG", "HO", "AG", "TW")):
             if rep.endswith(tok) or rep == tok:
                 return i
         return 99
-    best = {}
+    def label_of(r):
+        return None if is_missing_hg(r.get(field)) else str(r.get(field))
+    def qc_of(r):
+        return str(r.get("hg_qc") or "").strip() or None
+    groups = {}
     for r in rows:
         key = str(r.get("master_id") or r.get("individual_id") or r.get("record_id") or "")
         if not key:
             continue
-        if key not in best or rank(r) < rank(best[key]):
-            best[key] = r
-    return [best[k] for k in sorted(best)]
+        groups.setdefault(key, []).append(r)
+    kept = []
+    for key in sorted(groups):
+        grp = groups[key]
+        candidates = [r for r in grp if label_of(r) is not None]
+        if not candidates:
+            continue                      # 这个人没有该 kind 的标签：不生成观测
+        best = min(candidates, key=rank)
+        best = dict(best)                 # 证据字段不写回调用方的行（测试夹具是共享 dict）
+        kept_label, kept_qc = label_of(best), qc_of(best)
+        best["_representations"] = [{"record_id": str(r.get("record_id") or ""),
+                                     "label": label_of(r), "qc": qc_of(r)} for r in grp]
+        best["_label_conflicts"] = [
+            {"record_id": str(r.get("record_id") or ""), "label": label_of(r),
+             "kept_label": kept_label}
+            for r in grp if label_of(r) is not None and label_of(r) != kept_label]
+        best["_qc_conflicts"] = [
+            {"record_id": str(r.get("record_id") or ""), "qc": qc_of(r), "kept_qc": kept_qc}
+            for r in grp if qc_of(r) is not None and qc_of(r) != kept_qc]
+        kept.append(best)
+    return kept
 
 
 def _record_source_version(record, kind):
@@ -227,7 +257,9 @@ def lineage_observations(rows, query, parents, tree_kind, same_tree=True, histor
     hist = history or {}
     maps = hist.get("version_maps") or []
     out = []
-    for r in _dedupe_by_master([x for x in (rows or []) if not is_missing_hg(x.get(field))]):
+    # 复审 §3.2 P1 AN1：去重交给 _dedupe_by_master（带 field），同 Master 的其它表示连同
+    # 标签/QC 冲突证据挂在所选表示上；没有该 kind 标签的表示不生成观测。
+    for r in _dedupe_by_master(rows or [], field):
         node, note = canonicalize(r.get(field), kind, history, known_nodes)
         if stats is not None and note != "missing":
             stats[note] = stats.get(note, 0) + 1     # 进了比较就记账，包括版本不匹配的那些
@@ -275,6 +307,11 @@ def lineage_observations(rows, query, parents, tree_kind, same_tree=True, histor
             "date_basis": r.get("date_basis"),
             "call_source": call_src,
             "publication": r.get("publication"),
+            # 复审 §3.2 P1 AN1：原始表示与同 Master 表示间的标签/QC 冲突跟着观测走（证据
+            # 保留在交付数据里；是否展示由视图决定，绝不在去重时丢弃）。
+            "representations": list(r.get("_representations") or []),
+            "label_conflicts": list(r.get("_label_conflicts") or []),
+            "qc_conflicts": list(r.get("_qc_conflicts") or []),
         })
     # 只保留能与查询支系建立关系的记录：exact 与后代默认显示，祖先作为背景层（视图决定怎么展开）。
     # 待核对（pending_review）保留在载荷里交给模板诚实展示，但不计入已发表观测。
