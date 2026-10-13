@@ -11,6 +11,8 @@ Checks (P0_FIX_PLAN section 6, condensed):
   5. reference naming: chr-prefixed names must not appear in the key tables
   6. per-section status table (H1): status, reason code and bilingual reason are consistent
   7. the report JS runs to completion under node with zero failed figures
+  8. blood marker table: data/section consistency plus a row-by-row render check under node,
+     so the report can never silently ship another sample's blood genotypes
 
 Exit code 0 = pass, 1 = at least one failure (details on stderr).
 """
@@ -33,13 +35,18 @@ const fakeEl = () => ({
   getBoundingClientRect: () => ({ x: 0, y: 0, width: 900, height: 300 }),
   closest: () => null, contains: () => false, focus(){}, blur(){}, parentNode: null,
 });
+// Per-id element registry: getElementById keeps returning the same object, so the runner can
+// read back what renderAll actually wrote (e.g. the blood marker table) and the checker can
+// compare it against report_data.json row by row.
+const els = {};
+global.__els = els;
 global.__boot = fakeEl();
 global.window = { __renderErrors: [], matchMedia: null, addEventListener(){}, devicePixelRatio: 1,
                   location: { href: 'file://report.html' } };
 global.document = {
   documentElement: { setAttribute(){}, style: { setProperty(){} } },
   body: fakeEl(),
-  getElementById: (id) => (id === 'bootstate' ? global.__boot : fakeEl()),
+  getElementById: (id) => (els[id] = els[id] || (id === 'bootstate' ? global.__boot : fakeEl())),
   querySelectorAll: (sel) => (sel === '[data-i18n]' ? (global.__i18nEls || []) : []),
   querySelector: () => null,
   createElementNS: () => fakeEl(),
@@ -69,6 +76,7 @@ catch (e) { console.log('TOP-LEVEL ERROR: ' + e.message); process.exit(2); }
 const errs = (global.window && global.window.__renderErrors) || [];
 console.log('RENDER_ERRORS=' + JSON.stringify(errs));
 console.log('BOOTSTATE=' + ((global.__boot && global.__boot.textContent) || ''));
+console.log('BLOODMK_HTML=' + ((global.__els && global.__els['tb_blood_mk'] && global.__els['tb_blood_mk'].innerHTML) || ''));
 """
 
 FAIL = []
@@ -327,6 +335,41 @@ def check_shapes(D):
         fail("kir rows present but the summary says typing was unavailable")
 
 
+def check_blood_markers(D):
+    """血型证据表的数据↔sections 互洽（血型核查 2026-10-13）：叙述表来自人工文案，
+    D.blood_markers 是 23 步对本样本 VCF 的机器输出；两边必须在同一份 report_data.json
+    里同时出现或同时缺席——section 声称 ok 而无行是旧样本的残骸，有行而无 section 则
+    状态表漏记了该模块。没有 blood_markers 键的旧构建照常通过。"""
+    bm = D.get("blood_markers")
+    if bm is None:
+        return
+    sec = next((s for s in (D.get("sections") or []) if s.get("id") == "blood"), None)
+    if bm and not sec:
+        fail("blood_markers present without a sections.blood row: the status table must record the module")
+    if sec and sec.get("status") == "ok" and not bm:
+        fail("the blood section claims ok but blood_markers is empty: typing produced no rows")
+
+
+def check_bloodmk_render(html, rows):
+    """node 运行时逐行核对：报告渲染出的标志位点表必须等于 report_data.json 里的行
+    （rsid 与基因型逐个在场、行数一致）。数据无行时表必须为空——多出来的行只可能来自
+    另一份载荷。"""
+    rendered_rows = html.count("<tr")
+    if rows:
+        if not html:
+            fail("blood marker rows exist in the data but the report rendered no marker table")
+            return
+        for r in rows:
+            if r.get("rsid") and r["rsid"] not in html:
+                fail(f"the rendered blood marker table is missing {r['rsid']}")
+            if r.get("genotype") and r["genotype"] not in html:
+                fail(f"the rendered blood marker table lacks the genotype {r['genotype']!r} for {r['rsid']}")
+        if rendered_rows != len(rows):
+            fail(f"the rendered blood marker table has {rendered_rows} rows but the data carries {len(rows)}")
+    elif rendered_rows:
+        fail(f"the rendered blood marker table has {rendered_rows} rows but the data carries none: a stale payload")
+
+
 def check_sections(D):
     """H1: every section carries a status; 'unavailable' must explain itself bilingually."""
     secs = D.get("sections")
@@ -409,7 +452,7 @@ def check_naming(run_dir):
             fail(f"unexpected chromosome name '{c}' in {src}")
 
 
-def check_runtime(html_path):
+def check_runtime(html_path, D):
     """Run the report JS under node with a minimal DOM stub; no figure may fail.
 
     Static checks cannot see a figure that throws at run time -- a circos crash on an
@@ -418,6 +461,9 @@ def check_runtime(html_path):
     English entry throws inside t() and blanks the page in English alone. Run both.
     A missing node is a failure, not a skip: "跳过不可计通过" -- exiting 0 here let a
     machine without node hand over reports whose figures had never executed anywhere.
+    The element registry also feeds check_bloodmk_render: the blood marker table the page
+    actually rendered is compared against report_data.json row by row, so the report can
+    never silently ship another sample's blood genotypes (血型核查 2026-10-13).
     """
     node = shutil.which("node")
     if not node:
@@ -464,6 +510,8 @@ def check_runtime(html_path):
         elif "RENDER FAILED" in (re.search(r"BOOTSTATE=(.*)", out) or [None, ""])[1]:
             banner = re.search(r"BOOTSTATE=(.*)", out).group(1).strip()[:180]
             fail(f"the page banner reports a failed render{tag}: {banner}")
+        _bm = re.search(r"^BLOODMK_HTML=(.*)$", out, re.M)
+        check_bloodmk_render(_bm.group(1) if _bm else "", (D or {}).get("blood_markers") or [])
 
 
 def main():
@@ -483,6 +531,7 @@ def main():
         check_keys(root, D)
         check_shapes(D)
         check_sections(D)
+        check_blood_markers(D)
         check_sv_source(run_dir, D)
     else:
         fail(f"{json_path} not found")
@@ -490,7 +539,7 @@ def main():
     check_payload_escaping(html_path)
     check_print_and_narrow(html_path)
     check_naming(run_dir)
-    check_runtime(html_path)
+    check_runtime(html_path, D)
 
     if FAIL:
         print("FAILED:", file=sys.stderr)

@@ -475,6 +475,11 @@ if _ks_f.exists():
             _k2, _v2 = _l.split("\t", 1)
             _ksd[_k2] = _v2
     D["kir_summary"] = _ksd or None
+# 血型证据表（23 写出的逐位点基因型）。血型的表型叙述在 report_text.yaml 里人工维护——
+# 换样本重跑后旧文案会静默沿用，报告因此必须同时携带一份机器来源：23 对本样本 VCF 的
+# 直接输出原样注入，逐条可与叙述核对（叙述过期即露出矛盾，而不是无声冒充）。
+_bg = _read_tsv(W/"16_panels/bloodgroups.tsv")
+D["blood_markers"] = _bg.fillna("").to_dict("records") if _bg is not None and len(_bg) else []
 # PASS variants per 1 Mb bin, for the circos density ring
 try:
     _dens = {}
@@ -795,7 +800,7 @@ _SEC = []
 _SEC_NAMES = {
     "chip": ("芯片—WGS 一致性", "chip vs WGS consistency"), "pgx_pharmcat": ("PharmCAT 药物基因组", "PharmCAT pharmacogenomics"),
     "cyp2d6": ("CYP2D6（Cyrius）", "CYP2D6 (Cyrius)"), "hla": ("HLA 分型（T1K）", "HLA typing (T1K)"),
-    "kir": ("KIR 与 HLA 配体", "KIR and HLA ligands"), "sv": ("结构变异（Delly）", "structural variants (Delly)"),
+    "kir": ("KIR 与 HLA 配体", "KIR and HLA ligands"), "blood": ("血型系统", "blood-group systems"), "sv": ("结构变异（Delly）", "structural variants (Delly)"),
     "smn": ("SMN 拷贝数", "SMN copy number"), "str": ("短串联重复（EH）", "short tandem repeats (EH)"),
     "roh": ("纯合区段（ROH）", "runs of homozygosity"), "chip_hotspots": ("CHIP 热点", "CHIP hotspots"),
     "somatic": ("体细胞信号", "somatic signals"), "telomere": ("端粒", "telomere"),
@@ -826,6 +831,7 @@ _need("pgx_pharmcat", _has("pgx_pharmcat"), *_MISS_STEP, ev="06_pgx/pharmcat/pha
 _need("cyp2d6", D.get("cyp2d6") not in (None, "-"), *_MISS_STEP, ev="06_pgx/cyrius/target.tsv", detail=D.get("cyp2d6"))
 _need("hla", _has("hla"), *_MISS_STEP, ev="06_pgx/t1k/dayu_genotype.tsv", detail=len(D.get("hla") or {}))
 _need("kir", _has("kir"), *_MISS_STEP, ev="16_panels/kir.tsv", detail=len(D.get("kir") or []))
+_need("blood", _has("blood_markers"), *_MISS_OUT, ev="16_panels/bloodgroups.tsv", detail=len(D.get("blood_markers") or []))
 # A zero SV table is a genuine negative only when Delly actually produced a VCF; without the
 # bcf the empty table is step 13's not-run fallback. Either way "unavailable" is wrong for a
 # real zero, and "ok" is wrong for the fallback.

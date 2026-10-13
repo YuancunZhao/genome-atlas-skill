@@ -465,3 +465,49 @@ class TestOptionalProductAdmission(unittest.TestCase):
             self.assertEqual(r.returncode, 0, r.stderr)
             d = _data(td)
             self.assertIsNone(d["f3"], "他样本的 f3 结果必须判 stale，不得按存在投递")
+
+
+@unittest.skipIf(_SKIP, _SKIP)
+class TestBloodMarkers(unittest.TestCase):
+    """血型证据表绑定（血型核查 2026-10-13）：血型的表型叙述在 report_text.yaml 里人工
+    维护，换样本重跑后旧文案会静默沿用；30 必须把 23 的 bloodgroups.tsv 原样注入
+    D.blood_markers 并在 sections 表如实记录状态，报告的血型区块才有机器可核对的样本来源。"""
+
+    def _run(self, td, with_blood):
+        _write_base(td)
+        if with_blood:
+            b = pathlib.Path(td) / "work/wgs/16_panels"
+            b.mkdir(parents=True, exist_ok=True)
+            (b / "bloodgroups.tsv").write_text(
+                "system\trsid\tvariant\tlocus\tgenotype\tevidence\tmeaning\n"
+                "Kidd (JK)\trs1058396\tSLC14A1 838G>A (Asp280Asn)\t18:43319519\tG/A\t"
+                "PASS DP=77 AD=36,37\tref=JK*A, alt=JK*B\n"
+                "Vel\trs566629828\tSMIM1 64_80del\t-\tnot in 1000G panel\t\t\n",
+                encoding="utf-8")
+        r = _run_30(_write_config(td))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return json.loads((pathlib.Path(td) / "work/wgs/report_data.json").read_text(encoding="utf-8"))
+
+    def _blood_section(self, d):
+        return next(s for s in d["sections"] if s["id"] == "blood")
+
+    def test_present_tsv_is_carried_verbatim_and_the_section_is_ok(self):
+        with tempfile.TemporaryDirectory() as td:
+            d = self._run(td, with_blood=True)
+            rows = d["blood_markers"]
+            self.assertEqual([r["rsid"] for r in rows], ["rs1058396", "rs566629828"])
+            self.assertEqual(rows[0]["genotype"], "G/A")
+            self.assertEqual(rows[0]["evidence"], "PASS DP=77 AD=36,37")
+            self.assertEqual(rows[1]["locus"], "-")
+            self.assertEqual(rows[1]["meaning"], "", "an empty meaning cell must be an empty string, not NaN")
+            sec = self._blood_section(d)
+            self.assertEqual(sec["status"], "ok")
+            self.assertEqual(sec["evidence"], "16_panels/bloodgroups.tsv")
+
+    def test_absent_tsv_delivers_an_empty_list_and_an_unavailable_section(self):
+        with tempfile.TemporaryDirectory() as td:
+            d = self._run(td, with_blood=False)
+            self.assertEqual(d["blood_markers"], [])
+            sec = self._blood_section(d)
+            self.assertEqual(sec["status"], "unavailable")
+            self.assertEqual(sec["code"], "missing_output")

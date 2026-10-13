@@ -1,4 +1,4 @@
-const D = __DATA__; const BLOODV3 = __BLOOD__; const UI = __UI__; const FIND = __FIND__; const PGX = __PGX__; const PRS_EN = __PRS_EN__;
+const D = __DATA__; const BLOODV3 = __BLOOD__; const UI = __UI__; const FIND = __FIND__; const PGX = __PGX__; const PRS_EN = __PRS_EN__; const BLOODMK = __BLOODMK__;
 let LANG = 'zh';
 try { LANG = localStorage.getItem('dayu-lang') || (navigator.language && !navigator.language.startsWith('zh') ? 'en' : 'zh'); } catch(e) {}
 const F = {};
@@ -1348,6 +1348,19 @@ function deepRender(){
     return `<tr><td class="gene">${nm}</td><td class="rs">${zh()?(ANC_ZH[r.group]||r.group):r.group.replace(/_/g,' ')}</td><td class="num">${fmt(Math.round(r.date))}</td><td class="num">${r.d.toFixed(4)}</td></tr>`}).join('');
   const bb=document.getElementById('tb_blood');
   if(bb) bb.innerHTML=BLOODV3.map(r=>`<tr><td class="gene">${zh()?r.sys_zh:r.sys_en}</td><td class="g">${zh()?r.geno_zh:r.geno_en}</td><td class="gene">${zh()?r.ph_zh:r.ph_en}</td><td>${zh()?r.ev_zh:r.ev_en}</td></tr>`).join('');
+  // 血型证据表：上方叙述表来自人工文案（report_text.yaml，可能过时），这张逐位点表直接
+  // 渲染 23 步对本样本 VCF 的输出（30 注入 BLOODMK）——报告因此永远携带可核对的机器来源，
+  // 换样本重跑后叙述与证据若不一致会当场露出，而不是无声沿用旧样本的表型。
+  const _bmb=document.getElementById('blood_mk_block');
+  if(_bmb && (BLOODMK||[]).length){
+    _bmb.style.display='';
+    const _bmNote=document.getElementById('tb_blood_mk_note');
+    if(_bmNote) _bmNote.textContent=zh()
+      ?'下表为 23 步对本样本 VCF 的直接标志位点输出（无人工转写）；上方表型叙述为人工解读，应逐条能与本表核对。'
+      :"marker genotypes below are output directly from this sample's VCF by step 23 (no manual transcription); the phenotype narrative above is human interpretation and should check out row by row against this table.";
+    const _bmk=document.getElementById('tb_blood_mk');
+    if(_bmk) _bmk.innerHTML=(BLOODMK||[]).map(r=>`<tr><td class="gene">${r.system}</td><td class="rs">${r.rsid}</td><td class="rs">${r.variant}</td><td class="g">${r.genotype}</td><td>${r.locus&&r.locus!=='-'?r.locus+' · ':''}${r.evidence}</td><td>${r.meaning}</td></tr>`).join('');
+  }
 }
 
 /* ── circular genome overview ── */
