@@ -286,3 +286,53 @@ class TestPgxMachineTableGate(unittest.TestCase):
         s31 = (repo / "scripts/31_html_report.py").read_text(encoding="utf-8")
         self.assertIn("__PGXMK__", s31, "31 does not inject the machine pgx payload")
         self.assertIn('D.get("pgx_pharmcat")', s31, "31 must tolerate an older report_data.json")
+
+
+class TestLofMachineTableGate(unittest.TestCase):
+    """修-4（叙述审计 2026-10-13）：findings 列表是人工解读（基因+基因型+读段级叙述），
+    其机器事实集是 05c 的罕见 LoF 终表。30 逐行注入 D.lof_rare、模板在 findings 卡下渲染
+    证据表、32 逐行核对——叙述声称的携带者若不在机器表里，当场露出。"""
+
+    def setUp(self):
+        chk.FAIL.clear()
+
+    @staticmethod
+    def _rows():
+        return [{"gene": "SLC26A2", "variant": "5:149360024 TG>T", "csq": "frameshift",
+                 "zyg": "het", "clnsig": "Pathogenic/Likely_pathogenic"},
+                {"gene": "GENE2", "variant": "1:2000 A>G", "csq": "frameshift",
+                 "zyg": "hom/hemi", "clnsig": "Pathogenic/Likely_pathogenic"}]
+
+    @staticmethod
+    def _good():
+        return ("<tr><td>SLC26A2</td><td>5:149360024 TG>T</td><td>frameshift</td>"
+                "<td>het</td><td>Pathogenic/Likely_pathogenic</td></tr>"
+                "<tr><td>GENE2</td><td>1:2000 A>G</td><td>frameshift</td>"
+                "<td>hom/hemi</td><td>Pathogenic/Likely_pathogenic</td></tr>")
+
+    def test_rendered_table_must_carry_every_row(self):
+        chk.check_lof_mk_render(self._good(), self._rows())
+        self.assertFalse([f for f in chk.FAIL if "rare LoF" in f or "lof" in f])
+        chk.FAIL.clear()
+        chk.check_lof_mk_render(self._good().replace("SLC26A2", "SLC26A3"), self._rows())
+        self.assertTrue(any("SLC26A2" in f for f in chk.FAIL))
+        chk.FAIL.clear()
+        chk.check_lof_mk_render("", self._rows())
+        self.assertTrue(any("rare LoF" in f for f in chk.FAIL))
+        chk.FAIL.clear()
+        chk.check_lof_mk_render("", [])
+        self.assertFalse([f for f in chk.FAIL if "rare LoF" in f or "lof" in f])
+        chk.FAIL.clear()
+        chk.check_lof_mk_render(self._good(), [])
+        self.assertTrue(any("rare LoF" in f for f in chk.FAIL))
+
+    def test_report_wiring_binds_the_lof_evidence_table(self):
+        repo = pathlib.Path(__file__).resolve().parents[1]
+        js = (repo / "templates/report_script.js").read_text(encoding="utf-8")
+        self.assertIn("__LOFMK__", js)
+        self.assertIn("tb_lof_mk", js)
+        body = (repo / "templates/report_body.html").read_text(encoding="utf-8")
+        self.assertIn('id="tb_lof_mk"', body)
+        s31 = (repo / "scripts/31_html_report.py").read_text(encoding="utf-8")
+        self.assertIn("__LOFMK__", s31)
+        self.assertIn('D.get("lof_rare")', s31)

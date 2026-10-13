@@ -78,6 +78,7 @@ console.log('RENDER_ERRORS=' + JSON.stringify(errs));
 console.log('BOOTSTATE=' + ((global.__boot && global.__boot.textContent) || ''));
 console.log('BLOODMK_HTML=' + ((global.__els && global.__els['tb_blood_mk'] && global.__els['tb_blood_mk'].innerHTML) || ''));
 console.log('PGXMK_HTML=' + ((global.__els && global.__els['tb_pgx_mk'] && global.__els['tb_pgx_mk'].innerHTML) || ''));
+console.log('LOFMK_HTML=' + ((global.__els && global.__els['tb_lof_mk'] && global.__els['tb_lof_mk'].innerHTML) || ''));
 """
 
 FAIL = []
@@ -385,6 +386,10 @@ def check_pgxmk_render(html, rows):
     _check_mk_table(html, rows, "pgx machine", ("gene", "diplotype"))
 
 
+def check_lof_mk_render(html, rows):
+    _check_mk_table(html, rows, "rare LoF", ("gene", "variant"))
+
+
 def check_sections(D):
     """H1: every section carries a status; 'unavailable' must explain itself bilingually."""
     secs = D.get("sections")
@@ -529,6 +534,8 @@ def check_runtime(html_path, D):
         check_bloodmk_render(_bm.group(1) if _bm else "", (D or {}).get("blood_markers") or [])
         _pm = re.search(r"^PGXMK_HTML=(.*)$", out, re.M)
         check_pgxmk_render(_pm.group(1) if _pm else "", (D or {}).get("pgx_pharmcat") or [])
+        _lm = re.search(r"^LOFMK_HTML=(.*)$", out, re.M)
+        check_lof_mk_render(_lm.group(1) if _lm else "", (D or {}).get("lof_rare") or [])
 
 
 def main():

@@ -192,6 +192,13 @@ for _l in _cv_hdr.stdout.splitlines():
 D["clinvar_date"] = f"{_fd.group(1)}-{_fd.group(2)}-{_fd.group(3)}" if _fd else "-"
 lof = pd.read_csv(W/"05_clinvar/lof_table.tsv", sep="\t"); rare = pd.read_csv(W/"05_clinvar/lof_rare_final.tsv", sep="\t")
 D["lof"] = {"all": len(lof), "rare": len(rare), "rare_hom": int((rare.zyg == "hom/hemi").sum()), "rare_constrained": int((rare.oe_lof_upper < 0.6).sum())}
+# 关键发现的机器证据（叙述审计 2026-10-13）：findings 列表是人工解读（基因+基因型+读段级
+# 叙述），其机器事实集是 05c 的罕见 LoF 终表——逐行注入，报告携带可核对的来源；叙述声称
+# 的携带者若不在机器表里，当场露出，而不是无声沿用旧样本的发现。
+_lof_na = rare.fillna("")
+D["lof_rare"] = [{"gene": str(r.gene), "variant": f"{r.chrom}:{r.pos} {r.ref}>{r.alt}",
+                   "csq": str(r.csq), "zyg": str(r.zyg), "clnsig": str(r.clnsig)}
+                  for r in _lof_na.itertuples()]
 # --- PGx
 # No step of this repository runs the PharmCAT reporter; the summary is an externally
 # produced input, so it degrades to an empty list and the sections table records the fact.

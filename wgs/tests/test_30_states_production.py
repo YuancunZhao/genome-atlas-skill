@@ -185,7 +185,13 @@ def _write_base(td, y=True, mt=True, regional=False):
         "1\t1000\t12345\tA\tG\t50\tGENE:gene\tBenign\tno_assertion\tDisease\t"
         "some\t.\t.\t.\t0|1\t30\t45\t20\n", encoding="utf-8")
     (c / "lof_table.tsv").write_text("gene\tclass\tzyg\nGENE\tpLoF\thet\n", encoding="utf-8")
-    (c / "lof_rare_final.tsv").write_text("gene\tzyg\toe_lof_upper\nGENE2\thom/hemi\t0.3\n", encoding="utf-8")
+    # 修-4：罕见 LoF 终表带全列（生产形状），D.lof_rare 逐行注入用
+    (c / "lof_rare_final.tsv").write_text(
+        "chrom\tpos\tid\tref\talt\tgene\tcsq\tzyg\teas_af\tall_af\tin_1000G\tpLI\t"
+        "oe_lof_upper\tdp\tgq\tad\tclnsig\tgnomad_found\tgnomad_af\tgnomad_eas_af\t"
+        "gnomad_ac\tgnomad_unresolved\n"
+        "1\t2000\t.\tA\tG\tGENE2\tframeshift\thom/hemi\t.\t.\tFalse\t.\t0.3\t40\t60\t"
+        "20,20\tPathogenic/Likely_pathogenic\tFalse\t.\t.\t.\t.\n", encoding="utf-8")
     pr = W / "07_prs"
     pr.mkdir(parents=True)
     (pr / "prs_wgs.tsv").write_text("score\tpct_sub\n0.5\t88.8\n", encoding="utf-8")
@@ -465,6 +471,25 @@ class TestOptionalProductAdmission(unittest.TestCase):
             self.assertEqual(r.returncode, 0, r.stderr)
             d = _data(td)
             self.assertIsNone(d["f3"], "他样本的 f3 结果必须判 stale，不得按存在投递")
+
+
+@unittest.skipIf(_SKIP, _SKIP)
+class TestLofRareRows(unittest.TestCase):
+    """修-4：30 把 05c 罕见 LoF 终表逐行注入 D.lof_rare（关键发现的机器证据表）。"""
+
+    def test_rows_are_carried_with_binding_fields(self):
+        with tempfile.TemporaryDirectory() as td:
+            _write_base(td)
+            r = _run_30(_write_config(td))
+            self.assertEqual(r.returncode, 0, r.stderr)
+            d = json.loads((pathlib.Path(td) / "work/wgs/report_data.json").read_text(encoding="utf-8"))
+            rows = d["lof_rare"]
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["gene"], "GENE2")
+            self.assertEqual(rows[0]["variant"], "1:2000 A>G")
+            self.assertEqual(rows[0]["csq"], "frameshift")
+            self.assertEqual(rows[0]["zyg"], "hom/hemi")
+            self.assertEqual(rows[0]["clnsig"], "Pathogenic/Likely_pathogenic")
 
 
 @unittest.skipIf(_SKIP, _SKIP)

@@ -1,4 +1,4 @@
-const D = __DATA__; const BLOODV3 = __BLOOD__; const UI = __UI__; const FIND = __FIND__; const PGX = __PGX__; const PRS_EN = __PRS_EN__; const BLOODMK = __BLOODMK__; const PGXMK = __PGXMK__;
+const D = __DATA__; const BLOODV3 = __BLOOD__; const UI = __UI__; const FIND = __FIND__; const PGX = __PGX__; const PRS_EN = __PRS_EN__; const BLOODMK = __BLOODMK__; const PGXMK = __PGXMK__; const LOFMK = __LOFMK__;
 let LANG = 'zh';
 try { LANG = localStorage.getItem('dayu-lang') || (navigator.language && !navigator.language.startsWith('zh') ? 'en' : 'zh'); } catch(e) {}
 const F = {};
@@ -369,6 +369,18 @@ reveal('pcaeas',(s,c)=>{
 /* ── 03 findings ── */
 function renderFindings(){
   document.getElementById('findings').innerHTML=FIND.map(f=>`<div class="finding"><div><div class="g">${gI(f.gene)}<small>${zh()?f.gt_zh:f.gt_en}</small></div><span class="stamp${f.hot?' hot':''}">${zh()?f.tag_zh:f.tag_en}</span></div><div><div class="b">${zh()?f.zh:f.en}</div>${f.act_zh?`<div class="act">${zh()?f.act_zh:f.act_en}</div>`:''}</div></div>`).join('');
+  // 关键发现的机器证据表：上方卡片是人工解读（report_text.yaml，可能过时），这张表直接
+  // 渲染 05c 罕见 LoF 终表（30 注入 LOFMK）——叙述声称的携带者逐条可在此核对。
+  const _lfb=document.getElementById('lof_mk_block');
+  if(_lfb && (LOFMK||[]).length){
+    _lfb.style.display='';
+    const _lfNote=document.getElementById('tb_lof_mk_note');
+    if(_lfNote) _lfNote.textContent=zh()
+      ?`下表为 05 步对本样本的罕见功能丧失变异机器输出（共 ${LOFMK.length} 行，无人工转写）；上方发现卡片为人工解读，声称的携带者应能在本表核对。`
+      :`the table below is the machine output of rare loss-of-function variants for this sample (${LOFMK.length} rows, no manual transcription); the finding cards above are human interpretation whose carrier claims should check out against it.`;
+    const _lfk=document.getElementById('tb_lof_mk');
+    if(_lfk) _lfk.innerHTML=(LOFMK||[]).map(r=>`<tr><td class="gene">${gI(r.gene)}</td><td class="rs">${r.variant}</td><td class="rs">${r.csq}</td><td class="g">${r.zyg}</td><td class="rs">${r.clnsig}</td></tr>`).join('');
+  }
 }
 /* ── 03 ClinVar bars ── */
 reveal('cvbars',(s,c)=>{
