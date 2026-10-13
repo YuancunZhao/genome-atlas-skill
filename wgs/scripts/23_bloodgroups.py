@@ -43,7 +43,12 @@ for sysname,rs,desc,note in MARK:
         rec=[x.split("\t") for x in t]
         hit=[x for x in rec if x[0]==r and x[1]==a] or rec
         ref,alt,flt,gt,dp,ad=hit[0]
-        n=gt.replace("|","/").count("1"); geno={0:f"{r}/{r}",1:f"{r}/{a}",2:f"{a}/{a}"}.get(n,gt) if len(gt.replace("|","/").split("/"))==2 else (a if n else r)
+        # A no-call GT ("./.", "0/.") also counts zero ALT alleles and used to render as {r}/{r} --
+        # a missing call is not a reference homozygote, so say no call instead.
+        alleles=gt.replace("|","/").split("/")
+        n=sum(1 for x in alleles if x=="1")
+        geno=(f"no call (GT={gt})" if "." in alleles else
+              {0:f"{r}/{r}",1:f"{r}/{a}",2:f"{a}/{a}"}.get(n,gt) if len(alleles)==2 else (a if n else r))
         rows.append((sysname,rs,desc,f"{c}:{p}",geno,f"{flt} DP={dp} AD={ad}",note))
     else:
         ok=callable_(c,p); b=fa.fetch(c,p-1,p).upper()
