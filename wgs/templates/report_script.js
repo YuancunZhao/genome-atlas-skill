@@ -1,4 +1,4 @@
-const D = __DATA__; const BLOODV3 = __BLOOD__; const UI = __UI__; const FIND = __FIND__; const PGX = __PGX__; const PRS_EN = __PRS_EN__; const BLOODMK = __BLOODMK__;
+const D = __DATA__; const BLOODV3 = __BLOOD__; const UI = __UI__; const FIND = __FIND__; const PGX = __PGX__; const PRS_EN = __PRS_EN__; const BLOODMK = __BLOODMK__; const PGXMK = __PGXMK__;
 let LANG = 'zh';
 try { LANG = localStorage.getItem('dayu-lang') || (navigator.language && !navigator.language.startsWith('zh') ? 'en' : 'zh'); } catch(e) {}
 const F = {};
@@ -386,6 +386,18 @@ reveal('cvbars',(s,c)=>{
 /* ── 04 PGx ── */
 function renderPgx(){
   document.getElementById('pgx').innerHTML=PGX.map(r=>`<tr><td class="gene">${gI(r.gene)}</td><td class="g">${r.dip}</td><td>${zh()?r.ph_zh:r.ph_en}</td><td>${zh()?r.zh:r.en}</td><td class="rs">${r.src}</td></tr>`).join('');
+  // PGx 机器表：上方叙述表来自人工文案（report_text.yaml，可能过时），这张表直接渲染
+  // PharmCAT/Cyrius 的机器输出（30 注入 PGXMK）——换样本重跑后双倍型的机器来源永远在场。
+  const _pmb=document.getElementById('pgx_mk_block');
+  if(_pmb && (PGXMK||[]).length){
+    _pmb.style.display='';
+    const _pmNote=document.getElementById('tb_pgx_mk_note');
+    if(_pmNote) _pmNote.textContent=zh()
+      ?'下表为 PharmCAT/Cyrius 对本样本的机器分型输出（无人工转写）；上方表型叙述为人工解读，应逐条与本表核对。'
+      :'the table below is the machine diplotyping output of PharmCAT/Cyrius for this sample (no manual transcription); the narrative table above is human interpretation and should check out row by row against it.';
+    const _pmk=document.getElementById('tb_pgx_mk');
+    if(_pmk) _pmk.innerHTML=(PGXMK||[]).map(r=>`<tr><td class="gene">${gI(r.gene)}</td><td class="g">${r.diplotype}</td><td>${r.phenotype}</td><td class="rs">${r.call_source}</td><td class="rs">${r.n_warnings?r.n_warnings+' ⚠':''}</td></tr>`).join('');
+  }
 }
 function renderHla(){
   const order=['HLA-A','HLA-B','HLA-C','HLA-DRB1','HLA-DQA1','HLA-DQB1','HLA-DPA1','HLA-DPB1'];

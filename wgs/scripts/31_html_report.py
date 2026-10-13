@@ -143,8 +143,9 @@ _CHUNK = 100_000
 from ancestry_data import json_text as _json_text, js_string_literal as _js_string_literal
 
 _DATA_OBJS = [("D", D), ("BLOODV3", BLOOD), ("BLOODMK", D.get("blood_markers") or []),
-              ("UI", UI), ("FIND", FIND), ("PGX", PGX), ("PRS_EN", PRS_ZH)]
-_PH = ("__DATA__", "__UI__", "__FIND__", "__PGX__", "__BLOOD__", "__BLOODMK__", "__PRS_EN__")
+              ("PGX", PGX), ("PGXMK", D.get("pgx_pharmcat") or []),
+              ("UI", UI), ("FIND", FIND), ("PRS_EN", PRS_ZH)]
+_PH = ("__DATA__", "__UI__", "__FIND__", "__PGX__", "__PGXMK__", "__BLOOD__", "__BLOODMK__", "__PRS_EN__")
 _lines = js.split("\n")
 _decl = {i for i, l in enumerate(_lines) if any(p in l for p in _PH)}
 if not _decl:

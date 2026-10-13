@@ -236,3 +236,53 @@ class TestBloodMarkerGate(unittest.TestCase):
         s31 = (repo / "scripts/31_html_report.py").read_text(encoding="utf-8")
         self.assertIn('__BLOODMK__', s31, "31 does not inject the marker payload")
         self.assertIn('D.get("blood_markers")', s31, "31 must tolerate an older report_data.json")
+
+
+class TestPgxMachineTableGate(unittest.TestCase):
+    """修-3（叙述审计 2026-10-13）：PGx 叙述表来自人工文案，PharmCAT/Cyrius 的机器输出
+    （30 注入的 D.pgx_pharmcat）从未被渲染。与血型同一方案：31 以 PGXMK 载荷注入、模板
+    在叙述表下渲染机器表、32 在 node 运行时逐行核对——换样本重跑后叙述与机器表的矛盾
+    当场露出，而不是无声沿用旧样本的双倍型。"""
+
+    def setUp(self):
+        chk.FAIL.clear()
+
+    @staticmethod
+    def _rows():
+        return [{"gene": "CYP2C19", "diplotype": "*1/*2", "phenotype": "Intermediate Metabolizer",
+                 "call_source": "MATCHER", "n_warnings": 0},
+                {"gene": "CYP2D6", "diplotype": "*1/*1", "phenotype": "Normal Metabolizer",
+                 "call_source": "OUTSIDE", "n_warnings": 0}]
+
+    @staticmethod
+    def _good():
+        return ("<tr><td>CYP2C19</td><td>*1/*2</td><td>Intermediate Metabolizer</td>"
+                "<td>MATCHER</td></tr><tr><td>CYP2D6</td><td>*1/*1</td>"
+                "<td>Normal Metabolizer</td><td>OUTSIDE</td></tr>")
+
+    def test_rendered_table_must_carry_every_row(self):
+        chk.check_pgxmk_render(self._good(), self._rows())
+        self.assertFalse([f for f in chk.FAIL if "pgx" in f])
+        chk.FAIL.clear()
+        chk.check_pgxmk_render(self._good().replace("CYP2D6", "CYP2D9"), self._rows())
+        self.assertTrue(any("CYP2D6" in f for f in chk.FAIL))
+        chk.FAIL.clear()
+        chk.check_pgxmk_render("", self._rows())
+        self.assertTrue(any("pgx" in f for f in chk.FAIL))
+        chk.FAIL.clear()
+        chk.check_pgxmk_render("", [])
+        self.assertFalse([f for f in chk.FAIL if "pgx" in f])
+        chk.FAIL.clear()
+        chk.check_pgxmk_render(self._good(), [])
+        self.assertTrue(any("pgx" in f for f in chk.FAIL))
+
+    def test_report_wiring_binds_the_machine_pgx_table(self):
+        repo = pathlib.Path(__file__).resolve().parents[1]
+        js = (repo / "templates/report_script.js").read_text(encoding="utf-8")
+        self.assertIn("__PGXMK__", js, "the payload declaration line is missing from the template JS")
+        self.assertIn("tb_pgx_mk", js, "renderPgx no longer fills the machine table")
+        body = (repo / "templates/report_body.html").read_text(encoding="utf-8")
+        self.assertIn('id="tb_pgx_mk"', body, "the machine table has no element to render into")
+        s31 = (repo / "scripts/31_html_report.py").read_text(encoding="utf-8")
+        self.assertIn("__PGXMK__", s31, "31 does not inject the machine pgx payload")
+        self.assertIn('D.get("pgx_pharmcat")', s31, "31 must tolerate an older report_data.json")

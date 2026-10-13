@@ -77,6 +77,7 @@ const errs = (global.window && global.window.__renderErrors) || [];
 console.log('RENDER_ERRORS=' + JSON.stringify(errs));
 console.log('BOOTSTATE=' + ((global.__boot && global.__boot.textContent) || ''));
 console.log('BLOODMK_HTML=' + ((global.__els && global.__els['tb_blood_mk'] && global.__els['tb_blood_mk'].innerHTML) || ''));
+console.log('PGXMK_HTML=' + ((global.__els && global.__els['tb_pgx_mk'] && global.__els['tb_pgx_mk'].innerHTML) || ''));
 """
 
 FAIL = []
@@ -350,24 +351,38 @@ def check_blood_markers(D):
         fail("the blood section claims ok but blood_markers is empty: typing produced no rows")
 
 
-def check_bloodmk_render(html, rows):
-    """node 运行时逐行核对：报告渲染出的标志位点表必须等于 report_data.json 里的行
-    （rsid 与基因型逐个在场、行数一致）。数据无行时表必须为空——多出来的行只可能来自
-    另一份载荷。"""
+def _check_mk_table(html, rows, what, keyfields):
+    """Shared row-by-row gate for the machine evidence tables (blood markers, PGx machine
+    output, rare LoF): the rendered table must equal the rows in report_data.json -- every
+    key field present, row count identical. Empty data must render an empty table: extra
+    rows can only come from another sample's payload."""
     rendered_rows = html.count("<tr")
     if rows:
         if not html:
-            fail("blood marker rows exist in the data but the report rendered no marker table")
+            fail(f"{what} rows exist in the data but the report rendered no marker table")
             return
         for r in rows:
-            if r.get("rsid") and r["rsid"] not in html:
-                fail(f"the rendered blood marker table is missing {r['rsid']}")
-            if r.get("genotype") and r["genotype"] not in html:
-                fail(f"the rendered blood marker table lacks the genotype {r['genotype']!r} for {r['rsid']}")
+            for i, fld in enumerate(keyfields):
+                v = r.get(fld)
+                if not v:
+                    continue
+                if i == 0:
+                    if v not in html:
+                        fail(f"the rendered {what} table is missing {v}")
+                elif r.get(keyfields[0]) and v not in html:
+                    fail(f"the rendered {what} table lacks the {fld} {v!r} for {r.get(keyfields[0])}")
         if rendered_rows != len(rows):
-            fail(f"the rendered blood marker table has {rendered_rows} rows but the data carries {len(rows)}")
+            fail(f"the rendered {what} table has {rendered_rows} rows but the data carries {len(rows)}")
     elif rendered_rows:
-        fail(f"the rendered blood marker table has {rendered_rows} rows but the data carries none: a stale payload")
+        fail(f"the rendered {what} table has {rendered_rows} rows but the data carries none: a stale payload")
+
+
+def check_bloodmk_render(html, rows):
+    _check_mk_table(html, rows, "blood marker", ("rsid", "genotype"))
+
+
+def check_pgxmk_render(html, rows):
+    _check_mk_table(html, rows, "pgx machine", ("gene", "diplotype"))
 
 
 def check_sections(D):
@@ -512,6 +527,8 @@ def check_runtime(html_path, D):
             fail(f"the page banner reports a failed render{tag}: {banner}")
         _bm = re.search(r"^BLOODMK_HTML=(.*)$", out, re.M)
         check_bloodmk_render(_bm.group(1) if _bm else "", (D or {}).get("blood_markers") or [])
+        _pm = re.search(r"^PGXMK_HTML=(.*)$", out, re.M)
+        check_pgxmk_render(_pm.group(1) if _pm else "", (D or {}).get("pgx_pharmcat") or [])
 
 
 def main():
