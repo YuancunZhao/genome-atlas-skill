@@ -336,3 +336,88 @@ class TestLofMachineTableGate(unittest.TestCase):
         s31 = (repo / "scripts/31_html_report.py").read_text(encoding="utf-8")
         self.assertIn("__LOFMK__", s31)
         self.assertIn('D.get("lof_rare")', s31)
+
+
+class TestNarrativeTokenGate(unittest.TestCase):
+    """修-5（叙述审计 2026-10-13）：tier1_b 摘要与 n_pgx/n_kir/n_som 注记是人工文案，
+    其中手写的离散结论（Y/mt 单倍群、CYP2D6 双倍型、KIR 单倍型标签、最强 CHIP 热点）必须
+    与 report_data.json 一致——换样本重跑后数据变了而文案没改，此处当场报错。只核对"单一
+    值、无选择歧义"的 token；HLA 一类"机器 41 基因全表 vs 人工摘要"的注记不适用（机器值
+    已在 HLA 卡数据渲染）。文案缺失（渲染回退成键名）视为无手写层，跳过。"""
+
+    def setUp(self):
+        chk.FAIL.clear()
+
+    @staticmethod
+    def _D():
+        return {"y_state": "ok", "y_terminal": "N-CTS4714",
+                "mt": {"hg": "A13", "state": "ok"},
+                "cyp2d6": "*1/*1",
+                "kir_summary": {"haplotype": "Bx (at least one B haplotype)"},
+                "chip_hotspots": {"hotspots": [{"hotspot": "TP53 R175H", "depth": 29,
+                                                "alt_reads": 1, "vaf": 0.034}]}}
+
+    @staticmethod
+    def _narr():
+        return {"tier1_b": "父系 N-CTS4714，母系 A13。CYP2C19 中间代谢。",
+                "n_pgx": "CYP2D6 拷贝数由 Cyrius 分型（*1/*1，作为外部调用）。",
+                "n_kir": "属 Bx 单倍型（含 B 单倍型标志基因）。",
+                "n_som": "仅 TP53 R175H 检出 1 条支持读段（VAF 3.4%）。"}
+
+    def test_consistent_tokens_pass(self):
+        chk.check_narrative_tokens(self._D(), self._narr())
+        self.assertFalse(chk.FAIL)
+
+    def test_stale_y_haplogroup_fails_and_names_the_token(self):
+        narr = self._narr(); narr["tier1_b"] = narr["tier1_b"].replace("N-CTS4714", "O-F438")
+        chk.check_narrative_tokens(self._D(), narr)
+        self.assertTrue(any("N-CTS4714" in f and "tier1_b" in f for f in chk.FAIL))
+
+    def test_stale_mt_cyp2d6_kir_hotspot_each_fail(self):
+        d = self._D()
+        narr = self._narr(); narr["tier1_b"] = narr["tier1_b"].replace("A13", "B4")
+        chk.check_narrative_tokens(d, narr)
+        self.assertTrue(any("A13" in f for f in chk.FAIL))
+        chk.FAIL.clear()
+        narr = self._narr(); narr["n_pgx"] = "CYP2D6 为 *5/*5。"
+        chk.check_narrative_tokens(d, narr)
+        self.assertTrue(any("*1/*1" in f for f in chk.FAIL))
+        chk.FAIL.clear()
+        narr = self._narr(); narr["n_kir"] = "属 AA 单倍型。"
+        chk.check_narrative_tokens(d, narr)
+        self.assertTrue(any("Bx" in f for f in chk.FAIL))
+        chk.FAIL.clear()
+        narr = self._narr(); narr["n_som"] = "DNMT3A 有一批读段。"
+        chk.check_narrative_tokens(d, narr)
+        self.assertTrue(any("TP53 R175H" in f for f in chk.FAIL))
+
+    def test_missing_note_or_fallback_renders_skip_and_empty_states_skip(self):
+        d = self._D()
+        narr = self._narr(); del narr["n_kir"]; narr["n_som"] = "n_som"   # no copy -> fallback text
+        chk.check_narrative_tokens(d, narr)
+        self.assertFalse(chk.FAIL)
+        d2 = {"y_state": "unavailable", "y_terminal": "", "mt": {"hg": "", "state": "unavailable"},
+              "cyp2d6": "-", "kir_summary": {}, "chip_hotspots": {"hotspots": []}}
+        chk.check_narrative_tokens(d2, {})
+        self.assertFalse(chk.FAIL)
+
+    def test_runner_emits_narr_and_runtime_consumes_it(self):
+        src = pathlib.Path(__file__).resolve().parents[1] / "scripts" / "32_check_report.py"
+        text = src.read_text(encoding="utf-8")
+        self.assertIn("NARR=", text, "the node runner must report the rendered narrative elements")
+        self.assertIn("check_narrative_tokens(D, narr)", text,
+                      "check_runtime must feed the parsed narrative into the token gate")
+
+
+class TestNarrativeGateExemptsExampleBanner(unittest.TestCase):
+    """门只约束声称针对本样本的文案；example 渲染自带双语横幅，视为已披露、放行。"""
+
+    def test_banner_detection(self):
+        self.assertTrue(chk._example_banner_in("<div>本报告的叙述文案来自<b>示例模板</b>，尚未改写</div>"))
+        self.assertTrue(chk._example_banner_in("<div>this report uses the <b>bundled example copy</b></div>"))
+        self.assertFalse(chk._example_banner_in("<div>父系 N-CTS4714，母系 A13。</div>"))
+
+    def test_runtime_skips_the_token_gate_when_the_banner_is_present(self):
+        src = (pathlib.Path(__file__).resolve().parents[1] / "scripts" / "32_check_report.py").read_text(encoding="utf-8")
+        self.assertIn("if not _example_banner_in(html):", src,
+                      "check_runtime must stand the token gate down for example-bannered reports")

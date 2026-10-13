@@ -79,6 +79,12 @@ console.log('BOOTSTATE=' + ((global.__boot && global.__boot.textContent) || ''))
 console.log('BLOODMK_HTML=' + ((global.__els && global.__els['tb_blood_mk'] && global.__els['tb_blood_mk'].innerHTML) || ''));
 console.log('PGXMK_HTML=' + ((global.__els && global.__els['tb_pgx_mk'] && global.__els['tb_pgx_mk'].innerHTML) || ''));
 console.log('LOFMK_HTML=' + ((global.__els && global.__els['tb_lof_mk'] && global.__els['tb_lof_mk'].innerHTML) || ''));
+// The hand-written notes live in data-i18n elements; the token gate reads back what the
+// page actually rendered for the keys it cross-checks against report_data.json.
+const NARR_KEYS = ['tier1_b','n_pgx','n_kir','n_som'];
+const narr = {};
+(global.__i18nEls||[]).forEach(e => { if (NARR_KEYS.indexOf(e.__i18nKey) >= 0) narr[e.__i18nKey] = e.innerHTML; });
+console.log('NARR=' + JSON.stringify(narr));
 """
 
 FAIL = []
@@ -337,6 +343,60 @@ def check_shapes(D):
         fail("kir rows present but the summary says typing was unavailable")
 
 
+def _example_banner_in(html):
+    """31 在用内置 example 文案渲染时会把双语警示横幅写进页面（"示例模板 / bundled example
+    copy"）。此时手写层**按定义**不是样本文案，横幅已向读者披露——叙述 token 门让位：
+    门只约束声称针对本样本的文案（叙述审计 2026-10-13 的豁免规则，避免 AN7 合成树一类的
+    合法 example 渲染被误判为 stale）。"""
+    return ("bundled example copy" in html) or ("示例模板" in html)
+
+
+def _narr_text(narr, key):
+    """The rendered text of a narrative element, or None when this build's copy lacks the key
+    (the template then renders the key name itself -- a missing hand-written layer, not a
+    stale one, so the token gate has nothing to cross-check)."""
+    v = (narr or {}).get(key)
+    if not isinstance(v, str) or v.strip() == key:
+        return None
+    return v
+
+
+def check_narrative_tokens(D, narr):
+    """叙述↔数据一致性门（叙述审计 2026-10-13）：tier1_b 摘要与 n_pgx/n_kir/n_som 注记是
+    人工文案，其中手写的离散结论（Y/mt 单倍群、CYP2D6 双倍型、KIR 单倍型标签、最强 CHIP
+    热点）必须与 report_data.json 一致——换样本重跑后数据变了而文案没改，此处当场报错，
+    而不是无声沿用旧样本结论。只核对"单一值、无选择歧义"的 token；HLA 一类"机器 41 基因
+    全表 vs 人工摘要"的注记不在此门（机器值已在 HLA 卡数据渲染，摘要不应被迫全列）。
+    文案缺失（渲染回退成键名本身）视为无手写层，跳过。"""
+    t = _narr_text(narr, "tier1_b")
+    if t:
+        if D.get("y_state") == "ok" and D.get("y_terminal") and D["y_terminal"] not in t:
+            fail(f"the tier1_b summary does not mention the reported Y haplogroup {D['y_terminal']}: "
+                 "the hand-written headline is stale for this sample")
+        mt = D.get("mt") or {}
+        if mt.get("hg") and mt.get("state") != "unavailable" and mt["hg"] not in t:
+            fail(f"the tier1_b summary does not mention the reported mt haplogroup {mt['hg']}: "
+                 "the hand-written headline is stale for this sample")
+    p = _narr_text(narr, "n_pgx")
+    if p:
+        cyp = D.get("cyp2d6")
+        if cyp not in (None, "-") and cyp not in p:
+            fail(f"the n_pgx note does not carry the machine CYP2D6 call {cyp}: "
+                 "the hand-written note is stale for this sample")
+    k = _narr_text(narr, "n_kir")
+    if k:
+        hap = str(((D.get("kir_summary") or {}).get("haplotype") or "")).split("(")[0].strip()
+        if hap and not hap.lower().startswith("unavailable") and hap not in k:
+            fail(f"the n_kir note does not carry the machine KIR haplotype {hap!r}: "
+                 "the hand-written note is stale for this sample")
+    s = _narr_text(narr, "n_som")
+    if s:
+        hs = ((D.get("chip_hotspots") or {}).get("hotspots") or [])
+        if hs and hs[0].get("hotspot") and hs[0]["hotspot"] not in s:
+            fail(f"the n_som note does not name the strongest machine hotspot {hs[0]['hotspot']}: "
+                 "the hand-written note is stale for this sample")
+
+
 def check_blood_markers(D):
     """血型证据表的数据↔sections 互洽（血型核查 2026-10-13）：叙述表来自人工文案，
     D.blood_markers 是 23 步对本样本 VCF 的机器输出；两边必须在同一份 report_data.json
@@ -536,6 +596,14 @@ def check_runtime(html_path, D):
         check_pgxmk_render(_pm.group(1) if _pm else "", (D or {}).get("pgx_pharmcat") or [])
         _lm = re.search(r"^LOFMK_HTML=(.*)$", out, re.M)
         check_lof_mk_render(_lm.group(1) if _lm else "", (D or {}).get("lof_rare") or [])
+        _na = re.search(r"^NARR=(\{.*\})$", out, re.M)
+        try:
+            narr = json.loads(_na.group(1)) if _na else {}
+        except json.JSONDecodeError:
+            narr = {}
+            fail(f"the narrative readback is not valid JSON{tag}")
+        if not _example_banner_in(html):
+            check_narrative_tokens(D, narr)
 
 
 def main():
